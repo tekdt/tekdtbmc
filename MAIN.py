@@ -2025,7 +2025,7 @@ class PageFinalize(QWidget):
         layout.addWidget(self.auto_install_check)
 
         # Khung chứa giao diện nhúng TekDT_AIS.exe
-        options_group = QGroupBox()  # Không cần tiêu đề nếu chỉ có embed_container
+        options_group = QGroupBox()
         options_layout = QVBoxLayout(options_group)
         self.embed_container = QFrame()
         self.embed_container.setFrameShape(QFrame.Shape.WinPanel)
@@ -2089,12 +2089,6 @@ class PageFinalize(QWidget):
             # Gọi SetParent với cả hai tham số là integer
             ctypes.windll.user32.SetParent(int(self.ais_hwnd), container_id)
             
-            # Loại bỏ tiêu đề và viền của cửa sổ nhúng
-            style = ctypes.windll.user32.GetWindowLongW(int(self.ais_hwnd), -16)  # GWL_STYLE
-            style = style & ~0x00C00000  # Xóa WS_CAPTION
-            style = style & ~0x00040000  # Xóa WS_THICKFRAME
-            ctypes.windll.user32.SetWindowLongW(int(self.ais_hwnd), -16, style)
-            
             self.resize_embedded_window()
         elif self.find_window_timer.attempts > 40:  # Timeout sau 10 giây
             self.find_window_timer.stop()
@@ -2105,8 +2099,18 @@ class PageFinalize(QWidget):
 
     def resize_embedded_window(self):
         if self.ais_hwnd:
+            SWP_FRAMECHANGED = 0x0020
+            SWP_SHOWWINDOW = 0x0040
+            
             container_rect = self.embed_container.geometry()
-            ctypes.windll.user32.MoveWindow(self.ais_hwnd, 0, 0, container_rect.width(), container_rect.height(), True)
+            ctypes.windll.user32.SetWindowPos(
+                self.ais_hwnd,
+                None,
+                0, 0, # Tọa độ (x, y) so với góc trên bên trái của container
+                container_rect.width(),
+                container_rect.height(),
+                SWP_FRAMECHANGED | SWP_SHOWWINDOW
+            )
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
