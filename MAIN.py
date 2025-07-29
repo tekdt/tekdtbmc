@@ -2016,32 +2016,30 @@ class PageFinalize(QWidget):
         title.setObjectName("TitleLabel")
         layout.addWidget(title)
 
-        # Cấu hình tùy chọn
-        options_group = QGroupBox("Tùy chọn nâng cao")
-        options_layout = QVBoxLayout(options_group)
+        # Checkbox nằm ngoài khung
         self.auto_install_check = QCheckBox("Tích hợp cài đặt phần mềm tự động")
-        self.auto_install_check.setEnabled(True) # Kích hoạt checkbox
+        self.auto_install_check.setEnabled(True)
         self.auto_install_check.toggled.connect(self.on_toggle_auto_install)
-        options_layout.addWidget(self.auto_install_check)
+        layout.addWidget(self.auto_install_check)
 
-        # Khung chứa để nhúng ứng dụng
+        # Khung chứa giao diện nhúng TekDT_AIS.exe
+        options_group = QGroupBox()  # Không cần tiêu đề nếu chỉ có embed_container
+        options_layout = QVBoxLayout(options_group)
         self.embed_container = QFrame()
         self.embed_container.setFrameShape(QFrame.Shape.WinPanel)
         self.embed_container.setFrameShadow(QFrame.Shadow.Sunken)
         self.embed_container.setMinimumSize(400, 300)
         self.embed_container.setVisible(False)
-        options_layout.addWidget(self.embed_container, 1) # Stretch factor = 1
+        options_layout.addWidget(self.embed_container, 1)
 
-        layout.addWidget(options_group, 1) # Stretch factor = 1
-        
+        layout.addWidget(options_group, 1)
+
         # Thanh tiến trình và trạng thái
         self.progress_bar = QProgressBar()
         self.status_label = QLabel("Sẵn sàng")
         self.status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        
         self.progress_bar.setVisible(False)
         self.status_label.setVisible(False)
-        
         layout.addWidget(self.progress_bar)
         layout.addWidget(self.status_label)
 
