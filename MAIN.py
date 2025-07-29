@@ -35,7 +35,7 @@ else:
     BASE_DIR = Path(__file__).resolve().parent
 
 # --- Cấu hình và Hằng số ---
-APP_VERSION = "1.0"
+APP_VERSION = "1.0.0"
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 TOOLS_DIR = os.path.join(BASE_DIR, "Tools")
 VENTOY_DIR = os.path.join(TOOLS_DIR, "Ventoy")
@@ -2078,7 +2078,7 @@ class PageFinalize(QWidget):
 
     def find_and_embed_window(self):
         self.find_window_timer.attempts += 1
-        # Giả định tên cửa sổ của chương trình là "TekDT AIS"
+        # Giả định tên cửa sổ của chương trình là "TekDT AIS" - cần xác minh
         self.ais_hwnd = ctypes.windll.user32.FindWindowW(None, "TekDT AIS")
 
         if self.ais_hwnd:
@@ -2087,14 +2087,14 @@ class PageFinalize(QWidget):
             self.embed_container.setVisible(True)
             ctypes.windll.user32.SetParent(self.ais_hwnd, container_id)
             
-            style = ctypes.windll.user32.GetWindowLongW(self.ais_hwnd, -16) # GWL_STYLE
-            style = style & ~0x00C00000 # WS_CAPTION
-            style = style & ~0x00040000 # WS_THICKFRAME
+            # Loại bỏ tiêu đề và viền của cửa sổ nhúng
+            style = ctypes.windll.user32.GetWindowLongW(self.ais_hwnd, -16)  # GWL_STYLE
+            style = style & ~0x00C00000  # WS_CAPTION
+            style = style & ~0x00040000  # WS_THICKFRAME
             ctypes.windll.user32.SetWindowLongW(self.ais_hwnd, -16, style)
             
             self.resize_embedded_window()
-
-        elif self.find_window_timer.attempts > 20: # Timeout sau 5 giây
+        elif self.find_window_timer.attempts > 40:  # Tăng timeout lên 10 giây (40 * 250ms)
             self.find_window_timer.stop()
             self.main_app.show_error("Không thể tìm thấy cửa sổ của TekDT_AIS.exe để nhúng.")
             if self.ais_process:
