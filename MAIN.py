@@ -22,7 +22,7 @@ from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QB
                              QStackedWidget, QLabel, QFrame, QGroupBox, QLineEdit,
                              QFileDialog, QDialog, QListWidget, QRadioButton,
                              QProgressBar, QMessageBox, QMenu, QDialogButtonBox,
-                             QGraphicsOpacityEffect, QListWidgetItem)
+                             QGraphicsOpacityEffect, QListWidgetItem, QSizePolicy)
 from PyQt6.QtGui import QIcon, QAction, QFont, QColor, QPalette, QActionGroup
 from PyQt6.QtCore import Qt, QPropertyAnimation, QEasingCurve, QThread, pyqtSignal, QTimer, QSize
 
@@ -2018,25 +2018,22 @@ class PageFinalize(QWidget):
         title.setObjectName("TitleLabel")
         layout.addWidget(title)
 
-        # Checkbox nằm ngoài khung
         self.auto_install_check = QCheckBox("Tích hợp cài đặt phần mềm tự động")
         self.auto_install_check.setEnabled(True)
         self.auto_install_check.toggled.connect(self.on_toggle_auto_install)
         layout.addWidget(self.auto_install_check)
 
-        # Khung chứa giao diện nhúng TekDT_AIS.exe
         options_group = QGroupBox()
         options_layout = QVBoxLayout(options_group)
         self.embed_container = QFrame()
         self.embed_container.setFrameShape(QFrame.Shape.WinPanel)
         self.embed_container.setFrameShadow(QFrame.Shadow.Sunken)
-        self.embed_container.setMinimumSize(400, 300)
+        size_policy = QSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self.embed_container.setSizePolicy(size_policy)
         self.embed_container.setVisible(False)
         options_layout.addWidget(self.embed_container, 1)
-
         layout.addWidget(options_group, 1)
 
-        # Thanh tiến trình và trạng thái
         self.progress_bar = QProgressBar()
         self.status_label = QLabel("Sẵn sàng")
         self.status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -2045,7 +2042,6 @@ class PageFinalize(QWidget):
         layout.addWidget(self.progress_bar)
         layout.addWidget(self.status_label)
 
-        # Nút điều hướng
         nav_layout = QHBoxLayout()
         self.back_button = QPushButton("← Quay lại")
         self.start_button = QPushButton("Bắt đầu tạo")
@@ -2061,7 +2057,16 @@ class PageFinalize(QWidget):
                 self.auto_install_check.setChecked(False)
                 return
             try:
-                self.ais_process = subprocess.Popen([TEKDTAIS_EXE, "--embed"], cwd=TEKDTAIS_DIR)
+                startupinfo = subprocess.STARTUPINFO()
+                startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+                startupinfo.wShowWindow = 0
+
+                self.ais_process = subprocess.Popen(
+                    [TEKDTAIS_EXE, "--embed"],
+                    cwd=TEKDTAIS_DIR,
+                    startupinfo=startupinfo
+                )
+
                 self.find_window_timer = QTimer(self)
                 self.find_window_timer.attempts = 0
                 self.find_window_timer.timeout.connect(self.find_and_embed_window)
@@ -2078,19 +2083,23 @@ class PageFinalize(QWidget):
 
     def find_and_embed_window(self):
         self.find_window_timer.attempts += 1
-        # Tìm cửa sổ TekDT AIS
         self.ais_hwnd = ctypes.windll.user32.FindWindowW(None, "TekDT AIS")
 
         if self.ais_hwnd:
             self.find_window_timer.stop()
-            # Chuyển đổi container_id thành integer
             container_id = int(self.embed_container.winId())
-            self.embed_container.setVisible(True)
-            # Gọi SetParent với cả hai tham số là integer
+
+            GWL_STYLE = -16
+            WS_CHILD = 0x40000000
+            style = ctypes.windll.user32.GetWindowLongW(self.ais_hwnd, GWL_STYLE)
+            style |= WS_CHILD
+            ctypes.windll.user32.SetWindowLongW(self.ais_hwnd, GWL_STYLE, style)
+
             ctypes.windll.user32.SetParent(int(self.ais_hwnd), container_id)
-            
+            self.embed_container.setVisible(True)
             self.resize_embedded_window()
-        elif self.find_window_timer.attempts > 40:  # Timeout sau 10 giây
+
+        elif self.find_window_timer.attempts > 40:
             self.find_window_timer.stop()
             self.main_app.show_error("Không thể tìm thấy cửa sổ của TekDT_AIS.exe để nhúng.")
             if self.ais_process:
@@ -2101,14 +2110,10 @@ class PageFinalize(QWidget):
         if self.ais_hwnd:
             SWP_FRAMECHANGED = 0x0020
             SWP_SHOWWINDOW = 0x0040
-            
             container_rect = self.embed_container.geometry()
             ctypes.windll.user32.SetWindowPos(
-                self.ais_hwnd,
-                None,
-                0, 0, # Tọa độ (x, y) so với góc trên bên trái của container
-                container_rect.width(),
-                container_rect.height(),
+                self.ais_hwnd, None, 0, 0,
+                container_rect.width(), container_rect.height(),
                 SWP_FRAMECHANGED | SWP_SHOWWINDOW
             )
 
