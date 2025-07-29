@@ -843,39 +843,40 @@ class USBBootCreator(QMainWindow):
                 shutil.copy(iso_info["path"], usb_mount_point)
                 self.creation_worker.progress.emit(int(progress_start + (i + 1) * progress_per_iso))
             
-            self.creation_worker.status.emit("Đang sao chép TekDT AIS vào USB...")
-            dest_ais_dir = os.path.join(usb_mount_point, "TekDT_AIS")
-            if os.path.exists(TEKDTAIS_DIR):
-                if os.path.exists(dest_ais_dir):
-                    shutil.rmtree(dest_ais_dir)
-                shutil.copytree(TEKDTAIS_DIR, dest_ais_dir)
-                print("Đã sao chép TekDT_AIS vào USB.")
+            if self.config.get("auto_install", False):
+                self.creation_worker.status.emit("Đang sao chép TekDT AIS vào USB...")
+                dest_ais_dir = os.path.join(usb_mount_point, "TekDT_AIS")
+                if os.path.exists(TEKDTAIS_DIR):
+                    if os.path.exists(dest_ais_dir):
+                        shutil.rmtree(dest_ais_dir)
+                    shutil.copytree(TEKDTAIS_DIR, dest_ais_dir)
+                    print("Đã sao chép TekDT_AIS vào USB.")
 
-                run_ais_script_path = os.path.join(usb_mount_point, "run_ais_setup.bat")
-                run_ais_script_content = """@echo off
-REM Search for TekDT_AIS, copy it to C drive, and execute it.
-for %%D in (C D E F G H I J K L M N O P Q R S T U V W X Y Z) do (
-    if exist "%%D:\\TekDT_AIS\\tekdt_ais.exe" (
-        echo Found TekDT_AIS on drive %%D:
-        echo Copying TekDT_AIS to C:\\ ...
-        xcopy "%%D:\\TekDT_AIS" "C:\\TekDT_AIS\\" /E /I /Y /H /Q
-        
-        echo Running installer...
-        start "" "C:\\TekDT_AIS\\tekdt_ais.exe" /install
+                    run_ais_script_path = os.path.join(usb_mount_point, "run_ais_setup.bat")
+                    run_ais_script_content = """@echo off
+    REM Search for TekDT_AIS, copy it to C drive, and execute it.
+    for %%D in (C D E F G H I J K L M N O P Q R S T U V W X Y Z) do (
+        if exist "%%D:\\TekDT_AIS\\tekdt_ais.exe" (
+            echo Found TekDT_AIS on drive %%D:
+            echo Copying TekDT_AIS to C:\\ ...
+            xcopy "%%D:\\TekDT_AIS" "C:\\TekDT_AIS\\" /E /I /Y /H /Q
+            
+            echo Running installer...
+            start "" "C:\\TekDT_AIS\\tekdt_ais.exe" /install
 
-        (goto) 2>nul & del "%~f0"
+            (goto) 2>nul & del "%~f0"
 
-        goto :eof
+            goto :eof
+        )
     )
-)
-echo TekDT_AIS not found on any drive.
-:eof
-"""
-                with open(run_ais_script_path, "w") as f:
-                    f.write(run_ais_script_content)
-                print("Đã tạo run_ais_setup.bat trên USB.")
-            else:
-                print("Thư mục Tools\\TekDT_AIS không tồn tại, bỏ qua sao chép.")
+    echo TekDT_AIS not found on any drive.
+    :eof
+    """
+                    with open(run_ais_script_path, "w") as f:
+                        f.write(run_ais_script_content)
+                    print("Đã tạo run_ais_setup.bat trên USB.")
+                else:
+                    print("Thư mục Tools\\TekDT_AIS không tồn tại, bỏ qua sao chép.")
             self._process_driver_archive(usb_mount_point)
 
             self.creation_worker.progress.emit(100)
@@ -2073,6 +2074,7 @@ class PageFinalize(QWidget):
         layout.addLayout(nav_layout)
 
     def on_toggle_auto_install(self, checked):
+        self.main_app.config["auto_install"] = checked
         if checked:
             if not os.path.exists(TEKDTAIS_EXE):
                 QMessageBox.warning(self, "Lỗi", f"Không tìm thấy TekDT_AIS.exe tại:\n{TEKDTAIS_EXE}")
