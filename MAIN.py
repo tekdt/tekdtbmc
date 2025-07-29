@@ -370,6 +370,7 @@ class USBBootCreator(QMainWindow):
 
         # Khi fade out xong, chuyển trang và fade in
         self.anim_out.finished.connect(lambda: self.switch_and_fade_in(index))
+        QApplication.processEvents()
 
     def switch_and_fade_in(self, index):
         """Hàm phụ trợ: Chuyển index và thực hiện fade in."""
@@ -384,8 +385,25 @@ class USBBootCreator(QMainWindow):
         self.anim_in.setStartValue(0.0)
         self.anim_in.setEndValue(1.0)
         self.anim_in.setEasingCurve(QEasingCurve.Type.InOutQuad)
+        self.anim_in.finished.connect(lambda: self.finalize_page_after_animation(new_widget))
         self.anim_in.start(QPropertyAnimation.DeletionPolicy.DeleteWhenStopped)
 
+    def finalize_page_after_animation(self, widget):
+        """Xử lý sau khi hiệu ứng hoàn tất - đặc biệt cho trang 3"""
+        if widget == self.page3:
+            # Đảm bảo cập nhật giao diện
+            widget.update()
+            widget.repaint()
+            
+            # Nếu đang nhúng TekDT AIS, cập nhật kích thước
+            if hasattr(widget, 'ais_hwnd') and widget.ais_hwnd:
+                widget.resize_embedded_window()
+                
+            # Xử lý riêng cho checkbox
+            if widget.auto_install_check.isChecked():
+                widget.auto_install_check.setChecked(False)
+                QTimer.singleShot(100, lambda: widget.auto_install_check.setChecked(True))
+    
     def show_main_menu(self):
         """Hiển thị menu cấu hình chính."""
         menu = QMenu(self)
@@ -2049,13 +2067,10 @@ class PageFinalize(QWidget):
         self.auto_install_check.toggled.connect(self.on_toggle_auto_install)
         layout.addWidget(self.auto_install_check)
 
-        options_group = QGroupBox()
+        options_group = QGroupBox('dfgfdg')
         options_layout = QVBoxLayout(options_group)
         self.embed_container = QFrame()
-        screen_geometry = QApplication.primaryScreen().availableGeometry()
-        min_width = min(800, screen_geometry.width() * 0.7)  # 70% chiều rộng màn hình
-        min_height = min(600, screen_geometry.height() * 0.6)  # 60% chiều cao màn hình
-        self.embed_container.setMinimumSize(int(min_width), int(min_height))
+        self.embed_container.setMinimumSize(400, 300)
         self.embed_container.setFrameShape(QFrame.Shape.WinPanel)
         self.embed_container.setFrameShadow(QFrame.Shadow.Sunken)
         size_policy = QSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
@@ -2089,6 +2104,13 @@ class PageFinalize(QWidget):
                 QMessageBox.warning(self, "Lỗi", f"Không tìm thấy TekDT_AIS.exe tại:\n{TEKDTAIS_EXE}")
                 self.auto_install_check.setChecked(False)
                 return
+            
+            # Kiểm tra xem tiến trình đã chạy chưa
+            if self.is_tekdtais_running():
+                print("TekDT AIS đã chạy, không khởi động lại.")
+                self.embed_container.setVisible(True)
+                self.resize_embedded_window()
+                return
             try:
                 startupinfo = subprocess.STARTUPINFO()
                 startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
@@ -2109,11 +2131,17 @@ class PageFinalize(QWidget):
                 self.auto_install_check.setChecked(False)
         else:
             self._stop_tekdtais()
-            
+
         self.embed_container.update()
 
+    def is_tekdtais_running(self):
+        """Kiểm tra xem tiến trình TekDT AIS đã chạy chưa."""
+        if self.ais_process and self.ais_process.poll() is None:
+            return True
+        return False
+
     def _stop_tekdtais(self):
-        if self.ais_process:
+        if self.ais_process and self.ais_process.poll() is None:
             try:
                 # Kill toàn bộ tiến trình con
                 parent = psutil.Process(self.ais_process.pid)
@@ -2127,12 +2155,18 @@ class PageFinalize(QWidget):
             self.ais_hwnd = None
         self.embed_container.setVisible(False)
     
+    def hideEvent(self, event):
+        """Dừng TekDT AIS khi giao diện bị ẩn."""
+        super().hideEvent(event)
+        if self.auto_install_check.isChecked():
+            self._stop_tekdtais()
+
     def showEvent(self, event):
-        """Tự động điều chỉnh kích thước khi trang được hiển thị"""
+        """Xử lý khi trang được hiển thị"""
         super().showEvent(event)
-        if self.ais_hwnd:
-            self.resize_embedded_window()
-    
+        if self.auto_install_check.isChecked():
+            self.on_toggle_auto_install(True)
+
     def find_and_embed_window(self):
         self.find_window_timer.attempts += 1
         self.ais_hwnd = ctypes.windll.user32.FindWindowW(None, "TekDT AIS")
@@ -2143,29 +2177,15 @@ class PageFinalize(QWidget):
 
             GWL_STYLE = -16
             style = ctypes.windll.user32.GetWindowLongW(self.ais_hwnd, GWL_STYLE)
-            
-            # Xóa các style không cần thiết (viền, thanh tiêu đề, v.v.)
             remove_styles = 0x00C00000 | 0x00080000 | 0x00040000  # WS_CAPTION | WS_SYSMENU | WS_THICKFRAME
             new_style = style & ~remove_styles
-            
-            # Thêm style WS_CHILD
             new_style |= 0x40000000  # WS_CHILD
-            
-            # Áp dụng style mới
             ctypes.windll.user32.SetWindowLongW(self.ais_hwnd, GWL_STYLE, new_style)
-            
-            # Đặt parent cho cửa sổ
             ctypes.windll.user32.SetParent(int(self.ais_hwnd), container_id)
             
-            # Cập nhật để áp dụng style mới
-            ctypes.windll.user32.SetWindowPos(
-                self.ais_hwnd, None, 0, 0, 0, 0,
-                0x0001 | 0x0002 | 0x0020  # SWP_NOMOVE | SWP_NOSIZE | SWP_FRAMECHANGED
-            )
+            # Thiết lập kích thước ban đầu ngay sau khi nhúng
+            self.resize_embedded_window()
             self.embed_container.setVisible(True)
-            
-            # Tự động điều chỉnh kích thước ngay sau khi nhúng
-            QTimer.singleShot(100, self.resize_embedded_window)
         elif self.find_window_timer.attempts > 40:
             self.find_window_timer.stop()
             self.main_app.show_error("Không thể tìm thấy cửa sổ của TekDT_AIS.exe để nhúng.")
@@ -2174,13 +2194,11 @@ class PageFinalize(QWidget):
             self.auto_install_check.setChecked(False)
 
     def resize_embedded_window(self):
+        """Điều chỉnh kích thước cửa sổ nhúng để lấp đầy khung chứa."""
         if self.ais_hwnd:
-            # Lấy kích thước THỰC TẾ của khung chứa
             width = self.embed_container.width()
             height = self.embed_container.height()
-            
-            # Cập nhật kích thước cửa sổ nhúng - lấp đầy toàn bộ khung
-            flags = 0x0004 | 0x0010  # SWP_NOZORDER | SWP_NOACTIVATE
+            flags = 0x0002 | 0x0004 | 0x0010  # SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE
             ctypes.windll.user32.SetWindowPos(
                 self.ais_hwnd, None,
                 0, 0, width, height,
@@ -2190,11 +2208,7 @@ class PageFinalize(QWidget):
     def resizeEvent(self, event):
         super().resizeEvent(event)
         if self.ais_hwnd:
-            # Cần delay nhẹ để hệ thống cập nhật layout
-            QTimer.singleShot(50, self.resize_embedded_window)
-
-    def hideEvent(self, event):
-        super().hideEvent(event)
+            self.resize_embedded_window()
   
     def show_progress_ui(self, show):
         self.progress_bar.setVisible(show)
