@@ -2090,12 +2090,26 @@ class PageFinalize(QWidget):
             container_id = int(self.embed_container.winId())
 
             GWL_STYLE = -16
-            WS_CHILD = 0x40000000
             style = ctypes.windll.user32.GetWindowLongW(self.ais_hwnd, GWL_STYLE)
-            style |= WS_CHILD
-            ctypes.windll.user32.SetWindowLongW(self.ais_hwnd, GWL_STYLE, style)
-
+            
+            # Xóa các style không cần thiết (viền, thanh tiêu đề, v.v.)
+            remove_styles = 0x00C00000 | 0x00080000 | 0x00040000  # WS_CAPTION | WS_SYSMENU | WS_THICKFRAME
+            new_style = style & ~remove_styles
+            
+            # Thêm style WS_CHILD
+            new_style |= 0x40000000  # WS_CHILD
+            
+            # Áp dụng style mới
+            ctypes.windll.user32.SetWindowLongW(self.ais_hwnd, GWL_STYLE, new_style)
+            
+            # Đặt parent cho cửa sổ
             ctypes.windll.user32.SetParent(int(self.ais_hwnd), container_id)
+            
+            # Cập nhật để áp dụng style mới
+            ctypes.windll.user32.SetWindowPos(
+                self.ais_hwnd, None, 0, 0, 0, 0,
+                0x0001 | 0x0002 | 0x0020  # SWP_NOMOVE | SWP_NOSIZE | SWP_FRAMECHANGED
+            )
             self.embed_container.setVisible(True)
             self.resize_embedded_window()
 
@@ -2108,18 +2122,24 @@ class PageFinalize(QWidget):
 
     def resize_embedded_window(self):
         if self.ais_hwnd:
-            SWP_FRAMECHANGED = 0x0020
-            SWP_SHOWWINDOW = 0x0040
-            container_rect = self.embed_container.geometry()
+            
+            width = self.embed_container.width()
+            height = self.embed_container.height()
+            SWP_NOACTIVATE = 0x0010
+            flags = SWP_NOZORDER | SWP_NOACTIVATE
+            
             ctypes.windll.user32.SetWindowPos(
-                self.ais_hwnd, None, 0, 0,
-                container_rect.width(), container_rect.height(),
-                SWP_FRAMECHANGED | SWP_SHOWWINDOW
+                self.ais_hwnd, None, 
+                0, 0,  # X, Y position
+                width, height,  # Width, Height
+                flags
             )
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
-        self.resize_embedded_window()
+        if self.ais_hwnd:
+            # Cần delay nhẹ để hệ thống cập nhật layout
+            QTimer.singleShot(50, self.resize_embedded_window)
 
     def hideEvent(self, event):
         if self.auto_install_check.isChecked():
