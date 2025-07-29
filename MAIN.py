@@ -496,41 +496,59 @@ class USBBootCreator(QMainWindow):
             print("Đã gỡ cài đặt driver WinCDEmu.")
         except Exception as e:
             print(f"Ngoại lệ khi gỡ cài đặt driver WinCDEmu: {e}")
-
+        
     def on_updates_finished(self, success, message):
         """Kích hoạt lại UI sau khi cập nhật công cụ hoàn tất."""
         if success:
             self.init_status_label.setText("Các công cụ đã sẵn sàng!")
-            # Ẩn nhãn trạng thái sau một khoảng trễ ngắn
             QTimer.singleShot(1500, lambda: self.init_status_label.setVisible(False))
             self.stacked_widget.setEnabled(True)
             self.menu_button.setEnabled(True)
         else:
-            self.init_status_label.setText("Lỗi nghiêm trọng khi khởi tạo!")
-            self.show_error(f"Không thể tải các công cụ cần thiết. Vui lòng kiểm tra kết nối mạng và thử lại.\n\nChi tiết: {message}")
-            # Giữ cho UI bị vô hiệu hóa nếu có lỗi
+            self.init_status_label.setText("Có lỗi khi khởi tạo!")
+            # Kiểm tra xem tất cả công cụ có sẵn không
+            required_tools = [FIDO_SCRIPT_PATH, os.path.join(VENTOY_DIR, "Ventoy2Disk.exe"), 
+                             ARIA2_EXE, WIMLIB_EXE, WINCDEMU_EXE, TEKDTAIS_EXE]
+            missing_tools = [tool for tool in required_tools if not os.path.exists(tool)]
+            
+            if missing_tools:
+                self.show_error(f"Không thể tải các công cụ cần thiết: {', '.join([os.path.basename(t) for t in missing_tools])}. Vui lòng kiểm tra kết nối mạng và thử lại.\n\nChi tiết: {message}")
+                QMessageBox.critical(self, "Lỗi nghiêm trọng", "Ứng dụng sẽ thoát do thiếu công cụ cần thiết.")
+                sys.exit(1)
+            else:
+                self.init_status_label.setText("Sử dụng các công cụ hiện có!")
+                QTimer.singleShot(1500, lambda: self.init_status_label.setVisible(False))
+                self.stacked_widget.setEnabled(True)
+                self.menu_button.setEnabled(True)
     
     def _update_task(self):
         """Tác vụ cập nhật tất cả công cụ chạy trong luồng nền."""
-        self.update_worker.status.emit("Đang cập nhật Fido...")
-        self._update_fido_script()
+        self.update_worker.status.emit("Đang khởi tạo...")
 
-        self.update_worker.status.emit("Đang kiểm tra Ventoy...")
-        self._update_tool("Ventoy", VENTOY_API_URL, r"ventoy-.*-windows\.zip", self._unzip_and_move)
-        
-        self.update_worker.status.emit("Đang kiểm tra aria2...")
-        self._update_tool("aria2", ARIA2_API_URL, r"aria2-.*-win-32bit-build.*\.zip", self._unzip_and_move)
-        
-        self.update_worker.status.emit("Đang kiểm tra wimlib...")
-        # Sử dụng _unzip_and_move vì nó xử lý việc xóa thư mục cũ và di chuyển nội dung đúng cách
-        self._update_tool("wimlib", WIMLIB_URL, r"wimlib-.*-windows.*\.zip", self._unzip_and_move, ssl_verify=False)
-        
-        self.update_worker.status.emit("Đang kiểm tra WinCDEmu...")
-        self._update_tool("WinCDEmu", WINCDEMU_API_URL, r"PortableWinCDEmu-.*\.exe", 
-                  lambda dp, dd: self._download_and_place_exe(dp, dd, "wcdemu.exe"))
-        
-        self.update_worker.status.emit("Đang kiểm tra TekDT_AIS...")
-        self._update_tool("TekDT_AIS", TEKDTAIS_API_URL, r".*\.zip", self._unzip_and_move)
+        # Danh sách các công cụ và đường dẫn kiểm tra
+        tools = [
+            ("Fido", FIDO_SCRIPT_PATH, self._update_fido_script),
+            ("Ventoy", os.path.join(VENTOY_DIR, "Ventoy2Disk.exe"), lambda: self._update_tool("Ventoy", VENTOY_API_URL, r"ventoy-.*-windows\.zip", self._unzip_and_move)),
+            ("aria2", ARIA2_EXE, lambda: self._update_tool("aria2", ARIA2_API_URL, r"aria2-.*-win-32bit-build.*\.zip", self._unzip_and_move)),
+            ("wimlib", WIMLIB_EXE, lambda: self._update_tool("wimlib", WIMLIB_URL, r"wimlib-.*-windows.*\.zip", self._unzip_and_move, ssl_verify=False)),
+            ("WinCDEmu", WINCDEMU_EXE, lambda: self._update_tool("WinCDEmu", WINCDEMU_API_URL, r"PortableWinCDEmu-.*\.exe", lambda dp, dd: self._download_and_place_exe(dp, dd, "wcdemu.exe"))),
+            ("TekDT_AIS", TEKDTAIS_EXE, lambda: self._update_tool("TekDT_AIS", TEKDTAIS_API_URL, r".*\.zip", self._unzip_and_move)),
+        ]
+
+        critical_error = False
+        for tool_name, tool_path, update_func in tools:
+            if os.path.exists(tool_path):
+                self.update_worker.status.emit(f"{tool_name} đã có sẵn, bỏ qua cập nhật.")
+                continue
+            try:
+                self.update_worker.status.emit(f"Đang cập nhật {tool_name}...")
+                update_func()
+            except Exception as e:
+                self.update_worker.status.emit(f"Lỗi khi cập nhật {tool_name}: {e}")
+                critical_error = True  # Đánh dấu lỗi nghiêm trọng nếu không có công cụ và không tải được
+
+        if critical_error:
+            raise Exception("Không thể tải các công cụ cần thiết.")
         self.update_worker.status.emit("Sẵn sàng!")
         time.sleep(1)
 
@@ -2026,6 +2044,10 @@ class PageFinalize(QWidget):
         options_group = QGroupBox()
         options_layout = QVBoxLayout(options_group)
         self.embed_container = QFrame()
+        screen_geometry = QApplication.primaryScreen().availableGeometry()
+        min_width = min(800, screen_geometry.width() * 0.7)  # 70% chiều rộng màn hình
+        min_height = min(600, screen_geometry.height() * 0.6)  # 60% chiều cao màn hình
+        self.embed_container.setMinimumSize(int(min_width), int(min_height))
         self.embed_container.setFrameShape(QFrame.Shape.WinPanel)
         self.embed_container.setFrameShadow(QFrame.Shadow.Sunken)
         size_policy = QSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
@@ -2081,6 +2103,12 @@ class PageFinalize(QWidget):
                 self.ais_hwnd = None
             self.embed_container.setVisible(False)
 
+    def showEvent(self, event):
+        """Tự động điều chỉnh kích thước khi trang được hiển thị"""
+        super().showEvent(event)
+        if self.ais_hwnd:
+            self.resize_embedded_window()
+    
     def find_and_embed_window(self):
         self.find_window_timer.attempts += 1
         self.ais_hwnd = ctypes.windll.user32.FindWindowW(None, "TekDT AIS")
@@ -2111,8 +2139,9 @@ class PageFinalize(QWidget):
                 0x0001 | 0x0002 | 0x0020  # SWP_NOMOVE | SWP_NOSIZE | SWP_FRAMECHANGED
             )
             self.embed_container.setVisible(True)
-            self.resize_embedded_window()
-
+            
+            # Tự động điều chỉnh kích thước ngay sau khi nhúng
+            QTimer.singleShot(100, self.resize_embedded_window)
         elif self.find_window_timer.attempts > 40:
             self.find_window_timer.stop()
             self.main_app.show_error("Không thể tìm thấy cửa sổ của TekDT_AIS.exe để nhúng.")
@@ -2122,16 +2151,20 @@ class PageFinalize(QWidget):
 
     def resize_embedded_window(self):
         if self.ais_hwnd:
-            
+            # Lấy kích thước THỰC TẾ của khung chứa
             width = self.embed_container.width()
             height = self.embed_container.height()
-            SWP_NOACTIVATE = 0x0010
-            flags = SWP_NOZORDER | SWP_NOACTIVATE
             
+            # Đảm bảo kích thước tối thiểu
+            min_size = 400  # Kích thước tối thiểu tuyệt đối
+            width = max(width, min_size)
+            height = max(height, min_size)
+            
+            # Cập nhật kích thước cửa sổ nhúng
+            flags = 0x0004 | 0x0010  # SWP_NOZORDER | SWP_NOACTIVATE
             ctypes.windll.user32.SetWindowPos(
-                self.ais_hwnd, None, 
-                0, 0,  # X, Y position
-                width, height,  # Width, Height
+                self.ais_hwnd, None,
+                0, 0, width, height,
                 flags
             )
 
