@@ -332,14 +332,16 @@ class USBBootCreator(QMainWindow):
             return True
         except Exception:
             return False
-    
+ 
     def closeEvent(self, event):
-        """Ghi đè sự kiện đóng cửa sổ để dừng tác vụ tải file đang chạy và gỡ driver WinCDEmu."""
-        print("Cửa sổ đang đóng, kiểm tra và dừng tác vụ tải file và gỡ driver WinCDEmu...")
+        print("Cửa sổ đang đóng, kiểm tra và dừng các tác vụ...")
         self.page2.stop_download_process()
         self.uninstall_wincdemu_driver()
         if self.page3.auto_install_check.isChecked():
             self.page3.auto_install_check.setChecked(False)
+        # Giết tiến trình TekDT_AIS.exe nếu đang chạy
+        if hasattr(self.page3, 'ais_process') and self.page3.ais_process:
+            self.page3.ais_process.kill()
         event.accept()
     
     def lock_ui_for_updates(self):
@@ -2076,23 +2078,25 @@ class PageFinalize(QWidget):
 
     def find_and_embed_window(self):
         self.find_window_timer.attempts += 1
-        # Giả định tên cửa sổ của chương trình là "TekDT AIS" - cần xác minh
+        # Tìm cửa sổ TekDT AIS
         self.ais_hwnd = ctypes.windll.user32.FindWindowW(None, "TekDT AIS")
 
         if self.ais_hwnd:
             self.find_window_timer.stop()
-            container_id = self.embed_container.winId()
+            # Chuyển đổi container_id thành integer
+            container_id = int(self.embed_container.winId())
             self.embed_container.setVisible(True)
-            ctypes.windll.user32.SetParent(self.ais_hwnd, container_id)
+            # Gọi SetParent với cả hai tham số là integer
+            ctypes.windll.user32.SetParent(int(self.ais_hwnd), container_id)
             
             # Loại bỏ tiêu đề và viền của cửa sổ nhúng
-            style = ctypes.windll.user32.GetWindowLongW(self.ais_hwnd, -16)  # GWL_STYLE
-            style = style & ~0x00C00000  # WS_CAPTION
-            style = style & ~0x00040000  # WS_THICKFRAME
-            ctypes.windll.user32.SetWindowLongW(self.ais_hwnd, -16, style)
+            style = ctypes.windll.user32.GetWindowLongW(int(self.ais_hwnd), -16)  # GWL_STYLE
+            style = style & ~0x00C00000  # Xóa WS_CAPTION
+            style = style & ~0x00040000  # Xóa WS_THICKFRAME
+            ctypes.windll.user32.SetWindowLongW(int(self.ais_hwnd), -16, style)
             
             self.resize_embedded_window()
-        elif self.find_window_timer.attempts > 40:  # Tăng timeout lên 10 giây (40 * 250ms)
+        elif self.find_window_timer.attempts > 40:  # Timeout sau 10 giây
             self.find_window_timer.stop()
             self.main_app.show_error("Không thể tìm thấy cửa sổ của TekDT_AIS.exe để nhúng.")
             if self.ais_process:
