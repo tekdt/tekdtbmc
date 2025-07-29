@@ -337,11 +337,11 @@ class USBBootCreator(QMainWindow):
         print("Cửa sổ đang đóng, kiểm tra và dừng các tác vụ...")
         self.page2.stop_download_process()
         self.uninstall_wincdemu_driver()
-        if self.page3.auto_install_check.isChecked():
-            self.page3.auto_install_check.setChecked(False)
-        # Giết tiến trình TekDT_AIS.exe nếu đang chạy
-        if hasattr(self.page3, 'ais_process') and self.page3.ais_process:
-            self.page3.ais_process.kill()
+        
+        # Dừng TekDT AIS nếu đang chạy
+        if hasattr(self.page3, '_stop_tekdtais'):
+            self.page3._stop_tekdtais()
+        
         event.accept()
     
     def lock_ui_for_updates(self):
@@ -2027,6 +2027,13 @@ class PageFinalize(QWidget):
         self.ais_process = None
         self.ais_hwnd = None
         self.init_ui()
+        
+        # KHỞI TẠO TRẠNG THÁI TỪ CONFIG
+        self.auto_install_check.setChecked(self.main_app.config.get("auto_install_enabled", False))
+        
+        # Nếu config yêu cầu bật sẵn, khởi chạy ngay
+        if self.main_app.config.get("auto_install_enabled", False):
+            self.on_toggle_auto_install(True)
 
     def init_ui(self):
         layout = QVBoxLayout(self)
@@ -2074,6 +2081,8 @@ class PageFinalize(QWidget):
         layout.addLayout(nav_layout)
 
     def on_toggle_auto_install(self, checked):
+        # LƯU TRẠNG THÁI VÀO CONFIG
+        self.main_app.config["auto_install_enabled"] = checked
         self.main_app.config["auto_install"] = checked
         if checked:
             if not os.path.exists(TEKDTAIS_EXE):
@@ -2099,12 +2108,25 @@ class PageFinalize(QWidget):
                 self.main_app.show_error(f"Không thể khởi chạy TekDT_AIS.exe:\n{e}")
                 self.auto_install_check.setChecked(False)
         else:
-            if self.ais_process:
-                self.ais_process.kill()
-                self.ais_process = None
-                self.ais_hwnd = None
-            self.embed_container.setVisible(False)
+            self._stop_tekdtais()
+            
+        self.embed_container.update()
 
+    def _stop_tekdtais(self):
+        if self.ais_process:
+            try:
+                # Kill toàn bộ tiến trình con
+                parent = psutil.Process(self.ais_process.pid)
+                children = parent.children(recursive=True)
+                for child in children:
+                    child.kill()
+                parent.kill()
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                pass
+            self.ais_process = None
+            self.ais_hwnd = None
+        self.embed_container.setVisible(False)
+    
     def showEvent(self, event):
         """Tự động điều chỉnh kích thước khi trang được hiển thị"""
         super().showEvent(event)
@@ -2157,12 +2179,7 @@ class PageFinalize(QWidget):
             width = self.embed_container.width()
             height = self.embed_container.height()
             
-            # Đảm bảo kích thước tối thiểu
-            min_size = 400  # Kích thước tối thiểu tuyệt đối
-            width = max(width, min_size)
-            height = max(height, min_size)
-            
-            # Cập nhật kích thước cửa sổ nhúng
+            # Cập nhật kích thước cửa sổ nhúng - lấp đầy toàn bộ khung
             flags = 0x0004 | 0x0010  # SWP_NOZORDER | SWP_NOACTIVATE
             ctypes.windll.user32.SetWindowPos(
                 self.ais_hwnd, None,
@@ -2177,8 +2194,6 @@ class PageFinalize(QWidget):
             QTimer.singleShot(50, self.resize_embedded_window)
 
     def hideEvent(self, event):
-        if self.auto_install_check.isChecked():
-            self.auto_install_check.setChecked(False)
         super().hideEvent(event)
   
     def show_progress_ui(self, show):
