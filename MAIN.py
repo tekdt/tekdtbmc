@@ -2372,8 +2372,8 @@ class PageFinalize(QWidget):
 def main():
     # Bật nhận biết DPI cho ứng dụng để scaling hoạt động chính xác
     QApplication.setHighDpiScaleFactorRoundingPolicy(Qt.HighDpiScaleFactorRoundingPolicy.PassThrough)
-    QApplication.setAttribute(Qt.ApplicationAttribute.AA_EnableHighDpiScaling)
-    QApplication.setAttribute(Qt.ApplicationAttribute.AA_UseHighDpiPixmaps)
+    # QApplication.setAttribute(Qt.ApplicationAttribute.AA_EnableHighDpiScaling)
+    # QApplication.setAttribute(Qt.ApplicationAttribute.AA_UseHighDpiPixmaps)
     
     app = QApplication(sys.argv)
     window = USBBootCreator()
