@@ -102,6 +102,8 @@ class Worker(QThread):
 class USBBootCreator(QMainWindow):
     def __init__(self):
         super().__init__()
+        self.ais_process = None
+        self.ais_hwnd = None
         # --- Kiểm tra quyền admin và nâng quyền nếu cần ---
         if not self.is_admin():
             print("Không có quyền admin, đang thử nâng quyền...")
@@ -112,8 +114,9 @@ class USBBootCreator(QMainWindow):
             else:
                 # Nếu không nâng quyền được, hiện thông báo lỗi và thoát luôn
                 # vì ứng dụng cần quyền admin để hoạt động đúng.
-                QMessageBox.critical(None, "Lỗi Quyền Admin", 
-                                     "Không thể nâng quyền quản trị viên. Ứng dụng sẽ thoát.")
+                self.show_themed_message("Lỗi Quyền Admin", 
+                         "Không thể nâng quyền quản trị viên. Ứng dụng sẽ thoát.", 
+                         icon=QMessageBox.Icon.Critical)
                 sys.exit(1)
         
         self.setWindowTitle(f"TekDT BMC v{APP_VERSION}")
@@ -167,6 +170,8 @@ class USBBootCreator(QMainWindow):
         self.stacked_widget.addWidget(self.page1)
         self.stacked_widget.addWidget(self.page2)
         self.stacked_widget.addWidget(self.page3)
+        
+        self.stacked_widget.currentChanged.connect(self.on_page_changed)
 
         self.init_status_label = QLabel("Đang khởi tạo...")
         self.init_status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -339,10 +344,146 @@ class USBBootCreator(QMainWindow):
         self.uninstall_wincdemu_driver()
         
         # Dừng TekDT AIS nếu đang chạy
-        if hasattr(self.page3, '_stop_tekdtais'):
-            self.page3._stop_tekdtais()
+        self._stop_tekdtais()
         
         event.accept()
+    
+    def show_themed_message(self, title, text, icon=QMessageBox.Icon.NoIcon, 
+                            buttons=QMessageBox.StandardButton.Ok, 
+                            defaultButton=QMessageBox.StandardButton.NoButton):
+        msg_box = QMessageBox(self)
+        msg_box.setWindowTitle(title)
+        msg_box.setText(text)
+        msg_box.setIcon(icon)
+        msg_box.setStandardButtons(buttons)
+        if defaultButton != QMessageBox.StandardButton.NoButton:
+            msg_box.setDefaultButton(defaultButton)
+        
+        # Áp dụng stylesheet tùy chỉnh
+        msg_box.setStyleSheet("""
+            QMessageBox {
+                background-color: #3B4252;
+                color: #D8DEE9;
+                font-family: 'Segoe UI';
+                font-size: 11pt;
+            }
+            QMessageBox QLabel {
+                color: #D8DEE9;
+            }
+            QMessageBox QPushButton {
+                background-color: #5E81AC;
+                border-radius: 5px;
+                padding: 8px 16px;
+                font-size: 11pt;
+                font-weight: bold;
+                border: 1px solid #4C566A;
+                min-width: 80px;
+            }
+            QMessageBox QPushButton:hover {
+                background-color: #81A1C1;
+            }
+            QMessageBox QPushButton:pressed {
+                background-color: #88C0D0;
+            }
+        """)
+        return msg_box.exec()
+    
+    def _check_internet_connection(self):
+        """Kiểm tra kết nối Internet một cách nhanh chóng."""
+        try:
+            # Dùng một địa chỉ IP đáng tin cậy và timeout ngắn
+            requests.get("https://8.8.8.8", timeout=3)
+            return True
+        except requests.ConnectionError:
+            return False
+
+    def start_tekdtais(self):
+        if not os.path.exists(TEKDTAIS_EXE) or self.is_tekdtais_running():
+            return
+
+        try:
+            print("Đang khởi chạy TekDT AIS ở chế độ nền...")
+            startupinfo = subprocess.STARTUPINFO()
+            startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+            startupinfo.wShowWindow = 0 # SW_HIDE
+
+            self.ais_process = subprocess.Popen(
+                [TEKDTAIS_EXE, "--embed-mode"], # Argument để AIS biết nó đang được nhúng
+                cwd=TEKDTAIS_DIR,
+                startupinfo=startupinfo
+            )
+
+            self.find_ais_window_timer = QTimer(self)
+            self.find_ais_window_timer.attempts = 0
+            self.find_ais_window_timer.timeout.connect(self._find_ais_window_task)
+            self.find_ais_window_timer.start(250)
+
+        except Exception as e:
+            self.show_themed_message("Lỗi", f"Không thể khởi chạy TekDT_AIS.exe:\n{e}", icon=QMessageBox.Icon.Warning)
+
+    def _find_ais_window_task(self):
+        self.find_ais_window_timer.attempts += 1
+        self.ais_hwnd = ctypes.windll.user32.FindWindowW(None, "TekDT AIS")
+
+        if self.ais_hwnd:
+            self.find_ais_window_timer.stop()
+            print(f"Đã tìm thấy cửa sổ TekDT AIS (HWND: {self.ais_hwnd}).")
+            if self.stacked_widget.currentWidget() == self.page3:
+                self.embed_ais_window()
+        elif self.find_ais_window_timer.attempts > 40:
+            self.find_ais_window_timer.stop()
+            print("Không thể tìm thấy cửa sổ TekDT AIS sau 10 giây.")
+            self._stop_tekdtais()
+
+    def embed_ais_window(self):
+        if not self.ais_hwnd or not self.page3: return
+        container = self.page3.embed_container
+        container_id = int(container.winId())
+
+        GWL_STYLE = -16
+        style = ctypes.windll.user32.GetWindowLongW(self.ais_hwnd, GWL_STYLE)
+        style |= 0x40000000  # WS_CHILD
+        style &= ~0x00C00000 # WS_CAPTION
+        ctypes.windll.user32.SetWindowLongW(self.ais_hwnd, GWL_STYLE, style)
+        ctypes.windll.user32.SetParent(self.ais_hwnd, container_id)
+        ctypes.windll.user32.ShowWindow(self.ais_hwnd, 1)
+        self.resize_ais_window()
+        container.setVisible(True)
+
+    def hide_ais_window(self):
+        if not self.ais_hwnd: return
+        ctypes.windll.user32.ShowWindow(self.ais_hwnd, 0)
+        ctypes.windll.user32.SetParent(self.ais_hwnd, 0)
+        self.page3.embed_container.setVisible(False)
+
+    def resize_ais_window(self):
+        if self.ais_hwnd and self.page3.embed_container.isVisible():
+            container = self.page3.embed_container
+            pixel_ratio = self.devicePixelRatioF() # Sửa lỗi scaling trên màn hình 2K+
+            width = int(container.width() * pixel_ratio)
+            height = int(container.height() * pixel_ratio)
+
+            ctypes.windll.user32.SetWindowPos(self.ais_hwnd, 0, 0, 0, width, height, 0x0004 | 0x0010)
+
+    def is_tekdtais_running(self):
+        return self.ais_process and self.ais_process.poll() is None
+
+    def _stop_tekdtais(self):
+        if self.is_tekdtais_running():
+            print(f"Đang dừng tiến trình TekDT AIS (PID: {self.ais_process.pid})...")
+            self.ais_process.terminate()
+            try:
+                self.ais_process.wait(timeout=3)
+            except subprocess.TimeoutExpired:
+                self.ais_process.kill()
+            self.ais_process = None
+            self.ais_hwnd = None
+
+    def on_page_changed(self, index):
+        if index == 2:
+            self.embed_ais_window()
+        elif self.ais_hwnd:
+            self.hide_ais_window()
     
     def lock_ui_for_updates(self):
         """Vô hiệu hóa các thành phần UI chính trong khi kiểm tra cập nhật."""
@@ -521,28 +662,22 @@ class USBBootCreator(QMainWindow):
             QTimer.singleShot(1500, lambda: self.init_status_label.setVisible(False))
             self.stacked_widget.setEnabled(True)
             self.menu_button.setEnabled(True)
+            self.start_tekdtais() 
         else:
-            self.init_status_label.setText("Có lỗi khi khởi tạo!")
-            # Kiểm tra xem tất cả công cụ có sẵn không
-            required_tools = [FIDO_SCRIPT_PATH, os.path.join(VENTOY_DIR, "Ventoy2Disk.exe"), 
-                             ARIA2_EXE, WIMLIB_EXE, WINCDEMU_EXE, TEKDTAIS_EXE]
-            missing_tools = [tool for tool in required_tools if not os.path.exists(tool)]
-            
-            if missing_tools:
-                self.show_error(f"Không thể tải các công cụ cần thiết: {', '.join([os.path.basename(t) for t in missing_tools])}. Vui lòng kiểm tra kết nối mạng và thử lại.\n\nChi tiết: {message}")
-                QMessageBox.critical(self, "Lỗi nghiêm trọng", "Ứng dụng sẽ thoát do thiếu công cụ cần thiết.")
-                sys.exit(1)
-            else:
-                self.init_status_label.setText("Sử dụng các công cụ hiện có!")
-                QTimer.singleShot(1500, lambda: self.init_status_label.setVisible(False))
-                self.stacked_widget.setEnabled(True)
-                self.menu_button.setEnabled(True)
+            self.init_status_label.setText("Lỗi khởi tạo nghiêm trọng!")
+            self.show_themed_message("Lỗi nghiêm trọng",
+                               f"Không thể tải các công cụ cần thiết. Ứng dụng sẽ thoát.\n\nChi tiết: {message}",
+                               icon=QMessageBox.Icon.Critical)
+            sys.exit(1)
     
     def _update_task(self):
-        """Tác vụ cập nhật tất cả công cụ chạy trong luồng nền."""
-        self.update_worker.status.emit("Đang khởi tạo...")
+        self.update_worker.status.emit("Đang kiểm tra các công cụ...")
+        has_internet = self._check_internet_connection()
+        if has_internet:
+            self.update_worker.status.emit("Đã kết nối Internet. Sẵn sàng kiểm tra cập nhật.")
+        else:
+            self.update_worker.status.emit("Không có kết nối Internet. Sẽ sử dụng các công cụ hiện có.")
 
-        # Danh sách các công cụ và đường dẫn kiểm tra
         tools = [
             ("Fido", FIDO_SCRIPT_PATH, self._update_fido_script),
             ("Ventoy", os.path.join(VENTOY_DIR, "Ventoy2Disk.exe"), lambda: self._update_tool("Ventoy", VENTOY_API_URL, r"ventoy-.*-windows\.zip", self._unzip_and_move)),
@@ -552,21 +687,31 @@ class USBBootCreator(QMainWindow):
             ("TekDT_AIS", TEKDTAIS_EXE, lambda: self._update_tool("TekDT_AIS", TEKDTAIS_API_URL, r".*\.zip", self._unzip_and_move)),
         ]
 
-        critical_error = False
         for tool_name, tool_path, update_func in tools:
-            if os.path.exists(tool_path):
-                self.update_worker.status.emit(f"{tool_name} đã có sẵn, bỏ qua cập nhật.")
-                continue
-            try:
-                self.update_worker.status.emit(f"Đang cập nhật {tool_name}...")
-                update_func()
-            except Exception as e:
-                self.update_worker.status.emit(f"Lỗi khi cập nhật {tool_name}: {e}")
-                critical_error = True  # Đánh dấu lỗi nghiêm trọng nếu không có công cụ và không tải được
+            if not os.path.exists(tool_path):
+                self.update_worker.status.emit(f"Công cụ {tool_name} không tồn tại.")
+                if not has_internet:
+                    # Lỗi nghiêm trọng: thiếu công cụ và không có mạng để tải
+                    raise Exception(f"{tool_name} bị thiếu và không có kết nối Internet để tải về.")
 
-        if critical_error:
-            raise Exception("Không thể tải các công cụ cần thiết.")
-        self.update_worker.status.emit("Sẵn sàng!")
+                self.update_worker.status.emit(f"Đang tải {tool_name}...")
+                try:
+                    update_func() # Bắt buộc tải về lần đầu
+                except Exception as e:
+                    raise Exception(f"Không thể tải về công cụ bắt buộc {tool_name}: {e}")
+            else:
+                # Công cụ đã tồn tại
+                if has_internet:
+                    self.update_worker.status.emit(f"Đang kiểm tra cập nhật cho {tool_name}...")
+                    try:
+                        # Thử cập nhật, nhưng không báo lỗi nghiêm trọng nếu thất bại
+                        update_func()
+                    except Exception as e:
+                        self.update_worker.status.emit(f"Lỗi khi cập nhật {tool_name}, sử dụng phiên bản hiện có. Lỗi: {e}")
+                else:
+                    self.update_worker.status.emit(f"{tool_name} đã có. Bỏ qua kiểm tra cập nhật.")
+
+        self.update_worker.status.emit("Hoàn tất kiểm tra công cụ!")
         time.sleep(1)
 
     def _update_fido_script(self):
@@ -707,28 +852,27 @@ class USBBootCreator(QMainWindow):
         # Chỉ cần đổi tên thư mục tạm thành thư mục đích.
         shutil.move(temp_extract_dir, dest_dir)
 
-
     def confirm_and_start(self):
         """Hiển thị cảnh báo và bắt đầu quá trình tạo USB."""
         if not self.config.get("device"):
-            self.show_error("Vui lòng chọn một ổ đĩa USB!")
-            return
-            
-        if not self.config.get("iso_list"):
-            self.show_error("Vui lòng chọn hoặc tải ít nhất một file ISO!")
+            self.show_themed_message("Lỗi", "Vui lòng chọn một ổ đĩa USB!", icon=QMessageBox.Icon.Warning)
             return
 
-        msg_box = QMessageBox(self)
-        msg_box.setIcon(QMessageBox.Icon.Warning)
-        msg_box.setWindowTitle("XÁC NHẬN XÓA DỮ LIỆU")
-        msg_box.setText(f"<b>CẢNH BÁO!</b><br><br>"
+        if not self.config.get("iso_list"):
+            self.show_themed_message("Lỗi", "Vui lòng chọn hoặc tải ít nhất một file ISO!", icon=QMessageBox.Icon.Warning)
+            return
+
+        confirm_text = (f"<b>CẢNH BÁO!</b><br><br>"
                         f"Tất cả dữ liệu trên ổ đĩa <b>{self.config['device_name']}</b> "
                         f"(<b>{self.config['device']}</b>) sẽ bị <b>XÓA SẠCH</b>.<br><br>"
                         "Bạn có chắc chắn muốn tiếp tục không?")
-        msg_box.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
-        msg_box.setDefaultButton(QMessageBox.StandardButton.No)
-        
-        if msg_box.exec() == QMessageBox.StandardButton.Yes:
+
+        reply = self.show_themed_message("XÁC NHẬN XÓA DỮ LIỆU", confirm_text, 
+                                       icon=QMessageBox.Icon.Warning, 
+                                       buttons=QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                                       defaultButton=QMessageBox.StandardButton.No)
+
+        if reply == QMessageBox.StandardButton.Yes:
             self.page3.show_progress_ui(True)
             self.creation_worker = Worker(self.create_usb_task)
             self.creation_worker.status.connect(self.page3.update_status)
@@ -1213,15 +1357,14 @@ class USBBootCreator(QMainWindow):
         """Xử lý khi quá trình tạo USB kết thúc."""
         self.page3.show_progress_ui(False)
         if success:
-            QMessageBox.information(self, "Thành Công", "Tạo USB Boot thành công!")
+            self.show_themed_message("Thành Công", "Tạo USB Boot thành công!", icon=QMessageBox.Icon.Information)
         else:
-            self.show_error(f"Đã xảy ra lỗi:\n{message}")
+            self.show_themed_message("Lỗi", f"Đã xảy ra lỗi:\n{message}", icon=QMessageBox.Icon.Critical)
         self.page3.start_button.setEnabled(True)
-
 
     def show_error(self, message):
         """Hiển thị hộp thoại lỗi."""
-        QMessageBox.critical(self, "Lỗi", message)
+        self.show_themed_message("Lỗi", message, icon=QMessageBox.Icon.Critical)
 
 # --- Các trang giao diện (QWidget) ---
 class PageDeviceSelect(QWidget):
@@ -2060,19 +2203,18 @@ class PageFinalize(QWidget):
         title.setObjectName("TitleLabel")
         layout.addWidget(title)
 
-        self.auto_install_check = QCheckBox("Tích hợp cài đặt phần mềm tự động")
-        self.auto_install_check.setEnabled(True)
-        self.auto_install_check.toggled.connect(self.on_toggle_auto_install)
-        layout.addWidget(self.auto_install_check)
+        self.summary_group = QGroupBox("Tích hợp cài đặt phần mềm tự động (TekDT AIS)")
+        summary_layout = QVBoxLayout(self.summary_group)
 
         self.embed_container = QFrame()
         self.embed_container.setMinimumSize(400, 300)
-        self.embed_container.setFrameShape(QFrame.Shape.WinPanel)
+        self.embed_container.setFrameShape(QFrame.Shape.StyledPanel)
         self.embed_container.setFrameShadow(QFrame.Shadow.Sunken)
         size_policy = QSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.embed_container.setSizePolicy(size_policy)
-        self.embed_container.setVisible(False)
-        layout.addWidget(self.embed_container, 1)
+        self.embed_container.setVisible(False) # Sẽ được quản lý bởi main_app
+        summary_layout.addWidget(self.embed_container, 1)
+        layout.addWidget(self.summary_group, 1)
 
         self.progress_bar = QProgressBar()
         self.status_label = QLabel("Sẵn sàng")
@@ -2210,15 +2352,10 @@ class PageFinalize(QWidget):
             self.auto_install_check.setChecked(False)
 
     def resizeEvent(self, event):
+        """Kích hoạt việc thay đổi kích thước cửa sổ nhúng khi container thay đổi."""
         super().resizeEvent(event)
-        if self.ais_hwnd:
-            width = self.embed_container.width()
-            height = self.embed_container.height()
-            ctypes.windll.user32.SetWindowPos(
-                self.ais_hwnd, 0, 0, 0, width, height, 
-                0x0004 | 0x0010  # SWP_NOZORDER | SWP_NOMOVE
-            )
-            print(f"Đã cập nhật kích thước cửa sổ nhúng: {width}x{height}")
+        # Gọi hàm resize của cửa sổ chính để nó xử lý
+        self.main_app.resize_ais_window()
   
     def show_progress_ui(self, show):
         self.progress_bar.setVisible(show)
@@ -2232,8 +2369,12 @@ class PageFinalize(QWidget):
     def update_status(self, text):
         self.status_label.setText(text)
 
-# --- Hàm main để chạy ứng dụng ---
 def main():
+    # Bật nhận biết DPI cho ứng dụng để scaling hoạt động chính xác
+    QApplication.setHighDpiScaleFactorRoundingPolicy(Qt.HighDpiScaleFactorRoundingPolicy.PassThrough)
+    QApplication.setAttribute(Qt.ApplicationAttribute.AA_EnableHighDpiScaling)
+    QApplication.setAttribute(Qt.ApplicationAttribute.AA_UseHighDpiPixmaps)
+    
     app = QApplication(sys.argv)
     window = USBBootCreator()
     window.show()
