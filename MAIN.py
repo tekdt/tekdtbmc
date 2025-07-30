@@ -390,13 +390,12 @@ class USBBootCreator(QMainWindow):
 
     def finalize_page_after_animation(self, widget):
         """Xử lý sau khi hiệu ứng hoàn tất - đặc biệt cho trang 3"""
+        widget.update()
+        widget.repaint()
+        QApplication.processEvents()
         if widget == self.page3:
-            # Đảm bảo cập nhật giao diện
-            widget.update()
-            widget.repaint()
-            
-            # Nếu đang nhúng TekDT AIS, cập nhật kích thước
-            if hasattr(widget, 'ais_hwnd') and widget.ais_hwnd:
+            # Nếu đang nhúng TekDT AIS, cập nhật kích thước của nó
+            if widget.is_tekdtais_running() and widget.ais_hwnd:
                 widget.resize_embedded_window()
                 
             # Xử lý riêng cho checkbox
@@ -2049,7 +2048,6 @@ class PageFinalize(QWidget):
         # KHỞI TẠO TRẠNG THÁI TỪ CONFIG
         self.auto_install_check.setChecked(self.main_app.config.get("auto_install_enabled", False))
         
-        # Nếu config yêu cầu bật sẵn, khởi chạy ngay
         if self.main_app.config.get("auto_install_enabled", False):
             self.on_toggle_auto_install(True)
 
@@ -2067,8 +2065,6 @@ class PageFinalize(QWidget):
         self.auto_install_check.toggled.connect(self.on_toggle_auto_install)
         layout.addWidget(self.auto_install_check)
 
-        options_group = QGroupBox('dfgfdg')
-        options_layout = QVBoxLayout(options_group)
         self.embed_container = QFrame()
         self.embed_container.setMinimumSize(400, 300)
         self.embed_container.setFrameShape(QFrame.Shape.WinPanel)
@@ -2076,8 +2072,7 @@ class PageFinalize(QWidget):
         size_policy = QSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.embed_container.setSizePolicy(size_policy)
         self.embed_container.setVisible(False)
-        options_layout.addWidget(self.embed_container, 1)
-        layout.addWidget(options_group, 1)
+        layout.addWidget(self.embed_container, 1)
 
         self.progress_bar = QProgressBar()
         self.status_label = QLabel("Sẵn sàng")
@@ -2096,7 +2091,6 @@ class PageFinalize(QWidget):
         layout.addLayout(nav_layout)
 
     def on_toggle_auto_install(self, checked):
-        # LƯU TRẠNG THÁI VÀO CONFIG
         self.main_app.config["auto_install_enabled"] = checked
         self.main_app.config["auto_install"] = checked
         if checked:
@@ -2105,67 +2099,80 @@ class PageFinalize(QWidget):
                 self.auto_install_check.setChecked(False)
                 return
             
-            # Kiểm tra xem tiến trình đã chạy chưa
             if self.is_tekdtais_running():
-                print("TekDT AIS đã chạy, không khởi động lại.")
+                print("TekDT AIS đã chạy, chỉ cần hiển thị.")
                 self.embed_container.setVisible(True)
                 self.resize_embedded_window()
                 return
-            try:
-                startupinfo = subprocess.STARTUPINFO()
-                startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-                startupinfo.wShowWindow = 0
 
-                self.ais_process = subprocess.Popen(
-                    [TEKDTAIS_EXE, "--embed"],
-                    cwd=TEKDTAIS_DIR,
-                    startupinfo=startupinfo
-                )
+            # Hiển thị embed_container trước
+            self.embed_container.setVisible(True)
+            # Chờ 5 giây (5000ms) trước khi khởi chạy chương trình B
+            QTimer.singleShot(100, self.start_tekdtais)
+        else:
+            self._stop_tekdtais()
+        self.embed_container.update()
 
+    def start_tekdtais(self):
+        try:
+            width = self.embed_container.width()
+            height = self.embed_container.height()
+            embed_size_arg = f"--embed={width}x{height}"
+            print(f"Khởi chạy TekDT AIS với kích thước: {embed_size_arg}")
+            
+            startupinfo = subprocess.STARTUPINFO()
+            startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+            startupinfo.wShowWindow = 0
+
+            self.ais_process = subprocess.Popen(
+                [TEKDTAIS_EXE, embed_size_arg],
+                cwd=TEKDTAIS_DIR,
+                startupinfo=startupinfo
+            )
+
+            if not hasattr(self, 'find_window_timer'):
                 self.find_window_timer = QTimer(self)
                 self.find_window_timer.attempts = 0
                 self.find_window_timer.timeout.connect(self.find_and_embed_window)
-                self.find_window_timer.start(250)
-            except Exception as e:
-                self.main_app.show_error(f"Không thể khởi chạy TekDT_AIS.exe:\n{e}")
-                self.auto_install_check.setChecked(False)
-        else:
-            self._stop_tekdtais()
-
-        self.embed_container.update()
+            self.find_window_timer.start(250)
+        except Exception as e:
+            self.main_app.show_error(f"Không thể khởi chạy TekDT_AIS.exe:\n{e}")
+            self.auto_install_check.setChecked(False)
 
     def is_tekdtais_running(self):
         """Kiểm tra xem tiến trình TekDT AIS đã chạy chưa."""
-        if self.ais_process and self.ais_process.poll() is None:
-            return True
-        return False
+        return self.ais_process and self.ais_process.poll() is None
 
     def _stop_tekdtais(self):
-        if self.ais_process and self.ais_process.poll() is None:
+        if self.is_tekdtais_running():
+            print(f"Đang dừng tiến trình TekDT AIS (PID: {self.ais_process.pid})...")
             try:
-                # Kill toàn bộ tiến trình con
                 parent = psutil.Process(self.ais_process.pid)
                 children = parent.children(recursive=True)
                 for child in children:
+                    print(f"  -> Dừng tiến trình con (PID: {child.pid})")
                     child.kill()
                 parent.kill()
-            except (psutil.NoSuchProcess, psutil.AccessDenied):
-                pass
-            self.ais_process = None
-            self.ais_hwnd = None
+                print("Đã dừng tất cả các tiến trình liên quan đến TekDT AIS.")
+            except (psutil.NoSuchProcess, psutil.AccessDenied) as e:
+                print(f"Không thể dừng tiến trình, có thể nó đã kết thúc: {e}")
+            finally:
+                self.ais_process = None
+                self.ais_hwnd = None
+                if hasattr(self, 'find_window_timer'):
+                    self.find_window_timer.stop()
         self.embed_container.setVisible(False)
     
     def hideEvent(self, event):
         """Dừng TekDT AIS khi giao diện bị ẩn."""
         super().hideEvent(event)
-        if self.auto_install_check.isChecked():
-            self._stop_tekdtais()
+        self._stop_tekdtais()
 
     def showEvent(self, event):
-        """Xử lý khi trang được hiển thị"""
-        super().showEvent(event)
-        if self.auto_install_check.isChecked():
+        if (self.main_app.config.get("auto_install_enabled", False) and 
+            not self.is_tekdtais_running()):
             self.on_toggle_auto_install(True)
+        super().showEvent(event)
 
     def find_and_embed_window(self):
         self.find_window_timer.attempts += 1
@@ -2181,34 +2188,37 @@ class PageFinalize(QWidget):
             new_style = style & ~remove_styles
             new_style |= 0x40000000  # WS_CHILD
             ctypes.windll.user32.SetWindowLongW(self.ais_hwnd, GWL_STYLE, new_style)
-            ctypes.windll.user32.SetParent(int(self.ais_hwnd), container_id)
             
-            # Thiết lập kích thước ban đầu ngay sau khi nhúng
-            self.resize_embedded_window()
-            self.embed_container.setVisible(True)
-        elif self.find_window_timer.attempts > 40:
-            self.find_window_timer.stop()
-            self.main_app.show_error("Không thể tìm thấy cửa sổ của TekDT_AIS.exe để nhúng.")
-            if self.ais_process:
-                self.ais_process.kill()
-            self.auto_install_check.setChecked(False)
-
-    def resize_embedded_window(self):
-        """Điều chỉnh kích thước cửa sổ nhúng để lấp đầy khung chứa."""
-        if self.ais_hwnd:
+            ctypes.windll.user32.SetParent(self.ais_hwnd, container_id)
+            
+            # Đặt vị trí và kích thước bằng SetWindowPos
             width = self.embed_container.width()
             height = self.embed_container.height()
-            flags = 0x0002 | 0x0004 | 0x0010  # SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE
             ctypes.windll.user32.SetWindowPos(
-                self.ais_hwnd, None,
-                0, 0, width, height,
-                flags
+                self.ais_hwnd, 0, 0, 0, width, height, 
+                0x0004 | 0x0010  # SWP_NOZORDER | SWP_NOMOVE
             )
+            
+            ctypes.windll.user32.ShowWindow(self.ais_hwnd, 1)
+            self.embed_container.setVisible(True)
+            print(f"Đã nhúng cửa sổ TekDT AIS với kích thước: {width}x{height}")
+        elif self.find_window_timer.attempts > 40:
+            self.find_window_timer.stop()
+            self.main_app.show_error("Không thể tìm thấy cửa sổ TekDT AIS để nhúng.")
+            if self.ais_process:
+                self._stop_tekdtais()
+            self.auto_install_check.setChecked(False)
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
         if self.ais_hwnd:
-            self.resize_embedded_window()
+            width = self.embed_container.width()
+            height = self.embed_container.height()
+            ctypes.windll.user32.SetWindowPos(
+                self.ais_hwnd, 0, 0, 0, width, height, 
+                0x0004 | 0x0010  # SWP_NOZORDER | SWP_NOMOVE
+            )
+            print(f"Đã cập nhật kích thước cửa sổ nhúng: {width}x{height}")
   
     def show_progress_ui(self, show):
         self.progress_bar.setVisible(show)
