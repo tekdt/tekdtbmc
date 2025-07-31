@@ -52,6 +52,7 @@ WIMLIB_DIR = os.path.join(TOOLS_DIR, "wimlib")
 WIMLIB_EXE = os.path.join(WIMLIB_DIR, "wimlib-imagex.exe")
 TEKDTAIS_EXE = os.path.join(TEKDTAIS_DIR, "tekdt_ais.exe")
 ISO_ANALYSIS_CACHE = os.path.join(ISOS_DIR, "iso_cache.json")
+SHUTDOWN_SIGNAL_TEKDTAIS = os.path.join(TEKDTAIS_DIR, "shutdown_signal.txt")
 
 os.makedirs(TOOLS_DIR, exist_ok=True)
 os.makedirs(FIDO_DIR, exist_ok=True)
@@ -400,6 +401,13 @@ class USBBootCreator(QMainWindow):
     def start_tekdtais(self):
         if not os.path.exists(TEKDTAIS_EXE) or self.is_tekdtais_running():
             return
+            
+        if os.path.exists(SHUTDOWN_SIGNAL_TEKDTAIS):
+                    try:
+                        os.remove(SHUTDOWN_SIGNAL_TEKDTAIS)
+                        print(f"Đã xóa file tín hiệu shutdown_signal.txt cho TekDT AIS: {SHUTDOWN_SIGNAL_TEKDTAIS}")
+                    except OSError as e:
+                        print(f"Không thể xóa file tín hiệu shutdown_signal.txt cho TekDT AIS: {e}")
 
         try:
             print("Đang khởi chạy TekDT AIS ở chế độ nền...")
@@ -435,21 +443,72 @@ class USBBootCreator(QMainWindow):
             print("Không thể tìm thấy cửa sổ TekDT AIS sau 10 giây.")
             self._stop_tekdtais()
 
+    # def embed_ais_window(self):
+        # if not self.ais_hwnd or not self.page3: return
+        # container = self.page3.embed_container
+        # container_id = int(container.winId())
+
+        # GWL_STYLE = -16
+        # style = ctypes.windll.user32.GetWindowLongW(self.ais_hwnd, GWL_STYLE)
+        # style |= 0x40000000  # WS_CHILD
+        # style &= ~0x00C00000 # WS_CAPTION
+        # ctypes.windll.user32.SetWindowLongW(self.ais_hwnd, GWL_STYLE, style)
+        # ctypes.windll.user32.SetParent(self.ais_hwnd, container_id)
+        
+        # # Đặt lại kích thước ngay lập tức sau khi nhúng
+        # pixel_ratio = self.devicePixelRatioF() * 0.9
+        # width = int(container.width() * pixel_ratio)
+        # height = int(container.height() * pixel_ratio)
+        # ctypes.windll.user32.SetWindowPos(
+            # self.ais_hwnd, 0, 0, 0, width, height, 
+            # 0x0004  # SWP_NOZORDER
+        # )
+        
+        # ctypes.windll.user32.ShowWindow(self.ais_hwnd, 1)
+        # container.setVisible(True)
+        
     def embed_ais_window(self):
         if not self.ais_hwnd or not self.page3: return
         container = self.page3.embed_container
         container_id = int(container.winId())
 
+        # Thiết lập style cho cửa sổ B
         GWL_STYLE = -16
         style = ctypes.windll.user32.GetWindowLongW(self.ais_hwnd, GWL_STYLE)
         style |= 0x40000000  # WS_CHILD
         style &= ~0x00C00000 # WS_CAPTION
         ctypes.windll.user32.SetWindowLongW(self.ais_hwnd, GWL_STYLE, style)
         ctypes.windll.user32.SetParent(self.ais_hwnd, container_id)
+        
+        # Lấy kích thước logic của container
+        container_width = container.width()
+        container_height = container.height()
+        
+        # Lấy tỷ lệ pixel của thiết bị
+        pixel_ratio = self.devicePixelRatioF()
+        
+        # Tính kích thước vật lý
+        physical_width = int(container_width * pixel_ratio)
+        physical_height = int(container_height * pixel_ratio)
+        
+        # Điều chỉnh để bù viền (giả sử viền khoảng 2-4 pixel mỗi chiều, tùy hệ thống)
+        border_offset = 6  # Có thể điều chỉnh sau khi thử nghiệm
+        adjusted_width = physical_width - border_offset
+        adjusted_height = physical_height - border_offset
+        
+        # Đảm bảo kích thước không âm
+        adjusted_width = max(adjusted_width, 0)
+        adjusted_height = max(adjusted_height, 0)
+        
+        # Đặt vị trí và kích thước cho cửa sổ B
+        ctypes.windll.user32.SetWindowPos(
+            self.ais_hwnd, 0, 0, 0, adjusted_width, adjusted_height, 
+            0x0004  # SWP_NOZORDER
+        )
+        
         ctypes.windll.user32.ShowWindow(self.ais_hwnd, 1)
-        self.resize_ais_window()
         container.setVisible(True)
-
+    
     def hide_ais_window(self):
         if not self.ais_hwnd: return
         ctypes.windll.user32.ShowWindow(self.ais_hwnd, 0)
@@ -459,12 +518,16 @@ class USBBootCreator(QMainWindow):
     def resize_ais_window(self):
         if self.ais_hwnd and self.page3.embed_container.isVisible():
             container = self.page3.embed_container
-            pixel_ratio = self.devicePixelRatioF() # Sửa lỗi scaling trên màn hình 2K+
+            pixel_ratio = self.devicePixelRatioF()
             width = int(container.width() * pixel_ratio)
             height = int(container.height() * pixel_ratio)
 
-            ctypes.windll.user32.SetWindowPos(self.ais_hwnd, 0, 0, 0, width, height, 0x0004 | 0x0010)
-
+            # Đặt vị trí tại (0,0) trong container và giữ nguyên kích thước
+            ctypes.windll.user32.SetWindowPos(
+                self.ais_hwnd, 0, 0, 0, width, height, 
+                0x0004  # Chỉ SWP_NOZORDER, bỏ SWP_NOMOVE để đặt lại vị trí
+            )
+    
     def is_tekdtais_running(self):
         return self.ais_process and self.ais_process.poll() is None
 
@@ -2198,7 +2261,7 @@ class PageFinalize(QWidget):
         title.setObjectName("TitleLabel")
         layout.addWidget(title)
 
-        self.summary_group = QGroupBox("Tích hợp cài đặt phần mềm tự động (TekDT AIS)")
+        self.summary_group = QGroupBox("Lựa chọn phần mềm được cài đặt tự động sau khi cài Windows")
         summary_layout = QVBoxLayout(self.summary_group)
 
         self.embed_container = QFrame()
