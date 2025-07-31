@@ -443,43 +443,24 @@ class USBBootCreator(QMainWindow):
             print("Không thể tìm thấy cửa sổ TekDT AIS sau 10 giây.")
             self._stop_tekdtais()
 
-    # def embed_ais_window(self):
-        # if not self.ais_hwnd or not self.page3: return
-        # container = self.page3.embed_container
-        # container_id = int(container.winId())
-
-        # GWL_STYLE = -16
-        # style = ctypes.windll.user32.GetWindowLongW(self.ais_hwnd, GWL_STYLE)
-        # style |= 0x40000000  # WS_CHILD
-        # style &= ~0x00C00000 # WS_CAPTION
-        # ctypes.windll.user32.SetWindowLongW(self.ais_hwnd, GWL_STYLE, style)
-        # ctypes.windll.user32.SetParent(self.ais_hwnd, container_id)
-        
-        # # Đặt lại kích thước ngay lập tức sau khi nhúng
-        # pixel_ratio = self.devicePixelRatioF() * 0.9
-        # width = int(container.width() * pixel_ratio)
-        # height = int(container.height() * pixel_ratio)
-        # ctypes.windll.user32.SetWindowPos(
-            # self.ais_hwnd, 0, 0, 0, width, height, 
-            # 0x0004  # SWP_NOZORDER
-        # )
-        
-        # ctypes.windll.user32.ShowWindow(self.ais_hwnd, 1)
-        # container.setVisible(True)
-        
     def embed_ais_window(self):
+        # Kiểm tra điều kiện cơ bản
         if not self.ais_hwnd or not self.page3:
             return
+        
+        # Lấy container từ giao diện
         container = self.page3.embed_container
         container_id = int(container.winId())
 
-        # Thiết lập style cho cửa sổ B để loại bỏ viền và thanh tiêu đề
+        # Thiết lập style cho cửa sổ B
         GWL_STYLE = -16
         style = ctypes.windll.user32.GetWindowLongW(self.ais_hwnd, GWL_STYLE)
         style |= 0x40000000  # WS_CHILD: Đặt B là child window
         style &= ~0x00C00000  # Loại bỏ WS_CAPTION (thanh tiêu đề)
         style &= ~0x00040000  # Loại bỏ WS_THICKFRAME (viền resize)
         ctypes.windll.user32.SetWindowLongW(self.ais_hwnd, GWL_STYLE, style)
+        
+        # Đặt cửa sổ B làm con của container
         ctypes.windll.user32.SetParent(self.ais_hwnd, container_id)
 
         # Lấy kích thước logic của container
@@ -490,30 +471,23 @@ class USBBootCreator(QMainWindow):
         # Lấy tỷ lệ DPI của thiết bị
         pixel_ratio = self.devicePixelRatioF()
 
-        # Tính kích thước vật lý của container
+        # Tính kích thước vật lý
         physical_width = int(container_width * pixel_ratio)
         physical_height = int(container_height * pixel_ratio)
 
-        # Lấy kích thước viền cửa sổ từ hệ thống
-        SM_CXFRAME = 32  # Chiều rộng viền
-        SM_CYFRAME = 33  # Chiều cao viền
-        border_width = ctypes.windll.user32.GetSystemMetricsW(SM_CXFRAME)
-        border_height = ctypes.windll.user32.GetSystemMetricsW(SM_CYFRAME)
-
-        # Điều chỉnh kích thước để bù cho viền (trừ đi viền hai bên)
-        adjusted_width = physical_width - 2 * border_width
-        adjusted_height = physical_height - 2 * border_height
-
-        # Đảm bảo kích thước không âm
-        adjusted_width = max(adjusted_width, 0)
-        adjusted_height = max(adjusted_height, 0)
-
-        # Sử dụng MoveWindow để đặt vị trí và kích thước chính xác
-        ctypes.windll.user32.MoveWindow(self.ais_hwnd, 0, 0, adjusted_width, adjusted_height, True)
+        # Đặt kích thước và vị trí cho cửa sổ B
+        SWP_FRAMECHANGED = 0x0020
+        ctypes.windll.user32.SetWindowPos(
+            self.ais_hwnd, 0, 0, 0, physical_width, physical_height,
+            SWP_FRAMECHANGED | 0x0004  # SWP_NOZORDER
+        )
 
         # Hiển thị cửa sổ B
-        ctypes.windll.user32.ShowWindow(self.ais_hwnd, 1)
+        ctypes.windll.user32.ShowWindow(self.ais_hwnd, 1)  # SW_SHOW = 1
         container.setVisible(True)
+
+        # Thêm timer để điều chỉnh kích thước sau khi hiển thị
+        QTimer.singleShot(100, self.resize_ais_window)
     
     def hide_ais_window(self):
         if not self.ais_hwnd: return
