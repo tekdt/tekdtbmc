@@ -534,15 +534,6 @@ class USBBootCreator(QMainWindow):
         widget.update()
         widget.repaint()
         QApplication.processEvents()
-        if widget == self.page3:
-            # Nếu đang nhúng TekDT AIS, cập nhật kích thước của nó
-            if widget.is_tekdtais_running() and widget.ais_hwnd:
-                widget.resize_embedded_window()
-                
-            # Xử lý riêng cho checkbox
-            if widget.auto_install_check.isChecked():
-                widget.auto_install_check.setChecked(False)
-                QTimer.singleShot(100, lambda: widget.auto_install_check.setChecked(True))
     
     def show_main_menu(self):
         """Hiển thị menu cấu hình chính."""
@@ -1004,40 +995,37 @@ class USBBootCreator(QMainWindow):
                 shutil.copy(iso_info["path"], usb_mount_point)
                 self.creation_worker.progress.emit(int(progress_start + (i + 1) * progress_per_iso))
             
-            if self.config.get("auto_install", False):
-                self.creation_worker.status.emit("Đang sao chép TekDT AIS vào USB...")
-                dest_ais_dir = os.path.join(usb_mount_point, "TekDT_AIS")
-                if os.path.exists(TEKDTAIS_DIR):
-                    if os.path.exists(dest_ais_dir):
-                        shutil.rmtree(dest_ais_dir)
-                    shutil.copytree(TEKDTAIS_DIR, dest_ais_dir)
-                    print("Đã sao chép TekDT_AIS vào USB.")
+            self.creation_worker.status.emit("Đang sao chép TekDT AIS vào USB...")
+            dest_ais_dir = os.path.join(usb_mount_point, "TekDT_AIS")
+            if os.path.exists(TEKDTAIS_DIR):
+                if os.path.exists(dest_ais_dir):
+                    shutil.rmtree(dest_ais_dir)
+                shutil.copytree(TEKDTAIS_DIR, dest_ais_dir)
+                print("Đã sao chép TekDT_AIS vào USB.")
 
-                    run_ais_script_path = os.path.join(usb_mount_point, "run_ais_setup.bat")
-                    run_ais_script_content = """@echo off
-    REM Search for TekDT_AIS, copy it to C drive, and execute it.
-    for %%D in (C D E F G H I J K L M N O P Q R S T U V W X Y Z) do (
-        if exist "%%D:\\TekDT_AIS\\tekdt_ais.exe" (
-            echo Found TekDT_AIS on drive %%D:
-            echo Copying TekDT_AIS to C:\\ ...
-            xcopy "%%D:\\TekDT_AIS" "C:\\TekDT_AIS\\" /E /I /Y /H /Q
-            
-            echo Running installer...
-            start "" "C:\\TekDT_AIS\\tekdt_ais.exe" /install
+                run_ais_script_path = os.path.join(usb_mount_point, "run_ais_setup.bat")
+                run_ais_script_content = """@echo off
+REM Search for TekDT_AIS, copy it to C drive, and execute it.
+for %%D in (C D E F G H I J K L M N O P Q R S T U V W X Y Z) do (
+    if exist "%%D:\\TekDT_AIS\\tekdt_ais.exe" (
+        echo Found TekDT_AIS on drive %%D:
+        echo Copying TekDT_AIS to C:\\ ...
+        xcopy "%%D:\\TekDT_AIS" "C:\\TekDT_AIS\\" /E /I /Y /H /Q
+        
+        echo Running installer...
+        start "" "C:\\TekDT_AIS\\tekdt_ais.exe" /install
 
-            (goto) 2>nul & del "%~f0"
+        (goto) 2>nul & del "%~f0"
 
-            goto :eof
-        )
+        goto :eof
     )
-    echo TekDT_AIS not found on any drive.
-    :eof
-    """
-                    with open(run_ais_script_path, "w") as f:
-                        f.write(run_ais_script_content)
-                    print("Đã tạo run_ais_setup.bat trên USB.")
-                else:
-                    print("Thư mục Tools\\TekDT_AIS không tồn tại, bỏ qua sao chép.")
+)
+echo TekDT_AIS not found on any drive.
+:eof
+"""
+                with open(run_ais_script_path, "w") as f:
+                    f.write(run_ais_script_content)
+                print("Đã tạo run_ais_setup.bat trên USB.")
             self._process_driver_archive(usb_mount_point)
 
             self.creation_worker.progress.emit(100)
@@ -2188,12 +2176,6 @@ class PageFinalize(QWidget):
         self.ais_hwnd = None
         self.init_ui()
         
-        # KHỞI TẠO TRẠNG THÁI TỪ CONFIG
-        self.auto_install_check.setChecked(self.main_app.config.get("auto_install_enabled", False))
-        
-        if self.main_app.config.get("auto_install_enabled", False):
-            self.on_toggle_auto_install(True)
-
     def init_ui(self):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(50, 20, 50, 50)
@@ -2231,89 +2213,12 @@ class PageFinalize(QWidget):
         nav_layout.addStretch()
         nav_layout.addWidget(self.start_button)
         layout.addLayout(nav_layout)
-
-    def on_toggle_auto_install(self, checked):
-        self.main_app.config["auto_install_enabled"] = checked
-        self.main_app.config["auto_install"] = checked
-        if checked:
-            if not os.path.exists(TEKDTAIS_EXE):
-                QMessageBox.warning(self, "Lỗi", f"Không tìm thấy TekDT_AIS.exe tại:\n{TEKDTAIS_EXE}")
-                self.auto_install_check.setChecked(False)
-                return
-            
-            if self.is_tekdtais_running():
-                print("TekDT AIS đã chạy, chỉ cần hiển thị.")
-                self.embed_container.setVisible(True)
-                self.resize_embedded_window()
-                return
-
-            # Hiển thị embed_container trước
-            self.embed_container.setVisible(True)
-            # Chờ 5 giây (5000ms) trước khi khởi chạy chương trình B
-            QTimer.singleShot(100, self.start_tekdtais)
-        else:
-            self._stop_tekdtais()
-        self.embed_container.update()
-
-    def start_tekdtais(self):
-        try:
-            width = self.embed_container.width()
-            height = self.embed_container.height()
-            embed_size_arg = f"--embed={width}x{height}"
-            print(f"Khởi chạy TekDT AIS với kích thước: {embed_size_arg}")
-            
-            startupinfo = subprocess.STARTUPINFO()
-            startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-            startupinfo.wShowWindow = 0
-
-            self.ais_process = subprocess.Popen(
-                [TEKDTAIS_EXE, embed_size_arg],
-                cwd=TEKDTAIS_DIR,
-                startupinfo=startupinfo
-            )
-
-            if not hasattr(self, 'find_window_timer'):
-                self.find_window_timer = QTimer(self)
-                self.find_window_timer.attempts = 0
-                self.find_window_timer.timeout.connect(self.find_and_embed_window)
-            self.find_window_timer.start(250)
-        except Exception as e:
-            self.main_app.show_error(f"Không thể khởi chạy TekDT_AIS.exe:\n{e}")
-            self.auto_install_check.setChecked(False)
-
-    def is_tekdtais_running(self):
-        """Kiểm tra xem tiến trình TekDT AIS đã chạy chưa."""
-        return self.ais_process and self.ais_process.poll() is None
-
-    def _stop_tekdtais(self):
-        if self.is_tekdtais_running():
-            print(f"Đang dừng tiến trình TekDT AIS (PID: {self.ais_process.pid})...")
-            try:
-                parent = psutil.Process(self.ais_process.pid)
-                children = parent.children(recursive=True)
-                for child in children:
-                    print(f"  -> Dừng tiến trình con (PID: {child.pid})")
-                    child.kill()
-                parent.kill()
-                print("Đã dừng tất cả các tiến trình liên quan đến TekDT AIS.")
-            except (psutil.NoSuchProcess, psutil.AccessDenied) as e:
-                print(f"Không thể dừng tiến trình, có thể nó đã kết thúc: {e}")
-            finally:
-                self.ais_process = None
-                self.ais_hwnd = None
-                if hasattr(self, 'find_window_timer'):
-                    self.find_window_timer.stop()
-        self.embed_container.setVisible(False)
     
     def hideEvent(self, event):
         """Dừng TekDT AIS khi giao diện bị ẩn."""
         super().hideEvent(event)
-        self._stop_tekdtais()
 
     def showEvent(self, event):
-        if (self.main_app.config.get("auto_install_enabled", False) and 
-            not self.is_tekdtais_running()):
-            self.on_toggle_auto_install(True)
         super().showEvent(event)
 
     def find_and_embed_window(self):
@@ -2347,9 +2252,6 @@ class PageFinalize(QWidget):
         elif self.find_window_timer.attempts > 40:
             self.find_window_timer.stop()
             self.main_app.show_error("Không thể tìm thấy cửa sổ TekDT AIS để nhúng.")
-            if self.ais_process:
-                self._stop_tekdtais()
-            self.auto_install_check.setChecked(False)
 
     def resizeEvent(self, event):
         """Kích hoạt việc thay đổi kích thước cửa sổ nhúng khi container thay đổi."""
@@ -2372,8 +2274,6 @@ class PageFinalize(QWidget):
 def main():
     # Bật nhận biết DPI cho ứng dụng để scaling hoạt động chính xác
     QApplication.setHighDpiScaleFactorRoundingPolicy(Qt.HighDpiScaleFactorRoundingPolicy.PassThrough)
-    # QApplication.setAttribute(Qt.ApplicationAttribute.AA_EnableHighDpiScaling)
-    # QApplication.setAttribute(Qt.ApplicationAttribute.AA_UseHighDpiPixmaps)
     
     app = QApplication(sys.argv)
     window = USBBootCreator()
