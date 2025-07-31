@@ -471,14 +471,27 @@ class USBBootCreator(QMainWindow):
     def _stop_tekdtais(self):
         if self.is_tekdtais_running():
             print(f"Đang dừng tiến trình TekDT AIS (PID: {self.ais_process.pid})...")
-            self.ais_process.terminate()
+            with open(os.path.join(TEKDTAIS_DIR, "shutdown_signal.txt"), "w") as f:
+                f.write("shutdown")
             try:
-                self.ais_process.wait(timeout=3)
+                self.ais_process.wait(timeout=5)
             except subprocess.TimeoutExpired:
-                self.ais_process.kill()
+                print("B không tự thoát, buộc dừng tất cả tiến trình liên quan...")
+                # Sử dụng psutil để tìm và dừng các tiến trình liên quan
+                for proc in psutil.process_iter(['pid', 'name', 'exe']):
+                    try:
+                        if "tekdt_ais.exe" in proc.info['exe'] or \
+                           (proc.info['name'] == "python.exe" and proc.parent() and "tekdt_ais.exe" in proc.parent().exe()):
+                            print(f"Dừng tiến trình {proc.info['name']} (PID: {proc.info['pid']})")
+                            proc.kill()
+                    except (psutil.NoSuchProcess, psutil.AccessDenied):
+                        continue
+            signal_file = os.path.join(TEKDTAIS_DIR, "shutdown_signal.txt")
+            if os.path.exists(signal_file):
+                os.remove(signal_file)
             self.ais_process = None
             self.ais_hwnd = None
-
+    
     def on_page_changed(self, index):
         if index == 2:
             self.embed_ais_window()
