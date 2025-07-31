@@ -468,44 +468,50 @@ class USBBootCreator(QMainWindow):
         # container.setVisible(True)
         
     def embed_ais_window(self):
-        if not self.ais_hwnd or not self.page3: return
+        if not self.ais_hwnd or not self.page3:
+            return
         container = self.page3.embed_container
         container_id = int(container.winId())
 
-        # Thiết lập style cho cửa sổ B
+        # Thiết lập style cho cửa sổ B để loại bỏ viền và thanh tiêu đề
         GWL_STYLE = -16
         style = ctypes.windll.user32.GetWindowLongW(self.ais_hwnd, GWL_STYLE)
-        style |= 0x40000000  # WS_CHILD
-        style &= ~0x00C00000 # WS_CAPTION
+        style |= 0x40000000  # WS_CHILD: Đặt B là child window
+        style &= ~0x00C00000  # Loại bỏ WS_CAPTION (thanh tiêu đề)
+        style &= ~0x00040000  # Loại bỏ WS_THICKFRAME (viền resize)
         ctypes.windll.user32.SetWindowLongW(self.ais_hwnd, GWL_STYLE, style)
         ctypes.windll.user32.SetParent(self.ais_hwnd, container_id)
-        
+
         # Lấy kích thước logic của container
-        container_width = container.width()
-        container_height = container.height()
-        
-        # Lấy tỷ lệ pixel của thiết bị
+        container_size = container.size()
+        container_width = container_size.width()
+        container_height = container_size.height()
+
+        # Lấy tỷ lệ DPI của thiết bị
         pixel_ratio = self.devicePixelRatioF()
-        
-        # Tính kích thước vật lý
+
+        # Tính kích thước vật lý của container
         physical_width = int(container_width * pixel_ratio)
         physical_height = int(container_height * pixel_ratio)
-        
-        # Điều chỉnh để bù viền (giả sử viền khoảng 2-4 pixel mỗi chiều, tùy hệ thống)
-        border_offset = 6  # Có thể điều chỉnh sau khi thử nghiệm
-        adjusted_width = physical_width - border_offset
-        adjusted_height = physical_height - border_offset
-        
+
+        # Lấy kích thước viền cửa sổ từ hệ thống
+        SM_CXFRAME = 32  # Chiều rộng viền
+        SM_CYFRAME = 33  # Chiều cao viền
+        border_width = ctypes.windll.user32.GetSystemMetricsW(SM_CXFRAME)
+        border_height = ctypes.windll.user32.GetSystemMetricsW(SM_CYFRAME)
+
+        # Điều chỉnh kích thước để bù cho viền (trừ đi viền hai bên)
+        adjusted_width = physical_width - 2 * border_width
+        adjusted_height = physical_height - 2 * border_height
+
         # Đảm bảo kích thước không âm
         adjusted_width = max(adjusted_width, 0)
         adjusted_height = max(adjusted_height, 0)
-        
-        # Đặt vị trí và kích thước cho cửa sổ B
-        ctypes.windll.user32.SetWindowPos(
-            self.ais_hwnd, 0, 0, 0, adjusted_width, adjusted_height, 
-            0x0004  # SWP_NOZORDER
-        )
-        
+
+        # Sử dụng MoveWindow để đặt vị trí và kích thước chính xác
+        ctypes.windll.user32.MoveWindow(self.ais_hwnd, 0, 0, adjusted_width, adjusted_height, True)
+
+        # Hiển thị cửa sổ B
         ctypes.windll.user32.ShowWindow(self.ais_hwnd, 1)
         container.setVisible(True)
     
