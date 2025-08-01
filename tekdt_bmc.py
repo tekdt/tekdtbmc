@@ -104,6 +104,8 @@ class USBBootCreator(QMainWindow):
         self.ais_hwnd = None
         self.ais_monitor_timer = QTimer(self)
         self.ais_monitor_timer.timeout.connect(self._check_ais_status)
+        self.usb_monitor_timer = QTimer(self)
+        self.usb_monitor_timer.timeout.connect(self._check_selected_usb_presence)
         # --- Kiểm tra quyền admin và nâng quyền nếu cần ---
         if not self.is_admin():
             print("Không có quyền admin, đang thử nâng quyền...")
@@ -134,6 +136,8 @@ class USBBootCreator(QMainWindow):
             "windows_edition_index": None,
         }
 
+        self.config["device_details"] = None
+        
         self.init_ui()
         self.apply_stylesheet()
         self.install_wincdemu_driver()
@@ -339,6 +343,7 @@ class USBBootCreator(QMainWindow):
             return False
  
     def closeEvent(self, event):
+        self.usb_monitor_timer.stop()
         print("Cửa sổ đang đóng, kiểm tra và dừng các tác vụ...")
         self.page2.stop_download_process()
         self.uninstall_wincdemu_driver()
@@ -575,6 +580,9 @@ class USBBootCreator(QMainWindow):
         self.init_status_label.setVisible(True)
     
     def go_to_page(self, index):
+        if index == 0:
+            self.usb_monitor_timer.stop()
+            self.config["device_details"] = None
         """Chuyển trang với hiệu ứng mờ dần (fade) ổn định."""
         current_widget = self.stacked_widget.currentWidget()
         if not current_widget:
@@ -742,6 +750,69 @@ class USBBootCreator(QMainWindow):
                                f"Không thể tải các công cụ cần thiết. Ứng dụng sẽ thoát.\n\nChi tiết: {message}",
                                icon=QMessageBox.Icon.Critical)
             sys.exit(1)
+    
+    def _check_selected_usb_presence(self):
+        """
+        Nó sử dụng SerialNumber để đảm bảo đúng là USB đó.
+        """
+        selected_details = self.config.get("device_details")
+        if not selected_details:
+            self.usb_monitor_timer.stop()
+            return
+
+        try:
+            # Lấy danh sách các ổ đĩa đang kết nối
+            command = "Get-PhysicalDisk | Select-Object DeviceID, SerialNumber | ConvertTo-Json -Compress"
+            process = subprocess.run(
+                ['powershell', '-NoProfile', '-Command', command],
+                capture_output=True, text=True, check=True,
+                encoding='utf-8', creationflags=subprocess.CREATE_NO_WINDOW
+            )
+            output = process.stdout.strip()
+            if not output.startswith('['): output = f'[{output}]'
+            current_disks = json.loads(output)
+
+            # Tìm kiếm USB trong danh sách hiện tại dựa trên SerialNumber và DeviceID
+            is_present = any(
+                d.get('SerialNumber') == selected_details.get('SerialNumber') and
+                d.get('DeviceID') == selected_details.get('DeviceID')
+                for d in current_disks
+            )
+
+            # Cập nhật trạng thái các nút bấm
+            self.page1.next_button.setEnabled(is_present)
+            self.page2.next_button.setEnabled(is_present and len(self.config["iso_list"]) > 0)
+            self.page3.start_button.setEnabled(is_present)
+
+            if not is_present:
+                self.usb_monitor_timer.stop() # Dừng kiểm tra
+
+                # Nếu đang trong quá trình tạo USB thì phải dừng ngay lập tức
+                if hasattr(self, 'creation_worker') and self.creation_worker.isRunning():
+                    print("Lỗi nghiêm trọng: USB đã bị rút ra trong quá trình tạo!")
+                    self.creation_worker.terminate() # Buộc dừng luồng worker
+                    # Chờ một chút để luồng thực sự dừng
+                    self.creation_worker.wait(1000)
+                    self.on_creation_finished(False, "USB đã bị ngắt kết nối giữa chừng. Tác vụ đã bị hủy.")
+                    return
+
+                # Nếu không phải đang tạo thì báo lỗi và quay về trang 1
+                self.show_themed_message("Lỗi kết nối",
+                                       "USB đã chọn đã bị ngắt kết nối. Vui lòng chọn lại.",
+                                       icon=QMessageBox.Icon.Critical)
+                
+                # Reset cấu hình và quay về trang 1
+                self.config["device"] = None
+                self.config["device_name"] = None
+                self.config["device_details"] = None
+                self.go_to_page(0)
+
+        except Exception as e:
+            print(f"Lỗi trong quá trình giám sát USB: {e}")
+            # Xử lý tương tự như không tìm thấy
+            self.page1.next_button.setEnabled(False)
+            self.page2.next_button.setEnabled(False)
+            self.page3.start_button.setEnabled(False)
     
     def _update_task(self):
         self.update_worker.status.emit("Đang kiểm tra các công cụ...")
@@ -1495,7 +1566,8 @@ class PageDeviceSelect(QWidget):
         Tác vụ chạy trong luồng nền để lấy danh sách ổ đĩa bằng PowerShell.
         """
         try:
-            command = "Get-PhysicalDisk | Select-Object DeviceID, FriendlyName, Size, MediaType, BusType | ConvertTo-Json -Compress"
+            # Lấy thêm thuộc tính SerialNumber, VendorID, ProductID
+            command = "Get-PhysicalDisk | Select-Object DeviceID, FriendlyName, Size, MediaType, BusType, SerialNumber, VendorID, ProductID | ConvertTo-Json -Compress"
             process = subprocess.run(
                 ['powershell', '-NoProfile', '-Command', command],
                 capture_output=True, text=True, check=True,
@@ -1505,6 +1577,7 @@ class PageDeviceSelect(QWidget):
             if not output:
                 return []
 
+            # Đôi khi PowerShell chỉ trả về một object JSON, không có ngoặc vuông
             if not output.startswith('['):
                 output = f'[{output}]'
             
@@ -1547,7 +1620,7 @@ class PageDeviceSelect(QWidget):
                 
                 gb_size = size / (1024**3)
                 display_text = f"{model} ({gb_size:.2f} GB) - {bus_type}"
-                self.drive_combo.addItem(display_text, device_path)
+                self.drive_combo.addItem(display_text, disk)
 
         if not found_drives:
             self.drive_combo.addItem("Không tìm thấy USB nào" if not show_all else "Không tìm thấy ổ đĩa nào", None)
@@ -1559,23 +1632,24 @@ class PageDeviceSelect(QWidget):
             self.on_drive_selected(self.drive_combo.currentIndex())
 
     def on_drive_selected(self, index):
-        if index == -1:
+        if index == -1 or self.drive_combo.itemData(index) is None:
             self.main_app.config["device"] = None
             self.main_app.config["device_name"] = None
+            self.main_app.config["device_details"] = None
             self.next_button.setEnabled(False)
+            self.main_app.usb_monitor_timer.stop()
             return
 
-        device_path = self.drive_combo.itemData(index)
+        disk_details = self.drive_combo.itemData(index)
+        device_path = f"\\\\.\\PHYSICALDRIVE{disk_details['DeviceID']}"
         device_name = self.drive_combo.itemText(index)
-        if device_path:
-            self.main_app.config["device"] = device_path
-            self.main_app.config["device_name"] = device_name
-            self.next_button.setEnabled(True)
-        else:
-            self.main_app.config["device"] = None
-            self.main_app.config["device_name"] = None
-            self.next_button.setEnabled(False)
 
+        self.main_app.config["device"] = device_path
+        self.main_app.config["device_name"] = device_name
+        self.main_app.config["device_details"] = disk_details
+        self.next_button.setEnabled(True)
+
+        self.main_app.usb_monitor_timer.start(2000)
 class PageISOSelect(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -1684,8 +1758,10 @@ class PageISOSelect(QWidget):
         self.cancel_button.clicked.connect(self.cancel_download_clicked)
 
     def update_next_button_state(self):
-        """Kích hoạt nút 'Tiếp theo' chỉ khi có ít nhất một ISO trong danh sách."""
-        self.next_button.setEnabled(len(self.main_app.config["iso_list"]) > 0)
+        """Kích hoạt nút 'Tiếp theo' chỉ khi có ISO và USB vẫn được kết nối."""
+        has_iso = len(self.main_app.config["iso_list"]) > 0
+        is_usb_present = self.main_app.config.get("device_details") is not None
+        self.next_button.setEnabled(has_iso and is_usb_present)
 
     def toggle_arch_options(self, checked, win_version):
         options_data = self.win_options[win_version]
