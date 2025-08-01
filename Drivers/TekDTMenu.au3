@@ -374,7 +374,8 @@ Func _RunTool($sTool)
     ; Nếu file thực thi chưa tồn tại, hãy thử giải nén
     If Not FileExists($sExePath) Then
         ; Lấy đường dẫn thư mục của file exe mục tiêu
-        Local $sTargetDir = _PathGetLocation($sExePath)
+		Local $ExeFile_Drive, $ExeFile_Dir, $ExeFile_FileName, $ExeFile_Extension
+        Local $sTargetDir = StringTrimRight(_PathSplit($sExePath, $ExeFile_Drive, $ExeFile_Dir, $ExeFile_FileName, $ExeFile_Extension)[1]&_PathSplit($sExePath, $ExeFile_Drive, $ExeFile_Dir, $ExeFile_FileName, $ExeFile_Extension)[2],1)
 
         ; Tìm các file .7z trong thư mục đó
         Local $aArchives = _FileListToArray($sTargetDir, "*.7z")
