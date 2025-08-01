@@ -1977,36 +1977,36 @@ class PageISOSelect(QWidget):
                     rb.setChecked(False)
                 self.arch_button_group.setExclusive(True)
 
-    def on_arch_selected(self, checked, win_version, arch):
-        if checked:
-            msg_box = QMessageBox(self)
-            msg_box.setIcon(QMessageBox.Icon.Question)
-            msg_box.setWindowTitle("Xác nhận tải xuống")
-            msg_box.setText(f"Bạn có chắc chắn muốn bắt đầu quá trình tải xuống file ISO cho\n"
-                            f"{win_version} ({arch}) không?")
-            msg_box.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
-            msg_box.setDefaultButton(QMessageBox.StandardButton.No)
+    # def on_arch_selected(self, checked, win_version, arch):
+        # if checked:
+            # msg_box = QMessageBox(self)
+            # msg_box.setIcon(QMessageBox.Icon.Question)
+            # msg_box.setWindowTitle("Xác nhận tải xuống")
+            # msg_box.setText(f"Bạn có chắc chắn muốn bắt đầu quá trình tải xuống file ISO cho\n"
+                            # f"{win_version} ({arch}) không?")
+            # msg_box.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+            # msg_box.setDefaultButton(QMessageBox.StandardButton.No)
             
-            reply = msg_box.exec()
+            # reply = msg_box.exec()
 
-            if reply == QMessageBox.StandardButton.Yes:
-                self._set_ui_state(downloading=True) # Khóa UI trước khi tải
-                self.iso_path_edit.clear()
-                self.main_app.config["iso_path"] = None
-                self.next_button.setEnabled(False)
-                self.download_status_label.setText(f"Đang chuẩn bị tải {win_version} {arch}...")
+            # if reply == QMessageBox.StandardButton.Yes:
+                # self._set_ui_state(downloading=True) # Khóa UI trước khi tải
+                # self.iso_path_edit.clear()
+                # self.main_app.config["iso_path"] = None
+                # self.next_button.setEnabled(False)
+                # self.download_status_label.setText(f"Đang chuẩn bị tải {win_version} {arch}...")
                 
-                self.download_worker = Worker(self._download_task, win_version, arch)
-                self.download_worker.status.connect(self.download_status_label.setText)
-                self.download_worker.finished.connect(self.on_download_finished)
-                self.download_worker.result.connect(self.on_download_result)
-                self.download_worker.start()
-            else:
-                rb_to_uncheck = self.win_options[win_version]['radios'][arch]
-                self.arch_button_group.setExclusive(False)
-                rb_to_uncheck.setChecked(False)
-                self.arch_button_group.setExclusive(True)
-                self.download_status_label.setText("")
+                # self.download_worker = Worker(self._download_task, win_version, arch)
+                # self.download_worker.status.connect(self.download_status_label.setText)
+                # self.download_worker.finished.connect(self.on_download_finished)
+                # self.download_worker.result.connect(self.on_download_result)
+                # self.download_worker.start()
+            # else:
+                # rb_to_uncheck = self.win_options[win_version]['radios'][arch]
+                # self.arch_button_group.setExclusive(False)
+                # rb_to_uncheck.setChecked(False)
+                # self.arch_button_group.setExclusive(True)
+                # self.download_status_label.setText("")
 
     def start_downloads(self):
         self.downloads_queue = []
