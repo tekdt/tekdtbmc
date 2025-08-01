@@ -1071,8 +1071,6 @@ for %%D in (C D E F G H I J K L M N O P Q R S T U V W X Y Z) do (
         echo Running installer...
         start "" "C:\\TekDT_AIS\\tekdt_ais.exe" /install
 
-        (goto) 2>nul & del "%~f0"
-
         goto :eof
     )
 )
