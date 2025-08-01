@@ -429,16 +429,38 @@ class USBBootCreator(QMainWindow):
         except Exception as e:
             self.show_themed_message("Lỗi", f"Không thể khởi chạy TekDT_AIS.exe:\n{e}", icon=QMessageBox.Icon.Warning)
 
+    # def _find_ais_window_task(self):
+        # self.find_ais_window_timer.attempts += 1
+        # self.ais_hwnd = ctypes.windll.user32.FindWindowW(None, "TekDT AIS")
+
+        # if self.ais_hwnd:
+            # self.find_ais_window_timer.stop()
+            # print(f"Đã tìm thấy cửa sổ TekDT AIS (HWND: {self.ais_hwnd}).")
+            # if self.stacked_widget.currentWidget() == self.page3:
+                # self.embed_ais_window()
+        # elif self.find_ais_window_timer.attempts > 40:
+            # self.find_ais_window_timer.stop()
+            # print("Không thể tìm thấy cửa sổ TekDT AIS sau 10 giây.")
+            # self._stop_tekdtais()
+
     def _find_ais_window_task(self):
         self.find_ais_window_timer.attempts += 1
-        self.ais_hwnd = ctypes.windll.user32.FindWindowW(None, "TekDT AIS")
+        # Chỉ tìm kiếm nếu chưa tìm thấy
+        if not self.ais_hwnd:
+            self.ais_hwnd = ctypes.windll.user32.FindWindowW(None, "TekDT AIS")
 
         if self.ais_hwnd:
             self.find_ais_window_timer.stop()
             print(f"Đã tìm thấy cửa sổ TekDT AIS (HWND: {self.ais_hwnd}).")
+
+            # Ẩn cửa sổ ngay lập tức để không hiện trên taskbar
+            ctypes.windll.user32.ShowWindow(self.ais_hwnd, 0) # SW_HIDE = 0
+
+            # Nếu người dùng đang ở trang 3 thì nhúng vào luôn
             if self.stacked_widget.currentWidget() == self.page3:
                 self.embed_ais_window()
-        elif self.find_ais_window_timer.attempts > 40:
+
+        elif self.find_ais_window_timer.attempts > 40: # Thử trong 10 giây
             self.find_ais_window_timer.stop()
             print("Không thể tìm thấy cửa sổ TekDT AIS sau 10 giây.")
             self._stop_tekdtais()
@@ -1059,27 +1081,27 @@ class USBBootCreator(QMainWindow):
                 shutil.copytree(TEKDTAIS_DIR, dest_ais_dir)
                 print("Đã sao chép TekDT_AIS vào USB.")
 
-                run_ais_script_path = os.path.join(usb_mount_point, "run_ais_setup.bat")
-                run_ais_script_content = """@echo off
-REM Search for TekDT_AIS, copy it to C drive, and execute it.
-for %%D in (C D E F G H I J K L M N O P Q R S T U V W X Y Z) do (
-    if exist "%%D:\\TekDT_AIS\\tekdt_ais.exe" (
-        echo Found TekDT_AIS on drive %%D:
-        echo Copying TekDT_AIS to C:\\ ...
-        xcopy "%%D:\\TekDT_AIS" "C:\\TekDT_AIS\\" /E /I /Y /H /Q
+                # run_ais_script_path = os.path.join(usb_mount_point, "run_ais_setup.bat")
+                # run_ais_script_content = """@echo off
+# REM Search for TekDT_AIS, copy it to C drive, and execute it.
+# for %%D in (C D E F G H I J K L M N O P Q R S T U V W X Y Z) do (
+    # if exist "%%D:\\TekDT_AIS\\tekdt_ais.exe" (
+        # echo Found TekDT_AIS on drive %%D:
+        # echo Copying TekDT_AIS to C:\\ ...
+        # xcopy "%%D:\\TekDT_AIS" "C:\\TekDT_AIS\\" /E /I /Y /H /Q
         
-        echo Running installer...
-        start "" "C:\\TekDT_AIS\\tekdt_ais.exe" /install
+        # echo Running installer...
+        # start "" "C:\\TekDT_AIS\\tekdt_ais.exe" /install
 
-        goto :eof
-    )
-)
-echo TekDT_AIS not found on any drive.
-:eof
-"""
-                with open(run_ais_script_path, "w") as f:
-                    f.write(run_ais_script_content)
-                print("Đã tạo run_ais_setup.bat trên USB.")
+        # goto :eof
+    # )
+# )
+# echo TekDT_AIS not found on any drive.
+# :eof
+# """
+                # with open(run_ais_script_path, "w") as f:
+                    # f.write(run_ais_script_content)
+                # print("Đã tạo run_ais_setup.bat trên USB.")
             self._process_driver_archive(usb_mount_point)
 
             self.creation_worker.progress.emit(100)
@@ -1239,14 +1261,6 @@ echo TekDT_AIS not found on any drive.
                 <HideWirelessSetupInOOBE>true</HideWirelessSetupInOOBE>
                 <HideOnlineAccountScreens>true</HideOnlineAccountScreens>
             </OOBE>
-            <FirstLogonCommands>
-                <SynchronousCommand wcm:action="add">
-                    <Order>1</Order>
-                    <CommandLine>cmd.exe /c "for %%D in (C D E F G H I J K L M N O P Q R S T U V W X Y Z) do if exist %%D:\\run_ais_setup.bat (start /b cmd /c %%D:\\run_ais_setup.bat)"</CommandLine>
-                    <Description>Find and Run TekDT AIS Setup</Description>
-                    <RequiresUserInput>false</RequiresUserInput>
-                </SynchronousCommand>
-            </FirstLogonCommands>
         </component>
     </settings>
 
