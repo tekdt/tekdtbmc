@@ -26,12 +26,9 @@ from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QB
 from PyQt6.QtGui import QIcon, QAction, QFont, QColor, QPalette, QActionGroup
 from PyQt6.QtCore import Qt, QPropertyAnimation, QEasingCurve, QThread, pyqtSignal, QTimer, QSize
 
-# Determine the base directory dynamically
 if getattr(sys, 'frozen', False):
-    # Running as compiled EXE
-    BASE_DIR = Path(sys._MEIPASS)
+    BASE_DIR = Path(sys.executable).resolve().parent
 else:
-    # Running as Python script
     BASE_DIR = Path(__file__).resolve().parent
 
 # --- Cấu hình và Hằng số ---
@@ -105,6 +102,8 @@ class USBBootCreator(QMainWindow):
         super().__init__()
         self.ais_process = None
         self.ais_hwnd = None
+        self.ais_monitor_timer = QTimer(self)
+        self.ais_monitor_timer.timeout.connect(self._check_ais_status)
         # --- Kiểm tra quyền admin và nâng quyền nếu cần ---
         if not self.is_admin():
             print("Không có quyền admin, đang thử nâng quyền...")
@@ -425,23 +424,10 @@ class USBBootCreator(QMainWindow):
             self.find_ais_window_timer.attempts = 0
             self.find_ais_window_timer.timeout.connect(self._find_ais_window_task)
             self.find_ais_window_timer.start(250)
+            self.ais_monitor_timer.start(5000)
 
         except Exception as e:
             self.show_themed_message("Lỗi", f"Không thể khởi chạy TekDT_AIS.exe:\n{e}", icon=QMessageBox.Icon.Warning)
-
-    # def _find_ais_window_task(self):
-        # self.find_ais_window_timer.attempts += 1
-        # self.ais_hwnd = ctypes.windll.user32.FindWindowW(None, "TekDT AIS")
-
-        # if self.ais_hwnd:
-            # self.find_ais_window_timer.stop()
-            # print(f"Đã tìm thấy cửa sổ TekDT AIS (HWND: {self.ais_hwnd}).")
-            # if self.stacked_widget.currentWidget() == self.page3:
-                # self.embed_ais_window()
-        # elif self.find_ais_window_timer.attempts > 40:
-            # self.find_ais_window_timer.stop()
-            # print("Không thể tìm thấy cửa sổ TekDT AIS sau 10 giây.")
-            # self._stop_tekdtais()
 
     def _find_ais_window_task(self):
         self.find_ais_window_timer.attempts += 1
@@ -465,6 +451,23 @@ class USBBootCreator(QMainWindow):
             print("Không thể tìm thấy cửa sổ TekDT AIS sau 10 giây.")
             self._stop_tekdtais()
 
+    def _check_ais_status(self):
+        """Định kỳ kiểm tra trạng thái của TekDT AIS và khởi động lại nếu cần."""
+        # Chỉ kiểm tra nếu self.ais_process đã được khởi tạo (tức là đã từng chạy)
+        # và hiện tại không còn chạy nữa.
+        if self.ais_process and not self.is_tekdtais_running():
+            print("Phát hiện TekDT AIS đã tắt. Đang khởi động lại...")
+            # Dừng timer giám sát để tránh xung đột
+            self.ais_monitor_timer.stop() 
+            
+            # Reset lại các biến trạng thái
+            self.ais_process = None
+            self.ais_hwnd = None
+            
+            # Gọi lại hàm khởi động. Hàm này sẽ tự động khởi chạy lại
+            # tiến trình, tìm cửa sổ và cả timer giám sát.
+            self.start_tekdtais()
+    
     def embed_ais_window(self):
         # Kiểm tra điều kiện cơ bản
         if not self.ais_hwnd or not self.page3:
@@ -534,6 +537,7 @@ class USBBootCreator(QMainWindow):
         return self.ais_process and self.ais_process.poll() is None
 
     def _stop_tekdtais(self):
+        self.ais_monitor_timer.stop()
         if self.is_tekdtais_running():
             print(f"Đang dừng tiến trình TekDT AIS (PID: {self.ais_process.pid})...")
             with open(os.path.join(TEKDTAIS_DIR, "shutdown_signal.txt"), "w") as f:
@@ -1770,7 +1774,9 @@ class PageISOSelect(QWidget):
             return
 
         if not os.path.exists(WINCDEMU_EXE) or not os.path.exists(WIMLIB_EXE):
-            QMessageBox.critical(self, "Lỗi", "Không tìm thấy WinCDEmu hoặc wimlib-imagex.exe để phân tích ISO")
+            self.main_app.show_themed_message("Lỗi", 
+                                              "Không tìm thấy WinCDEmu hoặc wimlib-imagex.exe để phân tích ISO",
+                                              icon=QMessageBox.Icon.Critical)
             return
 
         editions = {}
@@ -2009,7 +2015,9 @@ class PageISOSelect(QWidget):
                 self.downloads_queue.append({'name': name, 'data': data})
         
         if not self.downloads_queue:
-            QMessageBox.information(self, "Thông báo", "Vui lòng chọn ít nhất một phiên bản để tải.")
+            self.main_app.show_themed_message("Thông báo", 
+                                              "Vui lòng chọn ít nhất một phiên bản để tải.",
+                                              icon=QMessageBox.Icon.Information)
             return
 
         self._set_ui_state(downloading=True)
@@ -2225,10 +2233,11 @@ class PageISOSelect(QWidget):
 
     def cancel_download_clicked(self):
         """Xử lý khi người dùng bấm nút Hủy Tải."""
-        reply = QMessageBox.question(self, "Hủy Tải",
-                                     "Bạn có chắc muốn dừng quá trình tải xuống không?",
-                                     QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                                     QMessageBox.StandardButton.No)
+        reply = self.main_app.show_themed_message("Hủy Tải",
+                                    "Bạn có chắc muốn dừng quá trình tải xuống không?",
+                                    icon=QMessageBox.Icon.Question,
+                                    buttons=QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                                    defaultButton=QMessageBox.StandardButton.No)
         
         if reply == QMessageBox.StandardButton.Yes:
             self.is_cancelling = True
