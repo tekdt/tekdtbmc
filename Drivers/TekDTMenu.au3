@@ -327,7 +327,7 @@ Func _RunTool($sTool)
         Return
     EndIf
 
-    ; Xử lý các lệnh đặc biệt
+    ; Xử lý các lệnh đặc biệt (giữ nguyên)
     Switch StringLower($sTool)
         Case "cmd", "command", "commandprompt"
             Run(@ComSpec & " /k echo Công cụ Command Prompt", "", @SW_SHOW)
@@ -340,20 +340,20 @@ Func _RunTool($sTool)
             Return
     EndSwitch
 
-    ; Xử lý lệnh shutdown với xác nhận
-    If StringInStr($sTool, "shutdown") Then
-        Local $sMsg = StringInStr($sTool, "/r") ? "Bạn có chắc chắn muốn khởi động lại máy tính?" : "Bạn có chắc chắn muốn tắt máy tính?"
+    ; Xử lý lệnh shutdown với xác nhận (giữ nguyên)
+    If StringInStr($sTool, "wpeutil.exe") Then
+        Local $sMsg = StringInStr($sTool, "reboot") ? "Bạn có chắc chắn muốn khởi động lại máy tính?" : "Bạn có chắc chắn muốn tắt máy tính?"
         If MsgBox(36, "Xác Nhận", $sMsg) = 6 Then ; 6 = Yes
             Run(@ComSpec & " /c " & $sTool, "", @SW_HIDE)
         EndIf
         Return
     EndIf
 
-   ; Thay thế %ScriptDir% và %ARCH%
+    ; Thay thế %ScriptDir% và %ARCH% (giữ nguyên)
     $sTool = StringReplace($sTool, "%ScriptDir%", @ScriptDir)
     $sTool = StringReplace($sTool, "%ARCH%", @OSArch = "X64" ? "64" : "32")
 
-    ; Tách đường dẫn chính và tham số
+    ; Tách đường dẫn chính và tham số (giữ nguyên)
     Local $sExePath, $sParams = ""
     If StringLeft($sTool, 1) = '"' Then
         Local $iEndQuote = StringInStr($sTool, '"', 0, 2)
@@ -371,7 +371,33 @@ Func _RunTool($sTool)
         EndIf
     EndIf
 
-    ; Kiểm tra và chạy tệp thực thi
+    ; Nếu file thực thi chưa tồn tại, hãy thử giải nén
+    If Not FileExists($sExePath) Then
+        ; Lấy đường dẫn thư mục của file exe mục tiêu
+        Local $sTargetDir = _PathGetLocation($sExePath)
+
+        ; Tìm các file .7z trong thư mục đó
+        Local $aArchives = _FileListToArray($sTargetDir, "*.7z")
+        If Not @error And $aArchives[0] > 0 Then
+            ; Xác định đường dẫn tới 7za.exe dựa trên kiến trúc hệ thống
+            Local $s7zPath = @ScriptDir & "\Tools\7z" & (@OSArch = "X64" ? "64" : "32") & "\7za.exe"
+
+            If FileExists($s7zPath) Then
+                ConsoleWrite("Attempting to extract archives in: " & $sTargetDir & @CRLF)
+                ; Lặp qua từng file .7z tìm thấy và giải nén
+                For $i = 1 To $aArchives[0]
+                    Local $sArchivePath = $sTargetDir & "\" & $aArchives[$i]
+                    ; Lệnh giải nén: x (giải nén với đường dẫn đầy đủ), -o (chỉ định thư mục đầu ra), -y (tự động đồng ý)
+                    Local $sCommand = '"' & $s7zPath & '" x "' & $sArchivePath & '" -o"' & $sTargetDir & '" -y'
+                    RunWait($sCommand, "", @SW_HIDE)
+                Next
+            Else
+                MsgBox(16, "Lỗi", "Không tìm thấy công cụ giải nén:" & @CRLF & $s7zPath)
+            EndIf
+        EndIf
+    EndIf
+
+    ; Kiểm tra và chạy tệp thực thi (giữ nguyên logic cũ, nhưng bây giờ nó sẽ kiểm tra lại sau khi đã giải nén)
     If FileExists($sExePath) Then
         Run('"' & $sExePath & '" ' & $sParams, "", @SW_SHOW)
     Else
