@@ -1347,6 +1347,7 @@ class USBBootCreator(QMainWindow):
         config_data = {
             "control": [
                 {
+                    "VTOY_SECONDARY_TIMEOUT": "3",
                     "VTOY_MAX_SEARCH_LEVEL": "0",
                     "VTOY_WIN11_BYPASS_CHECK": "1",
                     "VTOY_WIN11_BYPASS_NRO": "1"
