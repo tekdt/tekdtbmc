@@ -27,7 +27,7 @@ from PyQt6.QtGui import QIcon, QAction, QFont, QColor, QPalette, QActionGroup
 from PyQt6.QtCore import Qt, QPropertyAnimation, QEasingCurve, QThread, pyqtSignal, QTimer, QSize
 
 if getattr(sys, 'frozen', False):
-    BASE_DIR = Path(sys.executable).resolve().parent
+    BASE_DIR = Path(sys.argv[0]).resolve().parent
 else:
     BASE_DIR = Path(__file__).resolve().parent
 
