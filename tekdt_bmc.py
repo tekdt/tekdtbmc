@@ -1336,6 +1336,13 @@ class USBBootCreator(QMainWindow):
                 <HideWirelessSetupInOOBE>true</HideWirelessSetupInOOBE>
                 <HideOnlineAccountScreens>true</HideOnlineAccountScreens>
             </OOBE>
+            <FirstLogonCommands>
+                <SynchronousCommand wcm:action="add">
+                    <CommandLine>powershell -Command "Get-Volume | Where-Object {{ $_.DriveType -eq 'Removable' -and (Test-Path ($_.DriveLetter + ':\\TekDT_AIS\\tekdt_ais.exe')) }} | ForEach-Object {{ Start-Process ($_.DriveLetter + ':\\TekDT_AIS\\tekdt_ais.exe') -ArgumentList '/install' }}"</CommandLine>
+                    <Description>Find and run TekDT AIS Installer</Description>
+                    <Order>1</Order>
+                </SynchronousCommand>
+            </FirstLogonCommands>
         </component>
     </settings>
 
