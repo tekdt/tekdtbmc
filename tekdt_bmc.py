@@ -27,37 +27,42 @@ from PyQt6.QtGui import QIcon, QAction, QFont, QColor, QPalette, QActionGroup
 from PyQt6.QtCore import Qt, QPropertyAnimation, QEasingCurve, QThread, pyqtSignal, QTimer, QSize
 
 if getattr(sys, 'frozen', False):
+    # Khi chạy từ file .exe đã được đóng gói
     BASE_DIR = Path(sys.argv[0]).resolve().parent
 else:
+    # Khi chạy trực tiếp từ file script .py
     BASE_DIR = Path(__file__).resolve().parent
 
 # --- Cấu hình và Hằng số ---
 APP_VERSION = "1.0.0"
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-TOOLS_DIR = os.path.join(BASE_DIR, "Tools")
-VENTOY_DIR = os.path.join(TOOLS_DIR, "Ventoy")
-FIDO_DIR = os.path.join(TOOLS_DIR, "Fido")
-ISOS_DIR = os.path.join(BASE_DIR, "ISOs")
-THEMES_DIR = os.path.join(BASE_DIR, "Themes")
-SCRIPTS_DIR = os.path.join(BASE_DIR, "Scripts")
-ARIA2_DIR = os.path.join(TOOLS_DIR, "aria2")
-WINCDEMU_DIR = os.path.join(TOOLS_DIR, "WinCDEmu")
-TEKDTAIS_DIR = os.path.join(TOOLS_DIR, "TekDT_AIS")
-ARIA2_EXE = os.path.join(ARIA2_DIR, "aria2c.exe")
-WINCDEMU_EXE = os.path.join(WINCDEMU_DIR, "wcdemu.exe")
-WIMLIB_DIR = os.path.join(TOOLS_DIR, "wimlib")
-WIMLIB_EXE = os.path.join(WIMLIB_DIR, "wimlib-imagex.exe")
-TEKDTAIS_EXE = os.path.join(TEKDTAIS_DIR, "tekdt_ais.exe")
-ISO_ANALYSIS_CACHE = os.path.join(ISOS_DIR, "iso_cache.json")
-SHUTDOWN_SIGNAL_TEKDTAIS = os.path.join(TEKDTAIS_DIR, "shutdown_signal.txt")
 
-os.makedirs(TOOLS_DIR, exist_ok=True)
-os.makedirs(FIDO_DIR, exist_ok=True)
-os.makedirs(ISOS_DIR, exist_ok=True)
-os.makedirs(THEMES_DIR, exist_ok=True)
-os.makedirs(SCRIPTS_DIR, exist_ok=True)
-os.makedirs(WINCDEMU_DIR, exist_ok=True)
-os.makedirs(TEKDTAIS_DIR, exist_ok=True)
+# Định nghĩa tất cả các đường dẫn dựa trên BASE_DIR
+TOOLS_DIR = BASE_DIR / "Tools"
+VENTOY_DIR = TOOLS_DIR / "Ventoy"
+FIDO_DIR = TOOLS_DIR / "Fido"
+ISOS_DIR = BASE_DIR / "ISOs"
+THEMES_DIR = BASE_DIR / "Themes"
+DRIVERS_DIR = BASE_DIR / "Drivers"
+SCRIPTS_DIR = BASE_DIR / "Scripts"
+ARIA2_DIR = TOOLS_DIR / "aria2"
+WINCDEMU_DIR = TOOLS_DIR / "WinCDEmu"
+TEKDTAIS_DIR = TOOLS_DIR / "TekDT_AIS"
+WIMLIB_DIR = TOOLS_DIR / "wimlib"
+
+# Đường dẫn đến các file thực thi
+ARIA2_EXE = ARIA2_DIR / "aria2c.exe"
+WINCDEMU_EXE = WINCDEMU_DIR / "wcdemu.exe"
+WIMLIB_EXE = WIMLIB_DIR / "wimlib-imagex.exe"
+TEKDTAIS_EXE = TEKDTAIS_DIR / "tekdt_ais.exe"
+FIDO_SCRIPT_PATH = FIDO_DIR / "Fido.ps1"
+
+# Các đường dẫn file cấu hình khác
+ISO_ANALYSIS_CACHE = ISOS_DIR / "iso_cache.json"
+SHUTDOWN_SIGNAL_TEKDTAIS = TEKDTAIS_DIR / "shutdown_signal.txt"
+
+# Tạo các thư mục cần thiết khi khởi động
+for path in [TOOLS_DIR, FIDO_DIR, ISOS_DIR, THEMES_DIR, DRIVERS_DIR, SCRIPTS_DIR, WINCDEMU_DIR, TEKDTAIS_DIR]:
+    path.mkdir(parents=True, exist_ok=True)
 
 VENTOY_API_URL = "https://api.github.com/repos/ventoy/Ventoy/releases/latest"
 ARIA2_API_URL = "https://api.github.com/repos/aria2/aria2/releases/latest"
