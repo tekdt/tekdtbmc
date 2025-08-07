@@ -28,7 +28,8 @@ from PyQt6.QtCore import Qt, QPropertyAnimation, QEasingCurve, QThread, pyqtSign
 
 if getattr(sys, 'frozen', False):
     # Khi chạy từ file .exe đã được đóng gói
-    BASE_DIR = Path(sys.argv[0]).resolve().parent
+    # BASE_DIR = Path(sys.argv[0]).resolve().parent
+    BASE_DIR = Path(sys.executable).resolve().parent
 else:
     # Khi chạy trực tiếp từ file script .py
     BASE_DIR = Path(__file__).resolve().parent
