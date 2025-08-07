@@ -747,9 +747,10 @@ Func _AutoCleanPartitions()
     FileClose($hFile)
     RunWait('diskpart /s "' & $sCleanScriptFile & '"', "", @SW_HIDE)
     MsgBox(64, "Hoàn Tất", "Đã xoá " & UBound($aToDelete) & " phân vùng")
-	If WinExists("Setup","") Then
+	If WinExists("Setup","") = 1 Then
 		ControlClick("Setup","","[CLASS:Button; INSTANCE:1]")
 		ControlSend("Setup","","[CLASS:Button; INSTANCE:1]","!r")
+	EndIf
 
     ; Xóa file tạm
     FileDelete($sScriptFile)
