@@ -1386,7 +1386,7 @@ class USBBootCreator(QMainWindow):
             
         # Thêm cấu hình injection cho tất cả ISO
         config_data["injection"].append({
-            "image": "/",
+            "parent": "/",
             "archive": "/ventoy/Drivers.7z"
         })
 
