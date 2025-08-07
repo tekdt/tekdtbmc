@@ -1,2 +1,2 @@
 REM py -m nuitka tekdt_bmc.py --standalone --onefile --include-data-dir=Images=Images --include-data-dir=Drivers=Drivers --include-data-dir=Themes=Themes --windows-icon-from-ico=logo.ico --enable-plugin=pyqt6 --output-dir=build --windows-console-mode=disable
-py -m nuitka tekdt_bmc.py --onefile --windows-icon-from-ico=logo.ico --enable-plugin=pyqt6 --output-dir=build --windows-console-mode=disable
+py -m nuitka tekdt_bmc.py --standalone --onefile --windows-icon-from-ico=logo.ico --enable-plugin=pyqt6 --output-dir=build --windows-console-mode=disable
