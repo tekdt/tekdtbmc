@@ -62,7 +62,7 @@ SHUTDOWN_SIGNAL_TEKDTAIS = TEKDTAIS_DIR / "shutdown_signal.txt"
 
 # Tạo các thư mục cần thiết khi khởi động
 for path in [TOOLS_DIR, FIDO_DIR, ISOS_DIR, THEMES_DIR, DRIVERS_DIR, SCRIPTS_DIR, WINCDEMU_DIR, TEKDTAIS_DIR]:
-    path.mkdir(parents=True, exist_ok=True)
+    path.mkdir(exist_ok=True)
 
 VENTOY_API_URL = "https://api.github.com/repos/ventoy/Ventoy/releases/latest"
 ARIA2_API_URL = "https://api.github.com/repos/aria2/aria2/releases/latest"
