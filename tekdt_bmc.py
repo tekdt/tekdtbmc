@@ -61,8 +61,14 @@ ISO_ANALYSIS_CACHE = ISOS_DIR / "iso_cache.json"
 SHUTDOWN_SIGNAL_TEKDTAIS = TEKDTAIS_DIR / "shutdown_signal.txt"
 
 # Tạo các thư mục cần thiết khi khởi động
-for path in [TOOLS_DIR, FIDO_DIR, ISOS_DIR, THEMES_DIR, DRIVERS_DIR, SCRIPTS_DIR, WINCDEMU_DIR, TEKDTAIS_DIR]:
+directories_to_create = [TOOLS_DIR, FIDO_DIR, ISOS_DIR, SCRIPTS_DIR, WINCDEMU_DIR, TEKDTAIS_DIR]
+for path in directories_to_create:
     path.mkdir(exist_ok=True)
+    
+required_dirs = [DRIVERS_DIR, THEMES_DIR]
+for dir_path in required_dirs:
+    if not dir_path.exists():
+        print(f"Cảnh báo: Thư mục {dir_path} không tồn tại. Vui lòng sao chép nó cạnh ứng dụng.")
 
 VENTOY_API_URL = "https://api.github.com/repos/ventoy/Ventoy/releases/latest"
 ARIA2_API_URL = "https://api.github.com/repos/aria2/aria2/releases/latest"
@@ -679,14 +685,17 @@ class USBBootCreator(QMainWindow):
         theme_group.addAction(no_theme_action)
         
         try:
-            for theme_file in os.listdir(THEMES_DIR):
-                if theme_file.endswith(".zip"):
-                    theme_name = os.path.splitext(theme_file)[0]
-                    action = QAction(theme_name, self, checkable=True)
-                    action.setChecked(self.config["theme"] == theme_file)
-                    action.triggered.connect(lambda checked, t=theme_file: self.set_theme(t))
-                    theme_group.addAction(action)
-                    theme_menu.addAction(action)
+            if not THEMES_DIR.exists():
+                print("Thư mục Themes không tồn tại, bỏ qua việc tải theme.")
+            else:
+                for theme_file in os.listdir(THEMES_DIR):
+                    if theme_file.endswith(".zip"):
+                        theme_name = os.path.splitext(theme_file)[0]
+                        action = QAction(theme_name, self, checkable=True)
+                        action.setChecked(self.config["theme"] == theme_file)
+                        action.triggered.connect(lambda checked, t=theme_file: self.set_theme(t))
+                        theme_group.addAction(action)
+                        theme_menu.addAction(action)
         except FileNotFoundError:
             pass
 
@@ -820,6 +829,8 @@ class USBBootCreator(QMainWindow):
             self.page3.start_button.setEnabled(False)
     
     def _update_task(self):
+        if not TOOLS_DIR.exists():
+            TOOLS_DIR.mkdir()
         self.update_worker.status.emit("Đang kiểm tra các công cụ...")
         has_internet = self._check_internet_connection()
         if has_internet:
@@ -1460,10 +1471,17 @@ class USBBootCreator(QMainWindow):
         self.creation_worker.status.emit("Đang xử lý kho driver...")
         
         # Đường dẫn tới các file driver nguồn và thư mục đích trên USB
-        drivers_part1 = os.path.join(BASE_DIR, "Drivers", "Drivers.7z.001")
-        drivers_part2 = os.path.join(BASE_DIR, "Drivers", "Drivers.7z.002")
+        # drivers_part1 = os.path.join(BASE_DIR, "Drivers", "Drivers.7z.001")
+        # drivers_part2 = os.path.join(BASE_DIR, "Drivers", "Drivers.7z.002")
+        drivers_part1 = DRIVERS_DIR / "Drivers.7z.001"
+        drivers_part2 = DRIVERS_DIR / "Drivers.7z.002"
         usb_ventoy_dir = os.path.join(usb_mount_point, "ventoy")
         final_archive_path = os.path.join(usb_ventoy_dir, "Drivers.7z")
+        
+        if not DRIVERS_DIR.exists():
+            self.creation_worker.status.emit("Thư mục Drivers không tồn tại. Bỏ qua.")
+            print("Thư mục Drivers không tồn tại cạnh ứng dụng.")
+            return
 
         # Kiểm tra sự tồn tại của cả hai file .001, .002 và .003
         if not (os.path.exists(drivers_part1) and os.path.exists(drivers_part2)):
@@ -1796,7 +1814,7 @@ class PageISOSelect(QWidget):
             self.arch_button_group.setExclusive(True)
     
     def browse_iso(self):
-        file_paths, _ = QFileDialog.getOpenFileNames(self, "Chọn các file ISO", ISOS_DIR, "ISO Files (*.iso)")
+        file_paths, _ = QFileDialog.getOpenFileNames(self, "Chọn các file ISO", str(ISOS_DIR), "ISO Files (*.iso)")
         for file_path in file_paths:
             self.add_iso_to_list(file_path)
 
