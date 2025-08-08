@@ -26,13 +26,49 @@ from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QB
 from PyQt6.QtGui import QIcon, QAction, QFont, QColor, QPalette, QActionGroup
 from PyQt6.QtCore import Qt, QPropertyAnimation, QEasingCurve, QThread, pyqtSignal, QTimer, QSize
 
-if getattr(sys, 'frozen', False):
-    # Khi chạy từ file .exe đã được đóng gói
-    # BASE_DIR = Path(sys.argv[0]).resolve().parent
-    BASE_DIR = Path(sys.executable).resolve().parent
-else:
-    # Khi chạy trực tiếp từ file script .py
-    BASE_DIR = Path(__file__).resolve().parent
+def resolve_base_dir():
+    candidates = []
+    try:
+        p = Path(sys.argv[0]).resolve()
+        candidates.append(p.parent)
+    except Exception:
+        pass
+    try:
+        candidates.append(Path(__file__).resolve().parent)
+    except Exception:
+        pass
+
+    try:
+        candidates.append(Path(sys.executable).resolve().parent)
+    except Exception:
+        pass
+
+    candidates.append(Path.cwd())
+
+    uniq = []
+    seen = set()
+    for c in candidates:
+        if c not in seen:
+            uniq.append(c)
+            seen.add(c)
+
+    important = ["Tools", "ISOs", "Drivers", "Themes"]
+
+    for c in uniq:
+        if all((c / d).exists() for d in important):
+            return c
+
+    for c in uniq:
+        if any((c / d).exists() for d in important):
+            return c
+
+    if uniq:
+        return uniq[0]
+    return Path.cwd()
+
+BASE_DIR = resolve_base_dir()
+if not str(BASE_DIR).startswith(tempfile.gettempdir()):
+    pass
 
 # --- Cấu hình và Hằng số ---
 APP_VERSION = "1.0.0"
@@ -64,7 +100,7 @@ SHUTDOWN_SIGNAL_TEKDTAIS = TEKDTAIS_DIR / "shutdown_signal.txt"
 # Tạo các thư mục cần thiết khi khởi động
 directories_to_create = [TOOLS_DIR, FIDO_DIR, ISOS_DIR, SCRIPTS_DIR, WINCDEMU_DIR, TEKDTAIS_DIR]
 for path in directories_to_create:
-    path.mkdir(exist_ok=True)
+    path.mkdir(parents=True, exist_ok=True)
     
 required_dirs = [DRIVERS_DIR, THEMES_DIR]
 for dir_path in required_dirs:
@@ -74,7 +110,7 @@ for dir_path in required_dirs:
 VENTOY_API_URL = "https://api.github.com/repos/ventoy/Ventoy/releases/latest"
 ARIA2_API_URL = "https://api.github.com/repos/aria2/aria2/releases/latest"
 FIDO_PS1_URL = "https://github.com/pbatard/Fido/raw/refs/heads/master/Fido.ps1"
-FIDO_SCRIPT_PATH = os.path.join(FIDO_DIR, "Fido.ps1")
+FIDO_SCRIPT_PATH = FIDO_DIR / "Fido.ps1"
 WIMLIB_URL = "https://wimlib.net/downloads/wimlib-1.14.4-windows-x86_64-bin.zip"
 WINCDEMU_API_URL = "https://api.github.com/repos/sysprogs/WinCDEmu/releases/latest"
 TEKDTAIS_API_URL = "https://api.github.com/repos/tekdt/tekdtais/releases/latest"
@@ -562,14 +598,16 @@ class USBBootCreator(QMainWindow):
             try:
                 self.ais_process.wait(timeout=5)
             except subprocess.TimeoutExpired:
-                print("B không tự thoát, buộc dừng tất cả tiến trình liên quan...")
+                print("TekDT AIS không tự thoát, buộc dừng tất cả tiến trình liên quan...")
                 # Sử dụng psutil để tìm và dừng các tiến trình liên quan
                 for proc in psutil.process_iter(['pid', 'name', 'exe']):
                     try:
-                        if "tekdt_ais.exe" in proc.info['exe'] or \
-                           (proc.info['name'] == "python.exe" and proc.parent() and "tekdt_ais.exe" in proc.parent().exe()):
+                        exe_path = proc.info.get('exe')
+                        name = proc.info.get('name')
+                        if (exe_path and "tekdt_ais.exe" in exe_path) or (name == "python.exe" and proc.parent() and proc.parent().exe() and "tekdt_ais.exe" in proc.parent().exe()):
                             print(f"Dừng tiến trình {proc.info['name']} (PID: {proc.info['pid']})")
                             proc.kill()
+                            pass
                     except (psutil.NoSuchProcess, psutil.AccessDenied):
                         continue
             signal_file = os.path.join(TEKDTAIS_DIR, "shutdown_signal.txt")
