@@ -10,7 +10,7 @@ TekDT BMC là công cụ tạo thiết bị có thể chứa nhiều bộ cài h
 - Facebook: @tekdtcom
 
 # Hướng dẫn sử dụng
-Ở giao diện chương trình sẽ có tổng cộng 3 bước, bao gồm: CHỌN USB, CHỌN HOẶC TẢI ISO, THU THẬP EMAIL và THÔNG TIN
+Ở giao diện chương trình sẽ có tổng cộng 3 bước, bao gồm: CHỌN USB, CHỌN HOẶC TẢI ISO, THÊM PHẦN MỀM ĐƯỢC CÀI ĐẶT TỰ ĐỘNG SAU KHI CÀI WINDOWS
 - Bước 1: Chọn thiết bị USB
   + Danh sách sổ xuống: Sẽ hiển thị toàn bộ các thiết bị.
   + Hiển thị ổ cứng: Chức năng này hiện tại chưa hoạt động ổn định (không nên sử dụng, có thể gây mất dữ liệu)
