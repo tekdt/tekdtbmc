@@ -28,8 +28,8 @@ TekDT BMC là công cụ tạo thiết bị có thể chứa nhiều bộ cài h
 #Lưu ý: Chương trình này cần kết nối internet để hoạt động lần đầu tiên, do cần tải các công cụ cần thiết khác trong thư mục Tools như: Ventoy, 7z, aria2, wimlib, TekDT AIS,... Với giao diện thứ 3, giao diện này sẽ nhúng thêm giao diện chương trình TekDT AIS, cho nên nếu bạn muốn tải phần mềm mới thì cần có kết nối internet để tải, còn nếu trước đó đã tải một vài (hoặc toàn bộ) phần mềm đã đủ dùng thì không cần kết nối internet nữa.
 
 # Trách nhiệm
-TekDT không chịu trách nhiệm cho tài khoản của bạn khi bạn tải ở các nguồn khác được tuỳ biến, sửa đổi dựa trên script này. Bạn có thể sử dụng chương trình này miễn phí thì hãy tin nó. TekDT sẽ không thu thập tài khoản tài khoản hay làm bất cứ điều gì với tài khoản của bạn.
-Nếu không tin TekDT hoặc sợ mất tài khoản, vui lòng thoát khỏi trang này, hãy xoá phần mềm/script đã tải.
+TekDT không chịu trách nhiệm khi bạn sử dụng phần mềm/script này hoặc tải ở các nguồn khác được tuỳ biến, sửa đổi dựa trên script này. Bạn có thể sử dụng chương phần mềm/script miễn phí thì hãy tin nó. TekDT sẽ không thu thập thông tin hay làm hại đến máy tính của bạn.
+Nếu bạn không tin tưởng phần mềm/script này, hãy xoá phần mềm/script đã tải.
 
 # Hỗ trợ:
 Mọi liên lạc của bạn với TekDT sẽ rất hoan nghênh và đón nhận để TekDT có thể cải tiến phần mềm/script này tốt hơn. Hãy thử liên hệ với TekDT bằng những cách sau:
