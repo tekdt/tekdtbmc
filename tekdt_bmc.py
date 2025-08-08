@@ -37,31 +37,24 @@ def resolve_base_dir():
         candidates.append(Path(__file__).resolve().parent)
     except Exception:
         pass
-
     try:
         candidates.append(Path(sys.executable).resolve().parent)
     except Exception:
         pass
-
     candidates.append(Path.cwd())
-
     uniq = []
     seen = set()
     for c in candidates:
         if c not in seen:
             uniq.append(c)
             seen.add(c)
-
     important = ["Tools", "ISOs", "Drivers", "Themes"]
-
     for c in uniq:
         if all((c / d).exists() for d in important):
             return c
-
     for c in uniq:
         if any((c / d).exists() for d in important):
             return c
-
     if uniq:
         return uniq[0]
     return Path.cwd()
