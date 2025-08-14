@@ -14,6 +14,7 @@ import tempfile
 import string
 import ctypes
 import shlex
+from ctypes import wintypes
 from pathlib import Path
 from subprocess import run
 from urllib.request import urlretrieve
@@ -24,7 +25,23 @@ from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QB
                              QProgressBar, QMessageBox, QMenu, QDialogButtonBox,
                              QGraphicsOpacityEffect, QListWidgetItem, QSizePolicy)
 from PyQt6.QtGui import QIcon, QAction, QFont, QColor, QPalette, QActionGroup
-from PyQt6.QtCore import Qt, QPropertyAnimation, QEasingCurve, QThread, pyqtSignal, QTimer, QSize
+from PyQt6.QtCore import Qt, QPropertyAnimation, QEasingCurve, QThread, pyqtSignal, QTimer, QSize, qInstallMessageHandler, QtMsgType
+
+def qt_message_handler(mode, context, message):
+    """
+    Hàm tùy chỉnh để lọc các thông điệp cảnh báo không mong muốn từ Qt.
+    """
+    # Các chuỗi trong thông điệp cần bỏ qua
+    suppress_list = ["QPainter::", "Paint device returned engine == 0"]
+    
+    # Nếu bất kỳ chuỗi nào trong danh sách xuất hiện trong thông điệp, bỏ qua nó
+    if any(text in message for text in suppress_list):
+        return
+    
+    # In các thông điệp khác ra stderr như mặc định
+    # Điều này giúp giữ lại các thông báo lỗi quan trọng khác.
+    original_handler = sys.stderr.write
+    original_handler(f"{message}\n")
 
 def resolve_base_dir():
     candidates = []
@@ -65,6 +82,7 @@ if not str(BASE_DIR).startswith(tempfile.gettempdir()):
 
 # --- Cấu hình và Hằng số ---
 APP_VERSION = "1.0.0"
+CONFIG_FILE = BASE_DIR / "tekdt_bmc.json"
 
 # Định nghĩa tất cả các đường dẫn dựa trên BASE_DIR
 TOOLS_DIR = BASE_DIR / "Tools"
@@ -172,12 +190,14 @@ class USBBootCreator(QMainWindow):
             "partition_scheme": "GPT", # Mặc định GPT
             "filesystem": "ExFAT", # Mặc định ExFAT
             "theme": None,
+            "fill_space": True,
             "iso_list": [],
             "windows_edition": None,
             "windows_edition_index": None,
         }
 
         self.config["device_details"] = None
+        self.load_config()
         
         self.init_ui()
         self.apply_stylesheet()
@@ -475,6 +495,33 @@ class USBBootCreator(QMainWindow):
         except Exception as e:
             self.show_themed_message("Lỗi", f"Không thể khởi chạy TekDT_AIS.exe:\n{e}", icon=QMessageBox.Icon.Warning)
 
+    def save_config(self):
+        """Lưu cấu hình hiện tại vào file JSON."""
+        try:
+            with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
+                json.dump(self.config, f, indent=4)
+        except Exception as e:
+            print(f"Không thể lưu cấu hình vào {CONFIG_FILE}: {e}")
+
+    def load_config(self):
+        """Tải cấu hình từ file JSON nếu tồn tại, nếu không thì tạo mới."""
+        if CONFIG_FILE.exists():
+            try:
+                with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
+                    loaded_config = json.load(f)
+                    # Cập nhật config hiện tại với các giá trị đã tải
+                    # Điều này giúp giữ lại các khóa mới nếu phiên bản mới có thêm tùy chọn
+                    self.config.update(loaded_config)
+                    print("Đã tải cấu hình từ tekdt_bmc.json")
+            except (json.JSONDecodeError, IOError) as e:
+                print(f"Lỗi khi đọc file cấu hình, sử dụng mặc định: {e}")
+                # Nếu file bị lỗi, lưu lại cấu hình mặc định
+                self.save_config()
+        else:
+            # Nếu file không tồn tại, tạo nó với các giá trị mặc định
+            print("Không tìm thấy file cấu hình, đang tạo file mới với giá trị mặc định.")
+            self.save_config()
+    
     def _find_ais_window_task(self):
         self.find_ais_window_timer.attempts += 1
         # Chỉ tìm kiếm nếu chưa tìm thấy
@@ -705,6 +752,22 @@ class USBBootCreator(QMainWindow):
         fs_menu.addAction(ntfs_action)
         fs_menu.addAction(fat32_action)
         
+        # --- Fill Remaining Space ---
+        fill_menu = menu.addMenu("Lấp đầy dung lượng")
+        yes_action = QAction("Có", self, checkable=True)
+        yes_action.setChecked(self.config.get("fill_space", True))
+        yes_action.triggered.connect(lambda: self.set_fill_space(True))
+        
+        no_action = QAction("Không", self, checkable=True)
+        no_action.setChecked(not self.config.get("fill_space", True))
+        no_action.triggered.connect(lambda: self.set_fill_space(False))
+
+        fill_group = QActionGroup(self)
+        fill_group.addAction(yes_action)
+        fill_group.addAction(no_action)
+        fill_menu.addAction(yes_action)
+        fill_menu.addAction(no_action)
+        
         menu.addSeparator()
 
         # --- Themes ---
@@ -736,14 +799,22 @@ class USBBootCreator(QMainWindow):
     def set_partition_scheme(self, scheme):
         self.config["partition_scheme"] = scheme
         print(f"Đã chọn cấu trúc: {scheme}")
+        self.save_config()
 
     def set_filesystem(self, fs):
         self.config["filesystem"] = fs
         print(f"Đã chọn định dạng: {fs}")
+        self.save_config()
 
     def set_theme(self, theme_file):
         self.config["theme"] = theme_file
         print(f"Đã chọn theme: {theme_file}")
+        self.save_config()
+
+    def set_fill_space(self, fill):
+        self.config["fill_space"] = fill
+        print(f"Đã chọn Lấp đầy dung lượng: {'Có' if fill else 'Không'}")
+        self.save_config()
 
     def check_for_updates(self):
         """Kiểm tra và tải các công cụ cần thiết."""
@@ -1072,6 +1143,57 @@ class USBBootCreator(QMainWindow):
             self.creation_worker.finished.connect(self.on_creation_finished)
             self.creation_worker.start()
 
+    def _create_fill_file(self, file_path, size_in_bytes, total_fill_target, space_filled_so_far):
+        """
+        Tạo một tệp có kích thước cụ thể bằng cách ghi các khối zero.
+        Cung cấp các cập nhật tiến trình chi tiết cho giao diện người dùng.
+        """
+        self.creation_worker.status.emit(f"Đang tạo file lấp đầy: {os.path.basename(file_path)}")
+
+        # Định nghĩa các hằng số
+        CHUNK_SIZE = 16 * 1024 * 1024  # Ghi mỗi lần 16 MB để tối ưu hiệu suất
+        zeros = b'\x00' * CHUNK_SIZE
+        FILE_ATTRIBUTE_HIDDEN = 0x02
+        FILE_ATTRIBUTE_SYSTEM = 0x04
+
+        bytes_written = 0
+        try:
+            with open(file_path, "wb") as f:
+                while bytes_written < size_in_bytes:
+                    # Xác định kích thước khối cho lần ghi này
+                    write_size = min(CHUNK_SIZE, size_in_bytes - bytes_written)
+                    
+                    # Ghi khối dữ liệu
+                    if write_size == CHUNK_SIZE:
+                        f.write(zeros)
+                    else:
+                        f.write(b'\x00' * write_size)
+                    
+                    bytes_written += write_size
+                    
+                    # Cập nhật tiến trình tổng thể
+                    current_total_filled = space_filled_so_far + bytes_written
+                    # Chỉ cập nhật UI nếu có dung lượng cần lấp đầy
+                    if total_fill_target > 0:
+                        progress = (current_total_filled / total_fill_target) * 100
+                        self.creation_worker.status.emit(
+                            f"Đang lấp đầy: {current_total_filled / (1024**3):.2f} / {total_fill_target / (1024**3):.2f} GB ({progress:.0f}%)"
+                        )
+            
+            # Đặt thuộc tính file thành Ẩn + Hệ thống sau khi tạo xong
+            ctypes.windll.kernel32.SetFileAttributesW(file_path, FILE_ATTRIBUTE_HIDDEN | FILE_ATTRIBUTE_SYSTEM)
+            return bytes_written  # Trả về số byte đã thực sự được ghi
+
+        except Exception as e:
+            # Dọn dẹp nếu có sự cố
+            if os.path.exists(file_path):
+                try:
+                    os.remove(file_path)
+                except OSError:
+                    pass
+            # Báo lỗi với ngữ cảnh rõ ràng hơn
+            raise IOError(f"Không thể ghi vào file '{file_path}'. Đĩa có thể đã đầy hoặc bị ngắt kết nối. Lỗi: {e}")
+    
     def create_usb_task(self):
         """Tác vụ tạo USB Boot chạy trong luồng nền."""
         try:
@@ -1204,29 +1326,71 @@ class USBBootCreator(QMainWindow):
                 shutil.copytree(TEKDTAIS_DIR, dest_ais_dir)
                 print("Đã sao chép TekDT_AIS vào USB.")
 
-                # run_ais_script_path = os.path.join(usb_mount_point, "run_ais_setup.bat")
-                # run_ais_script_content = """@echo off
-# REM Search for TekDT_AIS, copy it to C drive, and execute it.
-# for %%D in (C D E F G H I J K L M N O P Q R S T U V W X Y Z) do (
-    # if exist "%%D:\\TekDT_AIS\\tekdt_ais.exe" (
-        # echo Found TekDT_AIS on drive %%D:
-        # echo Copying TekDT_AIS to C:\\ ...
-        # xcopy "%%D:\\TekDT_AIS" "C:\\TekDT_AIS\\" /E /I /Y /H /Q
-        
-        # echo Running installer...
-        # start "" "C:\\TekDT_AIS\\tekdt_ais.exe" /install
-
-        # goto :eof
-    # )
-# )
-# echo TekDT_AIS not found on any drive.
-# :eof
-# """
-                # with open(run_ais_script_path, "w") as f:
-                    # f.write(run_ais_script_content)
-                # print("Đã tạo run_ais_setup.bat trên USB.")
             self._process_driver_archive(usb_mount_point)
 
+            if self.config.get("fill_space", True):
+                self.creation_worker.status.emit("Đang tính toán dung lượng trống...")
+                time.sleep(2)
+
+                try:
+                    # Lấy kích thước cluster để dự trữ không gian tối thiểu cho metadata
+                    try:
+                        sectors_per_cluster = wintypes.DWORD()
+                        bytes_per_sector = wintypes.DWORD()
+                        ctypes.windll.kernel32.GetDiskFreeSpaceW(
+                            ctypes.c_wchar_p(usb_mount_point),
+                            ctypes.byref(sectors_per_cluster),
+                            ctypes.byref(bytes_per_sector),
+                            None, None
+                        )
+                        cluster_size = sectors_per_cluster.value * bytes_per_sector.value
+                        RESERVE_SPACE = cluster_size if cluster_size > 0 else 64 * 1024
+                    except Exception as e:
+                        print(f"Không thể lấy kích thước cluster, sử dụng giá trị dự phòng 64KB. Lỗi: {e}")
+                        RESERVE_SPACE = 64 * 1024 # Giá trị dự phòng
+
+                    usage = shutil.disk_usage(usb_mount_point)
+                    total_free_space = usage.free
+                    fill_space_target = total_free_space - RESERVE_SPACE
+                    
+                    if fill_space_target <= 0:
+                        print("Không đủ dung lượng trống để thực hiện lấp đầy.")
+                    else:
+                        fs_type = self.config["filesystem"].upper()
+                        print(f"Dung lượng trống: {total_free_space / (1024**3):.2f} GB. Sẽ lấp đầy: {fill_space_target / (1024**3):.2f} GB. Định dạng: {fs_type}")
+
+                        fill_file_dir = os.path.join(usb_mount_point, "TekDT_Fill")
+                        os.makedirs(fill_file_dir, exist_ok=True)
+                        
+                        space_to_fill = fill_space_target
+                        space_filled_so_far = 0
+
+                        if fs_type == "FAT32":
+                            max_chunk_size = 2 * 1024 * 1024 * 1024
+                            file_index = 1
+                            while space_to_fill > 0:
+                                file_size = min(space_to_fill, max_chunk_size)
+                                file_path = os.path.join(fill_file_dir, f"fill_{file_index:03d}.dat")
+                                
+                                written = self._create_fill_file(file_path, file_size, fill_space_target, space_filled_so_far)
+                                space_filled_so_far += written
+                                space_to_fill -= written
+                                if written < file_size:
+                                    print("Cảnh báo: Không thể ghi thêm dữ liệu. Đĩa có thể đã đầy.")
+                                    break
+                                file_index += 1
+                        else:
+                            if space_to_fill > 0:
+                                final_fill_path = os.path.join(fill_file_dir, "fill_final.dat")
+                                self._create_fill_file(final_fill_path, space_to_fill, fill_space_target, space_filled_so_far)
+                        
+                        self.creation_worker.status.emit("Đã lấp đầy dung lượng trống.")
+                        print("Hoàn tất việc lấp đầy dung lượng trống.")
+
+                except Exception as fill_error:
+                    print(f"Lỗi trong quá trình lấp đầy dung lượng: {fill_error}")
+                    self.creation_worker.status.emit(f"Cảnh báo: Không thể lấp đầy dung lượng trống. Lỗi: {fill_error}")
+            
             self.creation_worker.progress.emit(100)
             self.creation_worker.status.emit("Hoàn tất! USB đã sẵn sàng.")
 
@@ -2488,6 +2652,9 @@ class PageFinalize(QWidget):
         self.status_label.setText(text)
 
 def main():
+    # Cài đặt bộ lọc thông điệp để ẩn các cảnh báo QPainter không cần thiết
+    qInstallMessageHandler(qt_message_handler)
+    
     # Bật nhận biết DPI cho ứng dụng để scaling hoạt động chính xác
     QApplication.setHighDpiScaleFactorRoundingPolicy(Qt.HighDpiScaleFactorRoundingPolicy.PassThrough)
     

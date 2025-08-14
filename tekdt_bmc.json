@@ -1,0 +1,21 @@
+{
+    "device": "\\\\.\\PHYSICALDRIVE1",
+    "device_name": "JetFlash Transcend 8GB (7.35 GB) - USB",
+    "partition_scheme": "GPT",
+    "filesystem": "ExFAT",
+    "theme": "Purple.zip",
+    "fill_space": true,
+    "iso_list": [],
+    "windows_edition": null,
+    "windows_edition_index": null,
+    "device_details": {
+        "BusType": "USB",
+        "DeviceID": "1",
+        "FriendlyName": "JetFlash Transcend 8GB",
+        "MediaType": "Unspecified",
+        "ProductID": null,
+        "SerialNumber": "AA00000000000489",
+        "Size": 7893680128,
+        "VendorID": null
+    }
+}
