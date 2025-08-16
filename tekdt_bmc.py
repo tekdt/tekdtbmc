@@ -81,7 +81,7 @@ if not str(BASE_DIR).startswith(tempfile.gettempdir()):
     pass
 
 # --- Cấu hình và Hằng số ---
-APP_VERSION = "1.0.0"
+APP_VERSION = "1.0.1"
 CONFIG_FILE = BASE_DIR / "tekdt_bmc.json"
 
 # Định nghĩa tất cả các đường dẫn dựa trên BASE_DIR
@@ -480,10 +480,15 @@ class USBBootCreator(QMainWindow):
             startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
             startupinfo.wShowWindow = 0 # SW_HIDE
 
+            flags = subprocess.CREATE_NEW_PROCESS_GROUP
+            
             self.ais_process = subprocess.Popen(
                 [TEKDTAIS_EXE, "--embed-mode"], # Argument để AIS biết nó đang được nhúng
                 cwd=TEKDTAIS_DIR,
-                startupinfo=startupinfo
+                startupinfo=startupinfo,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                creationflags=flags
             )
 
             self.find_ais_window_timer = QTimer(self)
