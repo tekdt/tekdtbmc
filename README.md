@@ -1,10 +1,10 @@
-# TekDTBMC
+# TekDT BMC
 TekDT BMC là công cụ tạo thiết bị có thể chứa nhiều bộ cài hệ điều hành, tương thích với nhiều loại máy tính có cấu hình khác nhau và quá trình cài đặt hệ điều hành diễn ra một cách tự động.
 - Tên phần mềm: TekDT BMC
 - Tác giả: TekDT
 - Mô tả: Phần mềm tạo USB boot tương thích với nhiều cấu hình máy tính khác nhau, tích hợp cài đặt phần mềm tự động sau khi cài đặt Windows.
-- Ngày phát hành: 07-08-2025
-- Phiên bản: 1.0.0
+- Ngày phát hành: 14-08-2025
+- Phiên bản: 1.0.1
 - Email: dinhtrungtek@gmail.com
 - Telegram: @tekdt1152
 - Facebook: @tekdtcom
