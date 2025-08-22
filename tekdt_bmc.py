@@ -18,14 +18,14 @@ from ctypes import wintypes
 from pathlib import Path
 from subprocess import run
 from urllib.request import urlretrieve
-from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QButtonGroup,
+from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QButtonGroup,
                              QHBoxLayout, QPushButton, QComboBox, QCheckBox,
                              QStackedWidget, QLabel, QFrame, QGroupBox, QLineEdit,
                              QFileDialog, QDialog, QListWidget, QRadioButton,
                              QProgressBar, QMessageBox, QMenu, QDialogButtonBox,
                              QGraphicsOpacityEffect, QListWidgetItem, QSizePolicy)
-from PyQt6.QtGui import QIcon, QAction, QFont, QColor, QPalette, QActionGroup
-from PyQt6.QtCore import Qt, QPropertyAnimation, QEasingCurve, QThread, pyqtSignal, QTimer, QSize, qInstallMessageHandler, QtMsgType
+from PySide6.QtGui import QIcon, QAction, QFont, QColor, QPalette, QActionGroup
+from PySide6.QtCore import Qt, QPropertyAnimation, QEasingCurve, QThread, Signal, QTimer, QSize, qInstallMessageHandler, QtMsgType
 
 def qt_message_handler(mode, context, message):
     """
@@ -81,7 +81,7 @@ if not str(BASE_DIR).startswith(tempfile.gettempdir()):
     pass
 
 # --- Cấu hình và Hằng số ---
-APP_VERSION = "1.0.1"
+APP_VERSION = "1.0.2"
 CONFIG_FILE = BASE_DIR / "tekdt_bmc.json"
 
 # Định nghĩa tất cả các đường dẫn dựa trên BASE_DIR
@@ -135,10 +135,10 @@ WINDOWS_SERVER_2025_URL = "https://go.microsoft.com/fwlink/?linkid=2293312&clcid
 
 # --- Lớp Worker cho các tác vụ nền --
 class Worker(QThread):
-    progress = pyqtSignal(int)
-    status = pyqtSignal(str)
-    finished = pyqtSignal(bool, str)
-    result = pyqtSignal(object)
+    progress = Signal(int)
+    status = Signal(str)
+    finished = Signal(bool, str)
+    result = Signal(object)
 
     def __init__(self, target, *args, **kwargs):
         super().__init__()
