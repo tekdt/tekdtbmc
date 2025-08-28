@@ -2,7 +2,7 @@
 
 setlocal
 
-py -m nuitka tekdt_bmc.py --standalone --onefile --windows-icon-from-ico=logo.ico --enable-plugin=pyside6 --output-dir=build --windows-console-mode=disable --remove-output
+py -m nuitka tekdt_bmc.py --standalone --onefile --windows-icon-from-ico=logo.ico --enable-plugin=pyside6 --output-dir=build --windows-console-mode=disable --remove-output --windows-uac-admin
 
 
 :: Lấy đường dẫn hiện tại (nơi chứa file batch)
