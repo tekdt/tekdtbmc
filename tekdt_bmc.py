@@ -2229,16 +2229,24 @@ class PageISOSelect(QWidget):
     def _get_cloudflare_bypass(self, url):
         """Sử dụng cloudscraper để bypass CloudFlare và lấy header/cookie cho aria2c."""
         try:
-            scraper = cloudscraper.create_scraper()  # Tạo scraper với solver JS tự động
-            response = scraper.head(url)  # Chỉ lấy header để kiểm tra bypass (không tải full)
+            # Nâng cấp scraper với browser preset để giả lập Chrome trên Windows
+            scraper = cloudscraper.create_scraper(
+                browser={'browser': 'chrome', 'platform': 'windows', 'desktop': True}
+            )
+            
+            # Thêm delay ngắn để tránh rate limit CloudFlare
+            time.sleep(1)
+            
+            # Sử dụng GET thay vì HEAD để fetch đầy đủ hơn (nếu có challenge JS)
+            response = scraper.get(url, stream=True)  # stream=True để không tải full file lớn
             
             if response.status_code != 200:
-                raise Exception(f"Không thể bypass CloudFlare cho {url}. Mã lỗi: {response.status_code}")
+                raise Exception(f"Không thể bypass CloudFlare cho {url}. Mã lỗi: {response.status_code}. Nội dung lỗi: {response.text[:200]}")  # Thêm text để debug
             
-            # Lấy headers từ scraper (chỉ các header cần thiết)
+            # Lấy headers từ scraper (thêm Referer mặc định)
             headers = {
                 'User-Agent': scraper.headers.get('User-Agent', ''),
-                'Referer': scraper.headers.get('Referer', ''),
+                'Referer': 'https://massgrave.dev/',  # Thêm Referer để bypass check từ massgrave.dev
                 'Accept': scraper.headers.get('Accept', '*/*'),
                 'Accept-Language': scraper.headers.get('Accept-Language', 'en-US,en;q=0.9'),
                 # Thêm các header khác nếu cần từ scraper
