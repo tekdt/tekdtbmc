@@ -2166,8 +2166,6 @@ class PageISOSelect(QWidget):
                     cb = QCheckBox(name)
                     self.massgrave_checkboxes.append((cb, link))
                     self.massgrave_grid_layout.addWidget(cb, i, 0)
-            
-            self.download_status_label.setText("Sẵn sàng tải từ MassGrave.Dev.")
 
         except requests.exceptions.RequestException as e:
             self.download_status_label.setText("Lỗi: Không thể kết nối hoặc lấy dữ liệu.\nVui lòng kiểm tra lại kết nối Internet.")

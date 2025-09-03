@@ -5,9 +5,9 @@
 	"Windows 11 IoT Enterprise LTSC 2024": "https://drive.massgrave.dev/en-us_windows_11_iot_enterprise_ltsc_2024_x64_dvd_f6b14814.iso",
 	"Windows 11 Enterprise LTSC 2024": "https://drive.massgrave.dev/en-us_windows_11_enterprise_ltsc_2024_x64_dvd_965cfb00.iso",
 	"Windows 11 Consumer 24H2": "https://drive.massgrave.dev/en-us_windows_11_enterprise_ltsc_2024_x64_dvd_965cfb00.iso",
-	"Windows 10 Consumer 22H2 64 bit": "https://drive.massgrave.dev/en-us_windows_10_consumer_editions_version_22h2_updated_aug_2025_x64_dvd_65bb5415.iso",
-	"Windows 10 Consumer 22H2 32 bit": "https://drive.massgrave.dev/en-us_windows_10_consumer_editions_version_22h2_updated_aug_2025_x86_dvd_65bb5415.iso",
-	"Windows 10 Business 22H2 64 bit": "https://drive.massgrave.dev/en-us_windows_10_business_editions_version_22h2_updated_aug_2025_x64_dvd_a34ca02d.iso",
-	"Windows 10 Business 22H2 32 bit": "https://drive.massgrave.dev/en-us_windows_10_business_editions_version_22h2_updated_aug_2025_x86_dvd_1714c7a5.iso",
+	"Windows 10 Consumer 22H2 (x64)": "https://drive.massgrave.dev/en-us_windows_10_consumer_editions_version_22h2_updated_aug_2025_x64_dvd_65bb5415.iso",
+	"Windows 10 Consumer 22H2 (x86)": "https://drive.massgrave.dev/en-us_windows_10_consumer_editions_version_22h2_updated_aug_2025_x86_dvd_65bb5415.iso",
+	"Windows 10 Business 22H2 (x64)": "https://drive.massgrave.dev/en-us_windows_10_business_editions_version_22h2_updated_aug_2025_x64_dvd_a34ca02d.iso",
+	"Windows 10 Business 22H2 (x86)": "https://drive.massgrave.dev/en-us_windows_10_business_editions_version_22h2_updated_aug_2025_x86_dvd_1714c7a5.iso",
 	"Windows 10 IoT Enterprise 22H2": "https://drive.massgrave.dev/en-us_windows_10_iot_enterprise_version_22h2_x64_dvd_51cc370f.iso"
 }
