@@ -2668,6 +2668,7 @@ class PageISOSelect(QWidget):
                 '--console-log-level=info',
                 '--summary-interval=1',
                 '-c', '-x16', '-s16',
+                '--user-agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/115.0"',
                 '-d', ISOS_DIR,
                 '-o', iso_filename,
                 iso_url
