@@ -139,12 +139,18 @@ class Worker(QThread):
     status = Signal(str)
     finished = Signal(bool, str)
     result = Signal(object)
+    
+    # Tín hiệu này sẽ được phát ra ngay trước khi luồng kết thúc,
+    # mang theo chính đối tượng luồng đó.
+    about_to_finish = Signal(QThread)
 
-    def __init__(self, target, *args, **kwargs):
+    def __init__(self, name, target, *args, **kwargs):
         super().__init__()
+        self.name = name # Tên để dễ debug
         self.target = target
         self.args = args
         self.kwargs = kwargs
+        print(f"Luồng '{self.name}' đã được tạo.")
 
     def run(self):
         try:
@@ -153,12 +159,18 @@ class Worker(QThread):
                 self.result.emit(res)
             self.finished.emit(True, "Tác vụ hoàn thành thành công.")
         except Exception as e:
-            self.finished.emit(False, f"Lỗi trong luồng Worker:\n{str(e)}")
+            # Bỏ qua lỗi khi luồng bị terminate đột ngột
+            if not isinstance(e, SystemExit):
+                 self.finished.emit(False, f"Lỗi trong luồng Worker '{self.name}':\n{str(e)}")
+        finally:
+            # Luôn phát tín hiệu này, dù tác vụ thành công hay thất bại
+            self.about_to_finish.emit(self)
 
 # --- Lớp chính của ứng dụng ---
 class USBBootCreator(QMainWindow):
     def __init__(self):
         super().__init__()
+        self.active_workers = []
         self.ais_process = None
         self.ais_hwnd = None
         self.ais_monitor_timer = QTimer(self)
@@ -405,24 +417,28 @@ class USBBootCreator(QMainWindow):
             return False
  
     def closeEvent(self, event):
+        """Sự kiện đóng ứng dụng, đảm bảo dừng tất cả các tác vụ nền."""
+        print("Cửa sổ đang đóng, bắt đầu quy trình dọn dẹp...")
+
+        # Dừng các tiến trình và timer không phải QThread trước
         self.usb_monitor_timer.stop()
-        print("Cửa sổ đang đóng, kiểm tra và dừng các tác vụ...")
-
-        # Dừng luồng tải file (nếu có)
-        self.page2.stop_download_process()
-
-        # << Dừng luồng tạo USB (nếu có) >>
-        if hasattr(self, 'creation_worker') and self.creation_worker.isRunning():
-            print("Đang dừng luồng tạo USB...")
-            self.creation_worker.terminate()
-            self.creation_worker.wait(3000)
-            print("Luồng tạo USB đã dừng.")
-        
-        self.uninstall_wincdemu_driver()
-        
-        # Dừng TekDT AIS nếu đang chạy
+        self.page2.is_cancelling = True # Báo cho luồng tải biết để hủy
+        if self.page2.aria2_process:
+             self.page2.aria2_process.kill()
         self._stop_tekdtais()
-        
+        self.uninstall_wincdemu_driver()
+
+        # Dừng tất cả các luồng worker đang chạy
+        # Lặp qua một bản sao của danh sách để tránh lỗi khi xóa phần tử
+        for worker in list(self.active_workers):
+            if worker.isRunning():
+                print(f"Đang yêu cầu dừng luồng '{worker.name}'...")
+                worker.terminate()
+                # Chờ tối đa 5 giây cho mỗi luồng
+                if not worker.wait(5000):
+                    print(f"CẢNH BÁO: Luồng '{worker.name}' không phản hồi sau 5 giây.")
+
+        print("Quy trình dọn dẹp hoàn tất. Ứng dụng sẽ đóng.")
         event.accept()
     
     def show_themed_message(self, title, text, icon=QMessageBox.Icon.NoIcon, 
@@ -537,6 +553,32 @@ class USBBootCreator(QMainWindow):
             # Nếu file không tồn tại, tạo nó với các giá trị mặc định
             print("Không tìm thấy file cấu hình, đang tạo file mới với giá trị mặc định.")
             self.save_config()
+    
+    def _create_and_start_worker(self, name, target, on_result=None, on_finished=None, on_status=None, on_progress=None, *args, **kwargs):
+        """Tạo, cấu hình, theo dõi và khởi chạy một Worker."""
+        worker = Worker(name, target, *args, **kwargs)
+
+        # Kết nối các tín hiệu nếu có hàm xử lý tương ứng
+        if on_result: worker.result.connect(on_result)
+        if on_finished: worker.finished.connect(on_finished)
+        if on_status: worker.status.connect(on_status)
+        if on_progress: worker.progress.connect(on_progress)
+
+        # Quan trọng: Kết nối tín hiệu tự hủy theo dõi
+        worker.about_to_finish.connect(self._on_worker_finished)
+
+        # Thêm vào danh sách theo dõi và khởi chạy
+        self.active_workers.append(worker)
+        print(f"Số luồng đang hoạt động: {len(self.active_workers)}")
+        worker.start()
+        return worker
+
+    def _on_worker_finished(self, worker_thread):
+        """Xóa worker khỏi danh sách theo dõi khi nó kết thúc."""
+        if worker_thread in self.active_workers:
+            self.active_workers.remove(worker_thread)
+            print(f"Luồng '{worker_thread.name}' đã kết thúc và được xóa. Còn lại: {len(self.active_workers)} luồng.")
+        worker_thread.deleteLater() # Đảm bảo worker được dọn dẹp an toàn
     
     def _find_ais_window_task(self):
         self.find_ais_window_timer.attempts += 1
@@ -833,11 +875,12 @@ class USBBootCreator(QMainWindow):
         self.save_config()
 
     def check_for_updates(self):
-        """Kiểm tra và tải các công cụ cần thiết."""
-        self.update_worker = Worker(self._update_task)
-        self.update_worker.status.connect(self.init_status_label.setText)
-        self.update_worker.finished.connect(self.on_updates_finished)
-        self.update_worker.start()
+        self._create_and_start_worker(
+            name="ToolUpdater",
+            target=self._update_task,
+            on_status=self.init_status_label.setText,
+            on_finished=self.on_updates_finished
+        )
         
     def install_wincdemu_driver(self):
         """[FIX] Cài đặt driver WinCDEmu portable khi ứng dụng khởi động."""
@@ -897,10 +940,12 @@ class USBBootCreator(QMainWindow):
             return
             
         self.is_checking_usb = True
-        self.usb_check_worker = Worker(self._check_usb_presence_task, selected_details)
-        self.usb_check_worker.result.connect(self._handle_usb_presence_result)
-        # Không cần kết nối finished signal nếu không có xử lý đặc biệt khi kết thúc
-        self.usb_check_worker.start()
+        self._create_and_start_worker(
+            name="USBPresenceCheck",
+            target=self._check_usb_presence_task,
+            on_result=self._handle_usb_presence_result,
+            args=[selected_details] # Quan trọng: Truyền tham số qua args
+        )
     
     def _check_usb_presence_task(self, selected_details):
         """Tác vụ chạy trong luồng nền để kiểm tra sự tồn tại của USB."""
@@ -1159,11 +1204,13 @@ class USBBootCreator(QMainWindow):
 
         if reply == QMessageBox.StandardButton.Yes:
             self.page3.show_progress_ui(True)
-            self.creation_worker = Worker(self.create_usb_task)
-            self.creation_worker.status.connect(self.page3.update_status)
-            self.creation_worker.progress.connect(self.page3.update_progress)
-            self.creation_worker.finished.connect(self.on_creation_finished)
-            self.creation_worker.start()
+            self._create_and_start_worker(
+                name="USBCreator",
+                target=self.create_usb_task,
+                on_status=self.page3.update_status,
+                on_progress=self.page3.update_progress,
+                on_finished=self.on_creation_finished
+            )
 
     def _create_fill_file(self, file_path, size_in_bytes, total_fill_target, space_filled_so_far):
         """
@@ -1796,10 +1843,12 @@ class PageDeviceSelect(QWidget):
             return
 
         self.is_fetching = True
-        self.drive_worker = Worker(self._fetch_drives_task)
-        self.drive_worker.result.connect(self._update_drive_combo)
-        self.drive_worker.finished.connect(self._on_fetch_finished)
-        self.drive_worker.start()
+        self.main_app._create_and_start_worker(
+            name="DriveFetcher",
+            target=self._fetch_drives_task,
+            on_result=self._update_drive_combo,
+            on_finished=self._on_fetch_finished
+        )
 
     def _on_fetch_finished(self, success, message):
         """
@@ -2470,11 +2519,13 @@ class PageISOSelect(QWidget):
             return
 
         self._set_ui_state(downloading=True)
-        self.download_worker = Worker(self._download_task)
-        self.download_worker.status.connect(self.download_status_label.setText)
-        self.download_worker.finished.connect(self.on_download_finished)
-        self.download_worker.result.connect(self.on_download_result)
-        self.download_worker.start()
+        self.main_app._create_and_start_worker(
+            name="Downloader",
+            target=self._download_task,
+            on_status=self.download_status_label.setText,
+            on_finished=self.on_download_finished,
+            on_result=self.on_download_result
+        )
     
     def _set_ui_state(self, downloading=False, long_task=False):
         """Cập nhật trạng thái UI cho các tác vụ tải hoặc tác vụ nền dài."""
