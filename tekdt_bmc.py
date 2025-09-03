@@ -407,7 +407,17 @@ class USBBootCreator(QMainWindow):
     def closeEvent(self, event):
         self.usb_monitor_timer.stop()
         print("Cửa sổ đang đóng, kiểm tra và dừng các tác vụ...")
+
+        # Dừng luồng tải file (nếu có)
         self.page2.stop_download_process()
+
+        # << Dừng luồng tạo USB (nếu có) >>
+        if hasattr(self, 'creation_worker') and self.creation_worker.isRunning():
+            print("Đang dừng luồng tạo USB...")
+            self.creation_worker.terminate()
+            self.creation_worker.wait(3000)
+            print("Luồng tạo USB đã dừng.")
+        
         self.uninstall_wincdemu_driver()
         
         # Dừng TekDT AIS nếu đang chạy
@@ -2659,18 +2669,25 @@ class PageISOSelect(QWidget):
             self.start_button.setEnabled(not long_task)
 
     def stop_download_process(self):
-        """Dừng tiến trình aria2c.exe nếu nó đang chạy."""
+        """Dừng tiến trình aria2c.exe VÀ luồng QThread quản lý nó."""
+        # Dừng tiến trình con aria2c.exe (logic cũ)
         if self.aria2_process and self.aria2_process.poll() is None:
             print("Đang dừng tiến trình aria2c.exe...")
             self.aria2_process.terminate()
             try:
-                # Chờ một chút để tiến trình kết thúc
-                self.aria2_process.wait(timeout=5)
-                print("Đã dừng tiến trình aria2c.exe.")
+                self.aria2_process.wait(timeout=1)
             except subprocess.TimeoutExpired:
-                print("Không thể dừng aria2c.exe một cách nhẹ nhàng, buộc phải kill.")
                 self.aria2_process.kill()
         self.aria2_process = None
+
+        # Kiểm tra xem download_worker có tồn tại và đang chạy không
+        if hasattr(self, 'download_worker') and self.download_worker.isRunning():
+            print("Đang dừng luồng tải file...")
+            self.download_worker.terminate() # Dừng luồng một cách bắt buộc
+            # Chờ luồng kết thúc hoàn toàn trong tối đa 2 giây
+            # Đây là bước quan trọng nhất để sửa lỗi
+            self.download_worker.wait(2000) 
+            print("Luồng tải file đã dừng.")
 
     def cancel_download_clicked(self):
         """Xử lý khi người dùng bấm nút Hủy Tải."""
