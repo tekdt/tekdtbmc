@@ -19,7 +19,7 @@ from pathlib import Path
 from subprocess import run
 from urllib.request import urlretrieve
 from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QButtonGroup,
-                             QHBoxLayout, QPushButton, QComboBox, QCheckBox,
+                             QHBoxLayout, QPushButton, QComboBox, QCheckBox, QGridLayout,
                              QStackedWidget, QLabel, QFrame, QGroupBox, QLineEdit,
                              QFileDialog, QDialog, QListWidget, QRadioButton,
                              QProgressBar, QMessageBox, QMenu, QDialogButtonBox,
@@ -1897,6 +1897,9 @@ class PageISOSelect(QWidget):
         self.is_cancelling = False
         self.downloads_queue = []
         self.arch_button_group = QButtonGroup(self)
+        self.source_button_group = QButtonGroup(self)
+        self.massgrave_links = {} # Lưu trữ link từ file JSON
+        self.massgrave_checkboxes = [] # Lưu trữ các checkbox của MassGrave
         self.init_ui()
 
     def init_ui(self):
@@ -1925,57 +1928,142 @@ class PageISOSelect(QWidget):
         iso_buttons_layout.addWidget(remove_iso_button)
         group1_layout.addLayout(iso_buttons_layout)
         layout.addWidget(self.iso_list_group)
+        
+        source_group = QGroupBox("Nguồn tải")
+        source_layout = QHBoxLayout(source_group)
+        source_layout.setAlignment(Qt.AlignmentFlag.AlignLeft)
+
+        self.microsoft_radio = QRadioButton("Microsoft")
+        self.microsoft_radio.setChecked(True)
+        self.massgrave_radio = QRadioButton("MassGrave.Dev")
+
+        self.source_button_group.addButton(self.microsoft_radio)
+        self.source_button_group.addButton(self.massgrave_radio)
+        self.source_button_group.buttonToggled.connect(self._on_source_changed)
+
+        source_layout.addWidget(self.microsoft_radio)
+        source_layout.addWidget(self.massgrave_radio)
+        layout.addWidget(source_group)
 
         # Group 2: Tải tự động
-        self.download_group = QGroupBox("Tải tự động từ Microsoft")
-        self.download_group_layout = QVBoxLayout(self.download_group)
+        self.microsoft_download_group = QGroupBox("Tải tự động từ Microsoft")
+        self.microsoft_download_group_layout = QVBoxLayout(self.microsoft_download_group)
         
         self.win_options = {}
         
         # Windows 10 & 11 (dùng Fido)
-        fido_versions = { "Windows 11": ["x64"], "Windows 10": ["x64", "x86"] }
-        for win, archs in fido_versions.items():
-            cb = QCheckBox(f"{win} ({', '.join(archs)})")
-            self.win_options[win] = {'checkbox': cb, 'type': 'fido', 'archs': archs}
-            self.download_group_layout.addWidget(cb)
-            
-            # Nếu là Windows 10 thì tạo radio button chọn kiến trúc
-            if win == "Windows 10":
-                radios = {}
-                radio_layout = QHBoxLayout()
-                for arch in archs:
-                    rb = QRadioButton(arch)
-                    rb.setVisible(False)
-                    radio_layout.addWidget(rb)
-                    self.arch_button_group.addButton(rb)
-                    radios[arch] = rb
-                self.win_options[win]['radios'] = radios
-                self.download_group_layout.addLayout(radio_layout)
-                # Sự kiện hiện/ẩn radio khi tick checkbox
-                cb.toggled.connect(lambda checked, win=win: self.toggle_arch_options(checked, win))
+        microsoft_options_layout = QGridLayout()
+        microsoft_options_layout.setColumnStretch(0, 1) # Cho 2 cột có độ rộng bằng nhau
+        microsoft_options_layout.setColumnStretch(1, 1)
 
-        self.download_group_layout.addWidget(QFrame(self, frameShape=QFrame.Shape.HLine, frameShadow=QFrame.Shadow.Sunken))
+        # --- CỘT 1 ---
 
-        # Windows Server (dùng link trực tiếp)
+        # Windows 11
+        win11_cb = QCheckBox("Windows 11 (x64)")
+        self.win_options["Windows 11"] = {'checkbox': win11_cb, 'type': 'fido', 'archs': ["x64"]}
+        microsoft_options_layout.addWidget(win11_cb, 0, 0) # Hàng 0, Cột 0
+
+        # Windows 10 (gồm Checkbox và Radio Buttons)
+        # Tạo một layout dọc riêng cho cụm Win10 để chúng luôn đi cùng nhau
+        win10_container = QWidget()
+        win10_layout = QVBoxLayout(win10_container)
+        win10_layout.setContentsMargins(0, 0, 0, 0)
+        
+        win10_cb = QCheckBox("Windows 10 (x64, x86)")
+        self.win_options["Windows 10"] = {'checkbox': win10_cb, 'type': 'fido', 'archs': ["x64", "x86"]}
+        win10_layout.addWidget(win10_cb)
+        
+        # Radio buttons cho Win 10
+        win10_radios = {}
+        win10_radio_layout = QHBoxLayout()
+        for arch in ["x64", "x86"]:
+            rb = QRadioButton(arch)
+            rb.setVisible(False)
+            win10_radio_layout.addWidget(rb)
+            self.arch_button_group.addButton(rb)
+            win10_radios[arch] = rb
+        self.win_options["Windows 10"]['radios'] = win10_radios
+        win10_layout.addLayout(win10_radio_layout)
+        win10_cb.toggled.connect(lambda checked, win="Windows 10": self.toggle_arch_options(checked, win))
+        
+        microsoft_options_layout.addWidget(win10_container, 1, 0) # Hàng 1, Cột 0
+
+        # --- CỘT 2 ---
+        
+        # Windows Server
         server_versions = {
             "Windows Server 2025": WINDOWS_SERVER_2025_URL,
             "Windows Server 2022": WINDOWS_SERVER_2022_URL,
             "Windows Server 2016": WINDOWS_SERVER_2016_URL
         }
+        
+        row_index = 0
         for name, url in server_versions.items():
             cb = QCheckBox(name)
             self.win_options[name] = {'checkbox': cb, 'type': 'direct', 'url': url}
-            self.download_group_layout.addWidget(cb)
+            microsoft_options_layout.addWidget(cb, row_index, 1) # Hàng 0, 1, 2 ở Cột 1
+            row_index += 1
+            
+        # Thêm layout lưới vào layout chính của group
+        self.microsoft_download_group_layout.addLayout(microsoft_options_layout)
+        
+        # fido_versions = { "Windows 11": ["x64"], "Windows 10": ["x64", "x86"] }
+        # for win, archs in fido_versions.items():
+            # cb = QCheckBox(f"{win} ({', '.join(archs)})")
+            # self.win_options[win] = {'checkbox': cb, 'type': 'fido', 'archs': archs}
+            # self.microsoft_download_group_layout.addWidget(cb)
+            
+            # # Nếu là Windows 10 thì tạo radio button chọn kiến trúc
+            # if win == "Windows 10":
+                # radios = {}
+                # radio_layout = QHBoxLayout()
+                # for arch in archs:
+                    # rb = QRadioButton(arch)
+                    # rb.setVisible(False)
+                    # radio_layout.addWidget(rb)
+                    # self.arch_button_group.addButton(rb)
+                    # radios[arch] = rb
+                # self.win_options[win]['radios'] = radios
+                # self.microsoft_download_group_layout.addLayout(radio_layout)
+                # # Sự kiện hiện/ẩn radio khi tick checkbox
+                # cb.toggled.connect(lambda checked, win=win: self.toggle_arch_options(checked, win))
+
+        # self.microsoft_download_group_layout.addWidget(QFrame(self, frameShape=QFrame.Shape.HLine, frameShadow=QFrame.Shadow.Sunken))
+
+        # # Windows Server (dùng link trực tiếp)
+        # server_versions = {
+            # "Windows Server 2025": WINDOWS_SERVER_2025_URL,
+            # "Windows Server 2022": WINDOWS_SERVER_2022_URL,
+            # "Windows Server 2016": WINDOWS_SERVER_2016_URL
+        # }
+        # for name, url in server_versions.items():
+            # cb = QCheckBox(name)
+            # self.win_options[name] = {'checkbox': cb, 'type': 'direct', 'url': url}
+            # self.microsoft_download_group_layout.addWidget(cb)
 
         self.download_button = QPushButton("Tải các mục đã chọn")
         self.download_button.clicked.connect(self.start_downloads)
-        self.download_group_layout.addWidget(self.download_button)
+        self.microsoft_download_group_layout.addWidget(self.download_button)
 
         self.download_status_label = QLabel("")
         self.download_status_label.setObjectName("DownloadStatusLabel")
         self.download_status_label.setWordWrap(True)
-        self.download_group_layout.addWidget(self.download_status_label)
-        layout.addWidget(self.download_group)
+        self.microsoft_download_group_layout.addWidget(self.download_status_label)
+        layout.addWidget(self.microsoft_download_group)
+        
+        self.massgrave_download_group = QGroupBox("Tải tự động từ MassGrave.Dev")
+        massgrave_main_layout = QVBoxLayout(self.massgrave_download_group)
+
+        # Layout lưới cho các checkbox, sẽ được thêm nội dung sau
+        self.massgrave_grid_layout = QGridLayout()
+        massgrave_main_layout.addLayout(self.massgrave_grid_layout)
+
+        self.massgrave_download_button = QPushButton("Tải các mục đã chọn")
+        self.massgrave_download_button.clicked.connect(self.start_downloads)
+        massgrave_main_layout.addWidget(self.massgrave_download_button)
+
+        self.massgrave_download_group.setVisible(False) # Quan trọng: Ẩn đi lúc đầu
+        layout.addWidget(self.massgrave_download_group)
         
         layout.addStretch()
 
@@ -2020,6 +2108,64 @@ class PageISOSelect(QWidget):
             for rb in options_data['radios'].values():
                 rb.setChecked(False)
             self.arch_button_group.setExclusive(True)
+    
+    def _on_source_changed(self, button, checked):
+        """Xử lý khi người dùng thay đổi nguồn tải."""
+        if not checked:
+            return
+
+        is_microsoft = (button == self.microsoft_radio)
+        self.microsoft_download_group.setVisible(is_microsoft)
+        self.massgrave_download_group.setVisible(not is_microsoft)
+
+        # Nếu chuyển sang MassGrave và chưa có dữ liệu, hãy tải nó
+        if not is_microsoft and not self.massgrave_links:
+            self._fetch_and_populate_massgrave_links()
+
+    def _fetch_and_populate_massgrave_links(self):
+        """Lấy danh sách link từ GitHub và tạo các checkbox tương ứng."""
+        url = "https://raw.githubusercontent.com/tekdt/tekdtbmc/refs/heads/main/ISOs_link.json"
+        try:
+            self.download_status_label.setText("Đang lấy danh sách phiên bản từ MassGrave.Dev...")
+            QApplication.processEvents() # Cập nhật giao diện
+            
+            response = requests.get(url, timeout=10)
+            response.raise_for_status()
+            self.massgrave_links = response.json()
+            
+            # Xóa các widget cũ trong layout (nếu có)
+            for i in reversed(range(self.massgrave_grid_layout.count())): 
+                self.massgrave_grid_layout.itemAt(i).widget().setParent(None)
+            self.massgrave_checkboxes.clear()
+
+            # Tạo các checkbox mới
+            items = list(self.massgrave_links.items())
+            num_items = len(items)
+            
+            if num_items > 5: # Chia 2 cột
+                midpoint = (num_items + 1) // 2
+                for i, (name, link) in enumerate(items):
+                    cb = QCheckBox(name)
+                    self.massgrave_checkboxes.append((cb, link))
+                    if i < midpoint:
+                        self.massgrave_grid_layout.addWidget(cb, i, 0)
+                    else:
+                        self.massgrave_grid_layout.addWidget(cb, i - midpoint, 1)
+            else: # Dùng 1 cột
+                for i, (name, link) in enumerate(items):
+                    cb = QCheckBox(name)
+                    self.massgrave_checkboxes.append((cb, link))
+                    self.massgrave_grid_layout.addWidget(cb, i, 0)
+            
+            self.download_status_label.setText("Sẵn sàng tải từ MassGrave.Dev.")
+
+        except requests.exceptions.RequestException as e:
+            self.download_status_label.setText("Lỗi: Không thể kết nối hoặc lấy dữ liệu.\nVui lòng kiểm tra lại kết nối Internet.")
+            print(f"Lỗi khi lấy file JSON: {e}")
+            # Xóa các widget cũ (nếu có) để đảm bảo group trống
+            for i in reversed(range(self.massgrave_grid_layout.count())):
+                self.massgrave_grid_layout.itemAt(i).widget().setParent(None)
+            self.massgrave_checkboxes.clear()
     
     def browse_iso(self):
         file_paths, _ = QFileDialog.getOpenFileNames(self, "Chọn các file ISO", str(ISOS_DIR), "ISO Files (*.iso)")
@@ -2292,45 +2438,25 @@ class PageISOSelect(QWidget):
                     rb.setChecked(False)
                 self.arch_button_group.setExclusive(True)
 
-    # def on_arch_selected(self, checked, win_version, arch):
-        # if checked:
-            # msg_box = QMessageBox(self)
-            # msg_box.setIcon(QMessageBox.Icon.Question)
-            # msg_box.setWindowTitle("Xác nhận tải xuống")
-            # msg_box.setText(f"Bạn có chắc chắn muốn bắt đầu quá trình tải xuống file ISO cho\n"
-                            # f"{win_version} ({arch}) không?")
-            # msg_box.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
-            # msg_box.setDefaultButton(QMessageBox.StandardButton.No)
-            
-            # reply = msg_box.exec()
-
-            # if reply == QMessageBox.StandardButton.Yes:
-                # self._set_ui_state(downloading=True) # Khóa UI trước khi tải
-                # self.iso_path_edit.clear()
-                # self.main_app.config["iso_path"] = None
-                # self.next_button.setEnabled(False)
-                # self.download_status_label.setText(f"Đang chuẩn bị tải {win_version} {arch}...")
-                
-                # self.download_worker = Worker(self._download_task, win_version, arch)
-                # self.download_worker.status.connect(self.download_status_label.setText)
-                # self.download_worker.finished.connect(self.on_download_finished)
-                # self.download_worker.result.connect(self.on_download_result)
-                # self.download_worker.start()
-            # else:
-                # rb_to_uncheck = self.win_options[win_version]['radios'][arch]
-                # self.arch_button_group.setExclusive(False)
-                # rb_to_uncheck.setChecked(False)
-                # self.arch_button_group.setExclusive(True)
-                # self.download_status_label.setText("")
-
     def start_downloads(self):
-        self.downloads_queue = []
-        for name, data in self.win_options.items():
-            if data['checkbox'].isChecked():
-                self.downloads_queue.append({'name': name, 'data': data})
-        
+        self.downloads_queue.clear() # Dọn dẹp hàng đợi cũ
+
+        if self.microsoft_radio.isChecked():
+            # Logic cũ cho nguồn Microsoft
+            for name, data in self.win_options.items():
+                if data['checkbox'].isChecked():
+                    self.downloads_queue.append({'name': name, 'data': data})
+        else:
+            # Logic mới cho nguồn MassGrave
+            for checkbox, url in self.massgrave_checkboxes:
+                if checkbox.isChecked():
+                    self.downloads_queue.append({
+                        'name': checkbox.text(),
+                        'data': {'type': 'direct', 'url': url}
+                    })
+
         if not self.downloads_queue:
-            self.main_app.show_themed_message("Thông báo", 
+            self.main_app.show_themed_message("Thông báo",
                                               "Vui lòng chọn ít nhất một phiên bản để tải.",
                                               icon=QMessageBox.Icon.Information)
             return
