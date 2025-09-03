@@ -14,6 +14,7 @@ import tempfile
 import string
 import ctypes
 import shlex
+import webbrowser
 from ctypes import wintypes
 from pathlib import Path
 from subprocess import run
@@ -168,6 +169,8 @@ class Worker(QThread):
 
 # --- Lớp chính của ứng dụng ---
 class USBBootCreator(QMainWindow):
+    new_version_found = Signal(str, str)
+    
     def __init__(self):
         super().__init__()
         self.active_workers = []
@@ -214,6 +217,7 @@ class USBBootCreator(QMainWindow):
         
         self.init_ui()
         self.apply_stylesheet()
+        self.new_version_found.connect(self.prompt_for_update)
         self.install_wincdemu_driver()
         
         self.lock_ui_for_updates()
@@ -395,6 +399,42 @@ class USBBootCreator(QMainWindow):
             }
         """)
 
+    def prompt_for_update(self, new_version, download_url):
+        """Hiển thị hộp thoại hỏi người dùng có muốn cập nhật không."""
+        message = (f"Đã có phiên bản mới <b>{new_version}</b>!\n"
+                   f"Phiên bản hiện tại của bạn là {APP_VERSION}.\n\n"
+                   "Bạn có muốn truy cập trang tải về không?")
+        
+        reply = self.show_themed_message("Có phiên bản mới!", message,
+                                       icon=QMessageBox.Icon.Information,
+                                       buttons=QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                                       defaultButton=QMessageBox.StandardButton.Yes)
+        
+        if reply == QMessageBox.StandardButton.Yes:
+            webbrowser.open(download_url)
+
+    def _check_self_update(self):
+        """Kiểm tra phiên bản của chính chương trình trên GitHub."""
+        API_URL = "https://api.github.com/repos/tekdt/tekdtbmc/releases/latest"
+        try:
+            response = requests.get(API_URL, timeout=5)
+            response.raise_for_status()
+            latest_release = response.json()
+            
+            remote_version_tag = latest_release.get("tag_name", "").lstrip('v') # Lấy tag và xóa chữ 'v' ở đầu
+            local_version = APP_VERSION
+
+            # So sánh phiên bản (cách này hoạt động tốt với chuỗi dạng X.Y.Z)
+            if remote_version_tag > local_version:
+                download_url = latest_release.get("html_url")
+                if download_url:
+                    # Gửi tín hiệu về luồng chính để hiển thị thông báo
+                    self.new_version_found.emit(remote_version_tag, download_url)
+        except requests.exceptions.RequestException as e:
+            print(f"Không thể kiểm tra phiên bản mới: {e}")
+        except Exception as e:
+            print(f"Lỗi không xác định khi kiểm tra phiên bản: {e}")
+    
     def is_admin(self):
         """Kiểm tra xem ứng dụng có đang chạy với quyền admin không."""
         try:
@@ -1001,12 +1041,16 @@ class USBBootCreator(QMainWindow):
     def _update_task(self):
         if not TOOLS_DIR.exists():
             TOOLS_DIR.mkdir()
-        self.update_worker.status.emit("Đang kiểm tra các công cụ...")
+
         has_internet = self._check_internet_connection()
         if has_internet:
-            self.update_worker.status.emit("Đã kết nối Internet. Sẵn sàng kiểm tra cập nhật.")
+            self.update_worker.status.emit("Đang kiểm tra phiên bản chương trình...")
+            self._check_self_update() # Gọi hàm kiểm tra phiên bản mới
+            self.update_worker.status.emit("Đã kết nối Internet. Sẵn sàng kiểm tra cập nhật công cụ.")
         else:
             self.update_worker.status.emit("Không có kết nối Internet. Sẽ sử dụng các công cụ hiện có.")
+
+        self.update_worker.status.emit("Đang kiểm tra các công cụ...")
 
         tools = [
             ("Fido", FIDO_SCRIPT_PATH, self._update_fido_script),
