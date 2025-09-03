@@ -15,6 +15,7 @@ import string
 import ctypes
 import shlex
 import webbrowser
+import cloudscraper
 from ctypes import wintypes
 from pathlib import Path
 from subprocess import run
@@ -2225,6 +2226,37 @@ class PageISOSelect(QWidget):
         if not is_microsoft and not self.massgrave_links:
             self._fetch_and_populate_massgrave_links()
 
+    def _get_cloudflare_bypass(self, url):
+        """Sử dụng cloudscraper để bypass CloudFlare và lấy header/cookie cho aria2c."""
+        try:
+            scraper = cloudscraper.create_scraper()  # Tạo scraper với solver JS tự động
+            response = scraper.head(url)  # Chỉ lấy header để kiểm tra bypass (không tải full)
+            
+            if response.status_code != 200:
+                raise Exception(f"Không thể bypass CloudFlare cho {url}. Mã lỗi: {response.status_code}")
+            
+            # Lấy headers từ scraper (chỉ các header cần thiết)
+            headers = {
+                'User-Agent': scraper.headers.get('User-Agent', ''),
+                'Referer': scraper.headers.get('Referer', ''),
+                'Accept': scraper.headers.get('Accept', '*/*'),
+                'Accept-Language': scraper.headers.get('Accept-Language', 'en-US,en;q=0.9'),
+                # Thêm các header khác nếu cần từ scraper
+            }
+            
+            # Lưu cookies vào file tạm (aria2c hỗ trợ --load-cookies)
+            cookie_file = os.path.join(tempfile.gettempdir(), f"cookies_{os.path.basename(url)}.txt")
+            with open(cookie_file, 'w') as f:
+                for name, value in scraper.cookies.items():
+                    f.write(f".{urlparse(url).netloc}\tTRUE\t/\tFALSE\t0\t{name}\t{value}\n")
+            
+            # Trả về list header dưới dạng ['Key: Value'] cho aria2c --header
+            header_list = [f"{k}: {v}" for k, v in headers.items() if v]
+            
+            return header_list, cookie_file
+        except Exception as e:
+            raise Exception(f"Lỗi khi bypass CloudFlare: {e}")
+    
     def _fetch_and_populate_massgrave_links(self):
         """Lấy danh sách link từ GitHub và tạo các checkbox tương ứng."""
         url = "https://raw.githubusercontent.com/tekdt/tekdtbmc/refs/heads/main/ISOs_link.json"
@@ -2539,7 +2571,7 @@ class PageISOSelect(QWidget):
                 self.arch_button_group.setExclusive(True)
 
     def start_downloads(self):
-        self.downloads_queue.clear() # Dọn dẹp hàng đợi cũ
+        self.downloads_queue.clear()  # Dọn dẹp hàng đợi cũ
 
         if self.microsoft_radio.isChecked():
             # Logic cũ cho nguồn Microsoft
@@ -2552,7 +2584,8 @@ class PageISOSelect(QWidget):
                 if checkbox.isChecked():
                     self.downloads_queue.append({
                         'name': checkbox.text(),
-                        'data': {'type': 'direct', 'url': url}
+                        'data': {'type': 'direct', 'url': url},
+                        'is_massgrave': True  # Thêm flag để phân biệt MassGrave
                     })
 
         if not self.downloads_queue:
@@ -2661,18 +2694,34 @@ class PageISOSelect(QWidget):
 
             self.download_worker.status.emit(f"({i+1}/{total_downloads}) Đang tải {iso_filename}...")
 
-            self.download_worker.status.emit(f"Bước 2/2: Đang tải file {iso_filename}...")
+            # THÊM PHẦN BYPASS CLOUDFLARE CHO MASSGRAVE
+            header_list = []  # Mặc định không có header đặc biệt
+            cookie_file = None  # Mặc định không có cookie
+            if item.get('is_massgrave'):  # Chỉ áp dụng cho MassGrave
+                self.download_worker.status.emit(f"Bước 1/2: Đang bypass CloudFlare cho {name}...")
+                header_list, cookie_file = self._get_cloudflare_bypass(iso_url)
+                self.download_worker.status.emit(f"Bước 2/2: Đã bypass. Đang tải file {iso_filename}...")
+            else:
+                self.download_worker.status.emit(f"Bước 2/2: Đang tải file {iso_filename}...")
             
+            # Lệnh aria2c cơ bản
             aria2_cmd = [
                 ARIA2_EXE,
                 '--console-log-level=info',
                 '--summary-interval=1',
                 '-c', '-x16', '-s16',
-                '--user-agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/115.0"',
                 '-d', ISOS_DIR,
                 '-o', iso_filename,
                 iso_url
             ]
+            
+            # Thêm header nếu có (cho MassGrave)
+            for header in header_list:
+                aria2_cmd.extend(['--header', header])
+            
+            # Thêm cookie nếu có (cho MassGrave)
+            if cookie_file:
+                aria2_cmd.extend(['--load-cookies', cookie_file])
 
             self.aria2_process = subprocess.Popen(
                 aria2_cmd,
@@ -2681,7 +2730,7 @@ class PageISOSelect(QWidget):
                 text=True,
                 encoding='utf-8',
                 creationflags=subprocess.CREATE_NO_WINDOW,
-                bufsize=1 # Buộc ghi vào pipe sau mỗi dòng
+                bufsize=1  # Buộc ghi vào pipe sau mỗi dòng
             )
             
             for line in iter(self.aria2_process.stdout.readline, ''):
@@ -2707,6 +2756,11 @@ class PageISOSelect(QWidget):
             if self.aria2_process and self.aria2_process.returncode != 0:
                 if not self.is_cancelling:
                     raise Exception(f"aria2 thất bại với mã lỗi {self.aria2_process.returncode}")
+
+            # Dọn dẹp file cookie tạm sau khi tải xong (nếu có)
+            if cookie_file and os.path.exists(cookie_file):
+                os.remove(cookie_file)
+                print(f"Đã xóa file cookie tạm: {cookie_file}")
 
             if not self.is_cancelling:
                 self.download_worker.result.emit(iso_filepath)
@@ -2781,6 +2835,15 @@ class PageISOSelect(QWidget):
             # Đây là bước quan trọng nhất để sửa lỗi
             self.download_worker.wait(2000) 
             print("Luồng tải file đã dừng.")
+            
+        temp_dir = tempfile.gettempdir()
+        for file in os.listdir(temp_dir):
+            if file.startswith("cookies_") and file.endswith(".txt"):
+                try:
+                    os.remove(os.path.join(temp_dir, file))
+                    print(f"Đã xóa file cookie tạm khi hủy: {file}")
+                except OSError:
+                    pass
 
     def cancel_download_clicked(self):
         """Xử lý khi người dùng bấm nút Hủy Tải."""
