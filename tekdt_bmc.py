@@ -81,7 +81,7 @@ if not str(BASE_DIR).startswith(tempfile.gettempdir()):
     pass
 
 # --- Cấu hình và Hằng số ---
-APP_VERSION = "1.0.2"
+APP_VERSION = "1.0.3"
 CONFIG_FILE = BASE_DIR / "tekdt_bmc.json"
 
 # Định nghĩa tất cả các đường dẫn dựa trên BASE_DIR
@@ -165,6 +165,7 @@ class USBBootCreator(QMainWindow):
         self.ais_monitor_timer.timeout.connect(self._check_ais_status)
         self.usb_monitor_timer = QTimer(self)
         self.usb_monitor_timer.timeout.connect(self._check_selected_usb_presence)
+        self.is_checking_usb = False
         # --- Kiểm tra quyền admin và nâng quyền nếu cần ---
         if not self.is_admin():
             print("Không có quyền admin, đang thử nâng quyền...")
@@ -875,15 +876,25 @@ class USBBootCreator(QMainWindow):
     
     def _check_selected_usb_presence(self):
         """
-        Nó sử dụng SerialNumber để đảm bảo đúng là USB đó.
+        Khởi tạo một luồng Worker để kiểm tra sự tồn tại của USB mà không làm treo UI.
         """
+        if self.is_checking_usb: # Nếu đang kiểm tra thì bỏ qua
+            return
+
         selected_details = self.config.get("device_details")
         if not selected_details:
             self.usb_monitor_timer.stop()
             return
-
+            
+        self.is_checking_usb = True
+        self.usb_check_worker = Worker(self._check_usb_presence_task, selected_details)
+        self.usb_check_worker.result.connect(self._handle_usb_presence_result)
+        # Không cần kết nối finished signal nếu không có xử lý đặc biệt khi kết thúc
+        self.usb_check_worker.start()
+    
+    def _check_usb_presence_task(self, selected_details):
+        """Tác vụ chạy trong luồng nền để kiểm tra sự tồn tại của USB."""
         try:
-            # Lấy danh sách các ổ đĩa đang kết nối
             command = "Get-PhysicalDisk | Select-Object DeviceID, SerialNumber | ConvertTo-Json -Compress"
             process = subprocess.run(
                 ['powershell', '-NoProfile', '-Command', command],
@@ -893,48 +904,44 @@ class USBBootCreator(QMainWindow):
             output = process.stdout.strip()
             if not output.startswith('['): output = f'[{output}]'
             current_disks = json.loads(output)
-
-            # Tìm kiếm USB trong danh sách hiện tại dựa trên SerialNumber và DeviceID
+            
             is_present = any(
                 d.get('SerialNumber') == selected_details.get('SerialNumber') and
                 d.get('DeviceID') == selected_details.get('DeviceID')
                 for d in current_disks
             )
-
-            # Cập nhật trạng thái các nút bấm
-            self.page1.next_button.setEnabled(is_present)
-            self.page2.next_button.setEnabled(is_present and len(self.config["iso_list"]) > 0)
-            self.page3.start_button.setEnabled(is_present)
-
-            if not is_present:
-                self.usb_monitor_timer.stop() # Dừng kiểm tra
-
-                # Nếu đang trong quá trình tạo USB thì phải dừng ngay lập tức
-                if hasattr(self, 'creation_worker') and self.creation_worker.isRunning():
-                    print("Lỗi nghiêm trọng: USB đã bị rút ra trong quá trình tạo!")
-                    self.creation_worker.terminate() # Buộc dừng luồng worker
-                    # Chờ một chút để luồng thực sự dừng
-                    self.creation_worker.wait(1000)
-                    self.on_creation_finished(False, "USB đã bị ngắt kết nối giữa chừng. Tác vụ đã bị hủy.")
-                    return
-
-                # Nếu không phải đang tạo thì báo lỗi và quay về trang 1
-                self.show_themed_message("Lỗi kết nối",
-                                       "USB đã chọn đã bị ngắt kết nối. Vui lòng chọn lại.",
-                                       icon=QMessageBox.Icon.Critical)
-                
-                # Reset cấu hình và quay về trang 1
-                self.config["device"] = None
-                self.config["device_name"] = None
-                self.config["device_details"] = None
-                self.go_to_page(0)
-
+            return is_present
         except Exception as e:
-            print(f"Lỗi trong quá trình giám sát USB: {e}")
-            # Xử lý tương tự như không tìm thấy
-            self.page1.next_button.setEnabled(False)
-            self.page2.next_button.setEnabled(False)
-            self.page3.start_button.setEnabled(False)
+            print(f"Lỗi trong luồng kiểm tra USB: {e}")
+            return False
+    
+    def _handle_usb_presence_result(self, is_present):
+        """Xử lý kết quả từ luồng kiểm tra USB và cập nhật UI."""
+        self.is_checking_usb = False # Reset cờ
+
+        # Cập nhật trạng thái các nút bấm
+        self.page1.next_button.setEnabled(is_present)
+        self.page2.next_button.setEnabled(is_present and len(self.config["iso_list"]) > 0)
+        self.page3.start_button.setEnabled(is_present)
+
+        if not is_present:
+            self.usb_monitor_timer.stop() # Dừng kiểm tra
+
+            if hasattr(self, 'creation_worker') and self.creation_worker.isRunning():
+                print("Lỗi nghiêm trọng: USB đã bị rút ra trong quá trình tạo!")
+                self.creation_worker.terminate()
+                self.creation_worker.wait(1000)
+                self.on_creation_finished(False, "USB đã bị ngắt kết nối giữa chừng. Tác vụ đã bị hủy.")
+                return
+
+            self.show_themed_message("Lỗi kết nối",
+                                   "USB đã chọn đã bị ngắt kết nối. Vui lòng chọn lại.",
+                                   icon=QMessageBox.Icon.Critical)
+            
+            self.config["device"] = None
+            self.config["device_name"] = None
+            self.config["device_details"] = None
+            self.go_to_page(0)
     
     def _update_task(self):
         if not TOOLS_DIR.exists():
