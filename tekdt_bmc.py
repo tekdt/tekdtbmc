@@ -875,7 +875,7 @@ class USBBootCreator(QMainWindow):
         self.save_config()
 
     def check_for_updates(self):
-        self._create_and_start_worker(
+        self.update_worker = self._create_and_start_worker(
             name="ToolUpdater",
             target=self._update_task,
             on_status=self.init_status_label.setText,
@@ -1204,7 +1204,7 @@ class USBBootCreator(QMainWindow):
 
         if reply == QMessageBox.StandardButton.Yes:
             self.page3.show_progress_ui(True)
-            self._create_and_start_worker(
+            self.creation_worker = self._create_and_start_worker(
                 name="USBCreator",
                 target=self.create_usb_task,
                 on_status=self.page3.update_status,
@@ -2185,7 +2185,6 @@ class PageISOSelect(QWidget):
         """Lấy danh sách link từ GitHub và tạo các checkbox tương ứng."""
         url = "https://raw.githubusercontent.com/tekdt/tekdtbmc/refs/heads/main/ISOs_link.json"
         try:
-            self.download_status_label.setText("Đang lấy danh sách phiên bản từ MassGrave.Dev...")
             QApplication.processEvents() # Cập nhật giao diện
             
             response = requests.get(url, timeout=10)
@@ -2519,7 +2518,7 @@ class PageISOSelect(QWidget):
             return
 
         self._set_ui_state(downloading=True)
-        self.main_app._create_and_start_worker(
+        self.download_worker = self.main_app._create_and_start_worker(
             name="Downloader",
             target=self._download_task,
             on_status=self.download_status_label.setText,
