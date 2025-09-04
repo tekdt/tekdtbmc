@@ -2099,14 +2099,14 @@ class PageISOSelect(QWidget):
 
         self.microsoft_radio = QRadioButton("Fido Script")
         self.microsoft_radio.setChecked(True)
-        self.massgrave_radio = QRadioButton("MSDL.GraveSoft.Dev")
+        self.gravesoft_radio = QRadioButton("MSDL.GraveSoft.Dev")
 
         self.source_button_group.addButton(self.microsoft_radio)
-        self.source_button_group.addButton(self.massgrave_radio)
+        self.source_button_group.addButton(self.gravesoft_radio)
         self.source_button_group.buttonToggled.connect(self._on_source_changed)
 
         source_layout.addWidget(self.microsoft_radio)
-        source_layout.addWidget(self.massgrave_radio)
+        source_layout.addWidget(self.gravesoft_radio)
         layout.addWidget(self.source_group)
 
         # Group 2: Tải tự động
@@ -2171,28 +2171,28 @@ class PageISOSelect(QWidget):
 
         layout.addWidget(self.microsoft_download_group)
         
-        self.massgrave_download_group = QGroupBox("Tải tự động từ MassGrave.Dev")
-        massgrave_main_layout = QVBoxLayout(self.massgrave_download_group)
+        self.gravesoft_download_group = QGroupBox("Tải tự động từ MSDL.GraveSoft.Dev")
+        gravesoft_main_layout = QVBoxLayout(self.gravesoft_download_group)
         
-        # (Giữ nguyên phần code thêm các combobox và nút tải cho MassGrave)
-        massgrave_main_layout.addWidget(QLabel("1. Chọn phiên bản Windows:"))
-        self.massgrave_product_combo = QComboBox()
-        self.massgrave_product_combo.addItem("Vui lòng chọn nguồn tải...", None)
-        massgrave_main_layout.addWidget(self.massgrave_product_combo)
-        self.massgrave_sku_label = QLabel("2. Chọn ngôn ngữ và kiến trúc:")
-        self.massgrave_sku_combo = QComboBox()
-        self.massgrave_sku_label.setVisible(False)
-        self.massgrave_sku_combo.setVisible(False)
-        massgrave_main_layout.addWidget(self.massgrave_sku_label)
-        massgrave_main_layout.addWidget(self.massgrave_sku_combo)
-        massgrave_main_layout.addStretch() 
-        self.massgrave_download_button = QPushButton("Tải mục đã chọn")
-        self.massgrave_download_button.setVisible(False)
-        self.massgrave_download_button.clicked.connect(self.start_downloads)
-        massgrave_main_layout.addWidget(self.massgrave_download_button)
+        # (Giữ nguyên phần code thêm các combobox và nút tải cho GraveSoft)
+        gravesoft_main_layout.addWidget(QLabel("1. Chọn phiên bản Windows:"))
+        self.gravesoft_product_combo = QComboBox()
+        self.gravesoft_product_combo.addItem("Vui lòng chọn nguồn tải...", None)
+        gravesoft_main_layout.addWidget(self.gravesoft_product_combo)
+        self.gravesoft_sku_label = QLabel("2. Chọn ngôn ngữ và kiến trúc:")
+        self.gravesoft_sku_combo = QComboBox()
+        self.gravesoft_sku_label.setVisible(False)
+        self.gravesoft_sku_combo.setVisible(False)
+        gravesoft_main_layout.addWidget(self.gravesoft_sku_label)
+        gravesoft_main_layout.addWidget(self.gravesoft_sku_combo)
+        gravesoft_main_layout.addStretch() 
+        self.gravesoft_download_button = QPushButton("Tải mục đã chọn")
+        self.gravesoft_download_button.setVisible(False)
+        self.gravesoft_download_button.clicked.connect(self.start_downloads)
+        gravesoft_main_layout.addWidget(self.gravesoft_download_button)
 
-        self.massgrave_download_group.setVisible(False)
-        layout.addWidget(self.massgrave_download_group)
+        self.gravesoft_download_group.setVisible(False)
+        layout.addWidget(self.gravesoft_download_group)
         
         # Thêm label trạng thái vào layout chính, ngay trên các nút điều hướng
         self.download_status_label = QLabel("")
@@ -2220,8 +2220,8 @@ class PageISOSelect(QWidget):
 
         self.cancel_button.clicked.connect(self.cancel_download_clicked)
         
-        self.massgrave_product_combo.currentIndexChanged.connect(self._on_product_selected)
-        self.massgrave_sku_combo.currentIndexChanged.connect(self._on_sku_selected)
+        self.gravesoft_product_combo.currentIndexChanged.connect(self._on_product_selected)
+        self.gravesoft_sku_combo.currentIndexChanged.connect(self._on_sku_selected)
 
     def update_next_button_state(self):
         """Kích hoạt nút 'Tiếp theo' chỉ khi có ISO và USB vẫn được kết nối."""
@@ -2236,16 +2236,16 @@ class PageISOSelect(QWidget):
 
         is_microsoft = (button == self.microsoft_radio)
         self.microsoft_download_group.setVisible(is_microsoft)
-        self.massgrave_download_group.setVisible(not is_microsoft)
+        self.gravesoft_download_group.setVisible(not is_microsoft)
 
         # Nếu chuyển sang MassGrave và chưa có dữ liệu, hãy tải nó
-        if not is_microsoft and self.massgrave_product_combo.count() <= 1:
+        if not is_microsoft and self.gravesoft_product_combo.count() <= 1:
             self._fetch_products()
 
     def _fetch_products(self):
         """Bắt đầu một luồng để tải danh sách sản phẩm."""
-        self.massgrave_product_combo.clear()
-        self.massgrave_product_combo.addItem("Đang tải danh sách sản phẩm...", None)
+        self.gravesoft_product_combo.clear()
+        self.gravesoft_product_combo.addItem("Đang tải danh sách sản phẩm...", None)
         self.main_app._create_and_start_worker(
             name="ProductFetcher",
             target=self._fetch_products_task,
@@ -2266,33 +2266,33 @@ class PageISOSelect(QWidget):
 
     def _populate_product_combo(self, products_data):
         """Điền dữ liệu sản phẩm vào combobox đầu tiên."""
-        self.massgrave_product_combo.clear()
+        self.gravesoft_product_combo.clear()
         if not products_data:
-            self.massgrave_product_combo.addItem("Lỗi tải dữ liệu", None)
+            self.gravesoft_product_combo.addItem("Lỗi tải dữ liệu", None)
             return
 
-        self.massgrave_product_combo.addItem("Vui lòng chọn phiên bản Windows...", None)
+        self.gravesoft_product_combo.addItem("Vui lòng chọn phiên bản Windows...", None)
         # Sắp xếp các sản phẩm theo tên để dễ tìm
         sorted_products = sorted(products_data.items(), key=lambda item: item[1])
         for product_id, product_name in sorted_products:
-            self.massgrave_product_combo.addItem(product_name, product_id)
+            self.gravesoft_product_combo.addItem(product_name, product_id)
 
     def _on_product_selected(self, index):
         """Kích hoạt khi người dùng chọn một sản phẩm."""
         # Ẩn và xóa các lựa chọn cũ
-        self.massgrave_sku_label.setVisible(False)
-        self.massgrave_sku_combo.setVisible(False)
-        self.massgrave_download_button.setVisible(False)
-        self.massgrave_sku_combo.clear()
+        self.gravesoft_sku_label.setVisible(False)
+        self.gravesoft_sku_combo.setVisible(False)
+        self.gravesoft_download_button.setVisible(False)
+        self.gravesoft_sku_combo.clear()
 
-        product_id = self.massgrave_product_combo.itemData(index)
+        product_id = self.gravesoft_product_combo.itemData(index)
         if not product_id:
             return
 
         # Hiển thị trạng thái đang tải và bắt đầu worker
-        self.massgrave_sku_label.setVisible(True)
-        self.massgrave_sku_combo.setVisible(True)
-        self.massgrave_sku_combo.addItem("Đang tải ngôn ngữ/phiên bản...", None)
+        self.gravesoft_sku_label.setVisible(True)
+        self.gravesoft_sku_combo.setVisible(True)
+        self.gravesoft_sku_combo.addItem("Đang tải ngôn ngữ/phiên bản...", None)
 
         self.main_app._create_and_start_worker(
             name="SkuFetcher",
@@ -2346,16 +2346,16 @@ class PageISOSelect(QWidget):
         """
         # reset
         try:
-            self.massgrave_sku_combo.blockSignals(True)
+            self.gravesoft_sku_combo.blockSignals(True)
         except Exception:
             pass
-        self.massgrave_sku_combo.clear()
+        self.gravesoft_sku_combo.clear()
 
         # Lấy list thực tế
         if not skus_data:
-            self.massgrave_sku_combo.addItem("Không có phiên bản (dữ liệu rỗng)", None)
+            self.gravesoft_sku_combo.addItem("Không có phiên bản (dữ liệu rỗng)", None)
             try:
-                self.massgrave_sku_combo.blockSignals(False)
+                self.gravesoft_sku_combo.blockSignals(False)
             except Exception:
                 pass
             return
@@ -2366,30 +2366,30 @@ class PageISOSelect(QWidget):
             skus_list = skus_data
         else:
             # dữ liệu lạ
-            self.massgrave_sku_combo.addItem("Dữ liệu không đúng định dạng", None)
+            self.gravesoft_sku_combo.addItem("Dữ liệu không đúng định dạng", None)
             try:
-                self.massgrave_sku_combo.blockSignals(False)
+                self.gravesoft_sku_combo.blockSignals(False)
             except Exception:
                 pass
             return
 
         if not skus_list:
-            self.massgrave_sku_combo.addItem("Không có phiên bản", None)
+            self.gravesoft_sku_combo.addItem("Không có phiên bản", None)
             try:
-                self.massgrave_sku_combo.blockSignals(False)
+                self.gravesoft_sku_combo.blockSignals(False)
             except Exception:
                 pass
             return
 
         # Thêm placeholder
-        self.massgrave_sku_combo.addItem("Chọn ngôn ngữ / phiên bản...", None)
+        self.gravesoft_sku_combo.addItem("Chọn ngôn ngữ / phiên bản...", None)
 
         # Duyệt từng sku (mỗi sku là dict trong JSON bạn đưa)
         for sku in skus_list:
             if not isinstance(sku, dict):
                 # phòng hờ: nếu không phải dict -> hiển thị chuỗi đơn giản
                 display = str(sku)
-                self.massgrave_sku_combo.addItem(display, {"sku_id": None, "language": display, "filename": None, "arch": None})
+                self.gravesoft_sku_combo.addItem(display, {"sku_id": None, "language": display, "filename": None, "arch": None})
                 continue
 
             sku_id = sku.get("Id") or sku.get("id") or sku.get("SkuId") or None
@@ -2400,7 +2400,7 @@ class PageISOSelect(QWidget):
             if not friendly_files:
                 # tạo một mục đại diện
                 display = f"{language} - {sku_id or 'n/a'}"
-                self.massgrave_sku_combo.addItem(display, {"sku_id": sku_id, "language": language, "filename": None, "arch": None})
+                self.gravesoft_sku_combo.addItem(display, {"sku_id": sku_id, "language": language, "filename": None, "arch": None})
                 continue
 
             # Thêm một item cho mỗi filename (thường có 2: x32 và x64)
@@ -2408,17 +2408,17 @@ class PageISOSelect(QWidget):
                 arch = self._guess_arch_from_filename(fname)
                 display = f"{language} — {arch} ({fname})"
                 userdata = {"sku_id": sku_id, "language": language, "filename": fname, "arch": arch}
-                self.massgrave_sku_combo.addItem(display, userdata)
+                self.gravesoft_sku_combo.addItem(display, userdata)
 
         try:
-            self.massgrave_sku_combo.blockSignals(False)
+            self.gravesoft_sku_combo.blockSignals(False)
         except Exception:
             pass
 
     def _on_sku_selected(self, index):
         """Kích hoạt khi người dùng chọn SKU, hiển thị nút tải."""
-        sku_data = self.massgrave_sku_combo.itemData(index)  # Đây là dict với "sku_id", "language", "filename", "arch"
-        self.massgrave_download_button.setVisible(bool(sku_data and sku_data.get("sku_id")))
+        sku_data = self.gravesoft_sku_combo.itemData(index)  # Đây là dict với "sku_id", "language", "filename", "arch"
+        self.gravesoft_download_button.setVisible(bool(sku_data and sku_data.get("sku_id")))
     
     def browse_iso(self):
         file_paths, _ = QFileDialog.getOpenFileNames(self, "Chọn các file ISO", str(ISOS_DIR), "ISO Files (*.iso)")
@@ -2699,10 +2699,10 @@ class PageISOSelect(QWidget):
                     self.downloads_queue.append({'name': name, 'data': data})
         else:
             # LOGIC CHO NGUỒN MASSGRAVE
-            product_id = self.massgrave_product_combo.currentData()
-            sku_data = self.massgrave_sku_combo.currentData()  # Lấy userdata dict từ combobox thứ hai
-            product_name = self.massgrave_product_combo.currentText()
-            sku_name = self.massgrave_sku_combo.currentText()
+            product_id = self.gravesoft_product_combo.currentData()
+            sku_data = self.gravesoft_sku_combo.currentData()  # Lấy userdata dict từ combobox thứ hai
+            product_name = self.gravesoft_product_combo.currentText()
+            sku_name = self.gravesoft_sku_combo.currentText()
 
             if product_id and sku_data and sku_data.get("sku_id"):
                 self.downloads_queue.append({
@@ -2710,7 +2710,7 @@ class PageISOSelect(QWidget):
                     'product_id': product_id,
                     'sku_id': sku_data["sku_id"],  # Lấy sku_id từ userdata
                     'selected_filename': sku_data.get("filename"),  # THÊM: Lưu filename đã chọn để so khớp sau
-                    'is_massgrave': True 
+                    'is_gravesoft': True 
                 })
 
         if not self.downloads_queue:
@@ -2737,7 +2737,7 @@ class PageISOSelect(QWidget):
         self.iso_list_group.setEnabled(is_enabled)
         self.source_group.setEnabled(is_enabled)
         self.microsoft_download_group.setEnabled(is_enabled)
-        self.massgrave_download_group.setEnabled(is_enabled)
+        self.gravesoft_download_group.setEnabled(is_enabled)
         
         # Ẩn/hiện các nút điều hướng
         self.back_button.setVisible(is_enabled)
@@ -2775,7 +2775,7 @@ class PageISOSelect(QWidget):
             header_list = []  # Giữ empty, vì API không trả headers
             cookie_file = None  # Bỏ, vì không có cookies
 
-            if item.get('is_massgrave'):
+            if item.get('is_gravesoft'):
                 self.download_worker.status.emit(f"Bước 1/2: Lấy link tải cho {name}...")
                 product_id = item['product_id']
                 sku_id = item['sku_id']
@@ -2843,7 +2843,7 @@ class PageISOSelect(QWidget):
                 raise Exception(f"Không lấy được URL hợp lệ cho {name}.")
             
             # Sử dụng selected_filename nếu là MassGrave, nếu không thì parse từ iso_url
-            if item.get('is_massgrave'):
+            if item.get('is_gravesoft'):
                 iso_filename = selected_filename
             else:
                 iso_filename = os.path.basename(iso_url.split('?')[0])
