@@ -2092,14 +2092,14 @@ class PageISOSelect(QWidget):
         layout.addWidget(self.iso_list_group)
         
         # <<< THAY ĐỔI BẮT ĐẦU: Thêm "self." để biến source_group thành thuộc tính của lớp
-        self.source_group = QGroupBox("Nguồn tải")
+        self.source_group = QGroupBox("Lấy link trực tiếp từ")
         source_layout = QHBoxLayout(self.source_group)
         # <<< THAY ĐỔI KẾT THÚC
         source_layout.setAlignment(Qt.AlignmentFlag.AlignLeft)
 
-        self.microsoft_radio = QRadioButton("Microsoft")
+        self.microsoft_radio = QRadioButton("Fido Script")
         self.microsoft_radio.setChecked(True)
-        self.massgrave_radio = QRadioButton("Microsoft Software Download pages")
+        self.massgrave_radio = QRadioButton("MSDL.GraveSoft.Dev")
 
         self.source_button_group.addButton(self.microsoft_radio)
         self.source_button_group.addButton(self.massgrave_radio)
