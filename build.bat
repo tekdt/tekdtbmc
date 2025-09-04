@@ -19,7 +19,7 @@ set "PASSWORD=TekDT@391152"
 set "TARGET_EXE=%BASEDIR%build\tekdt_bmc.exe"
 
 if "%TARGET_EXE%"=="" (
-    echo [!] Vui lòng kéo-thả file EXE vào batch hoặc chỉnh sửa biến TARGET_EXE.
+    echo [!] Please drag-drop the EXE file into the batch or edit the TARGET_EXE variable.
     pause
     exit /b 1
 )
@@ -28,9 +28,9 @@ if "%TARGET_EXE%"=="" (
 "%SIGNTOOL%" sign /f "%CERT%" /p %PASSWORD% /tr http://timestamp.digicert.com /td SHA256 /fd SHA256 "%TARGET_EXE%"
 
 if %errorlevel%==0 (
-    echo [OK] Ký thành công: %TARGET_EXE%
+    echo [OK] Signed successfully: %TARGET_EXE%
 ) else (
-    echo [LỖI] Ký thất bại!
+    echo [ERROR] Signing failed!
 )
 
 pause
