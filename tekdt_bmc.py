@@ -2698,7 +2698,7 @@ class PageISOSelect(QWidget):
                 if data['checkbox'].isChecked():
                     self.downloads_queue.append({'name': name, 'data': data})
         else:
-            # THAY ĐỔI LOGIC CHO NGUỒN MASSGRAVE
+            # LOGIC CHO NGUỒN MASSGRAVE
             product_id = self.massgrave_product_combo.currentData()
             sku_data = self.massgrave_sku_combo.currentData()  # Lấy userdata dict từ combobox thứ hai
             product_name = self.massgrave_product_combo.currentText()
@@ -2790,7 +2790,7 @@ class PageISOSelect(QWidget):
                     response.raise_for_status()
                     link_data = response.json()
                     
-                    options = link_data.get("ProductDownloadOptions", [])  # THAY ĐỔI: Lấy mảng options
+                    options = link_data.get("ProductDownloadOptions", [])  # Lấy mảng options
                     if not options:
                         raise Exception("API không trả về ProductDownloadOptions.")
 
@@ -2842,7 +2842,7 @@ class PageISOSelect(QWidget):
             if not iso_url or not iso_url.startswith("http"):
                 raise Exception(f"Không lấy được URL hợp lệ cho {name}.")
             
-            # THAY ĐỔI: Sử dụng selected_filename nếu là MassGrave, nếu không thì parse từ iso_url
+            # Sử dụng selected_filename nếu là MassGrave, nếu không thì parse từ iso_url
             if item.get('is_massgrave'):
                 iso_filename = selected_filename
             else:
