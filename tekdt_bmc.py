@@ -202,12 +202,8 @@ class USBBootCreator(QMainWindow):
         if not self.is_admin():
             print("Không có quyền admin, đang thử nâng quyền...")
             if self.elevate_privileges():
-                # Không cần làm gì thêm ở đây, chỉ cần thoát tiến trình gốc.
-                # Tiến trình mới sẽ tự khởi chạy.
                 sys.exit(0)
             else:
-                # Nếu không nâng quyền được, hiện thông báo lỗi và thoát luôn
-                # vì ứng dụng cần quyền admin để hoạt động đúng.
                 self.show_themed_message("Lỗi Quyền Admin", 
                          "Không thể nâng quyền quản trị viên. Ứng dụng sẽ thoát.", 
                          icon=QMessageBox.Icon.Critical)
@@ -215,13 +211,34 @@ class USBBootCreator(QMainWindow):
         
         self.setWindowTitle(f"TekDT BMC v{APP_VERSION}")
         self.setWindowIcon(QIcon())
-        self.setMinimumSize(700, 550)
+        
+        # Tính toán và thiết lập kích thước cửa sổ dựa trên màn hình
+        # Lấy thông tin màn hình chính
+        screen = QApplication.primaryScreen()
+        if screen:
+            available_geometry = screen.availableGeometry()
+            screen_width = available_geometry.width()
+            screen_height = available_geometry.height()
+
+            # Tính toán kích thước mong muốn (60% chiều rộng, 90% chiều cao)
+            desired_width = int(screen_width * 0.6)
+            desired_height = int(screen_height * 0.9)
+            
+            # Thiết lập kích thước ban đầu cho cửa sổ
+            self.resize(desired_width, desired_height)
+            
+            # Cập nhật kích thước tối thiểu để không bị co quá nhỏ
+            self.setMinimumSize(int(desired_width * 0.7), int(desired_height * 0.7))
+        else:
+            # Fallback về kích thước cố định nếu không lấy được thông tin màn hình
+            self.setMinimumSize(800, 600)
+            self.resize(960, 720)
         
         self.config = {
             "device": None,
             "device_name": None,
-            "partition_scheme": "GPT", # Mặc định GPT
-            "filesystem": "ExFAT", # Mặc định ExFAT
+            "partition_scheme": "GPT",
+            "filesystem": "ExFAT",
             "theme": None,
             "fill_space": True,
             "iso_list": [],
@@ -2074,13 +2091,15 @@ class PageISOSelect(QWidget):
         group1_layout.addLayout(iso_buttons_layout)
         layout.addWidget(self.iso_list_group)
         
-        source_group = QGroupBox("Nguồn tải")
-        source_layout = QHBoxLayout(source_group)
+        # <<< THAY ĐỔI BẮT ĐẦU: Thêm "self." để biến source_group thành thuộc tính của lớp
+        self.source_group = QGroupBox("Nguồn tải")
+        source_layout = QHBoxLayout(self.source_group)
+        # <<< THAY ĐỔI KẾT THÚC
         source_layout.setAlignment(Qt.AlignmentFlag.AlignLeft)
 
         self.microsoft_radio = QRadioButton("Microsoft")
         self.microsoft_radio.setChecked(True)
-        self.massgrave_radio = QRadioButton("MassGrave.Dev")
+        self.massgrave_radio = QRadioButton("Microsoft Software Download pages")
 
         self.source_button_group.addButton(self.microsoft_radio)
         self.source_button_group.addButton(self.massgrave_radio)
@@ -2088,7 +2107,7 @@ class PageISOSelect(QWidget):
 
         source_layout.addWidget(self.microsoft_radio)
         source_layout.addWidget(self.massgrave_radio)
-        layout.addWidget(source_group)
+        layout.addWidget(self.source_group)
 
         # Group 2: Tải tự động
         self.microsoft_download_group = QGroupBox("Tải tự động từ Microsoft")
@@ -2098,18 +2117,16 @@ class PageISOSelect(QWidget):
         
         # Windows 10 & 11 (dùng Fido)
         microsoft_options_layout = QGridLayout()
-        microsoft_options_layout.setColumnStretch(0, 1) # Cho 2 cột có độ rộng bằng nhau
+        microsoft_options_layout.setColumnStretch(0, 1)
         microsoft_options_layout.setColumnStretch(1, 1)
 
         # --- CỘT 1 ---
-
         # Windows 11
         win11_cb = QCheckBox("Windows 11 (x64)")
         self.win_options["Windows 11"] = {'checkbox': win11_cb, 'type': 'fido', 'archs': ["x64"]}
         microsoft_options_layout.addWidget(win11_cb, 0, 0) # Hàng 0, Cột 0
 
         # Windows 10 (gồm Checkbox và Radio Buttons)
-        # Tạo một layout dọc riêng cho cụm Win10 để chúng luôn đi cùng nhau
         win10_container = QWidget()
         win10_layout = QVBoxLayout(win10_container)
         win10_layout.setContentsMargins(0, 0, 0, 0)
@@ -2118,7 +2135,6 @@ class PageISOSelect(QWidget):
         self.win_options["Windows 10"] = {'checkbox': win10_cb, 'type': 'fido', 'archs': ["x64", "x86"]}
         win10_layout.addWidget(win10_cb)
         
-        # Radio buttons cho Win 10
         win10_radios = {}
         win10_radio_layout = QHBoxLayout()
         for arch in ["x64", "x86"]:
@@ -2134,8 +2150,6 @@ class PageISOSelect(QWidget):
         microsoft_options_layout.addWidget(win10_container, 1, 0) # Hàng 1, Cột 0
 
         # --- CỘT 2 ---
-        
-        # Windows Server
         server_versions = {
             "Windows Server 2025": WINDOWS_SERVER_2025_URL,
             "Windows Server 2022": WINDOWS_SERVER_2022_URL,
@@ -2146,55 +2160,47 @@ class PageISOSelect(QWidget):
         for name, url in server_versions.items():
             cb = QCheckBox(name)
             self.win_options[name] = {'checkbox': cb, 'type': 'direct', 'url': url}
-            microsoft_options_layout.addWidget(cb, row_index, 1) # Hàng 0, 1, 2 ở Cột 1
+            microsoft_options_layout.addWidget(cb, row_index, 1)
             row_index += 1
             
-        # Thêm layout lưới vào layout chính của group
         self.microsoft_download_group_layout.addLayout(microsoft_options_layout)
 
         self.download_button = QPushButton("Tải các mục đã chọn")
         self.download_button.clicked.connect(self.start_downloads)
         self.microsoft_download_group_layout.addWidget(self.download_button)
 
-        self.download_status_label = QLabel("")
-        self.download_status_label.setObjectName("DownloadStatusLabel")
-        self.download_status_label.setWordWrap(True)
-        self.microsoft_download_group_layout.addWidget(self.download_status_label)
         layout.addWidget(self.microsoft_download_group)
         
         self.massgrave_download_group = QGroupBox("Tải tự động từ MassGrave.Dev")
         massgrave_main_layout = QVBoxLayout(self.massgrave_download_group)
-
-        # 1. Label và ComboBox cho việc chọn Sản phẩm (Product)
+        
+        # (Giữ nguyên phần code thêm các combobox và nút tải cho MassGrave)
         massgrave_main_layout.addWidget(QLabel("1. Chọn phiên bản Windows:"))
         self.massgrave_product_combo = QComboBox()
         self.massgrave_product_combo.addItem("Vui lòng chọn nguồn tải...", None)
         massgrave_main_layout.addWidget(self.massgrave_product_combo)
-
-        # 2. Label và ComboBox cho việc chọn Ngôn ngữ/Bản dựng (SKU)
         self.massgrave_sku_label = QLabel("2. Chọn ngôn ngữ và kiến trúc:")
         self.massgrave_sku_combo = QComboBox()
-
-        # Ẩn các thành phần này lúc đầu
         self.massgrave_sku_label.setVisible(False)
         self.massgrave_sku_combo.setVisible(False)
-
         massgrave_main_layout.addWidget(self.massgrave_sku_label)
         massgrave_main_layout.addWidget(self.massgrave_sku_combo)
-
-        # Thêm một khoảng trống để giao diện đẹp hơn
         massgrave_main_layout.addStretch() 
-
-        # Nút tải sẽ được hiển thị sau khi chọn SKU
         self.massgrave_download_button = QPushButton("Tải mục đã chọn")
-        # Ẩn nút tải lúc đầu
         self.massgrave_download_button.setVisible(False)
         self.massgrave_download_button.clicked.connect(self.start_downloads)
         massgrave_main_layout.addWidget(self.massgrave_download_button)
 
-        self.massgrave_download_group.setVisible(False) # Quan trọng: Ẩn đi lúc đầu
+        self.massgrave_download_group.setVisible(False)
         layout.addWidget(self.massgrave_download_group)
         
+        # Thêm label trạng thái vào layout chính, ngay trên các nút điều hướng
+        self.download_status_label = QLabel("")
+        self.download_status_label.setObjectName("DownloadStatusLabel") # Giữ lại style
+        self.download_status_label.setAlignment(Qt.AlignmentFlag.AlignCenter) # Căn giữa
+        self.download_status_label.setWordWrap(True)
+        layout.addWidget(self.download_status_label)
+
         layout.addStretch()
 
         # Nút điều hướng
@@ -2724,17 +2730,19 @@ class PageISOSelect(QWidget):
     
     def _set_ui_state(self, downloading=False, long_task=False):
         """Cập nhật trạng thái UI cho các tác vụ tải hoặc tác vụ nền dài."""
-        # Các thành phần UI liên quan đến tải file
-        self.iso_list_group.setEnabled(not downloading)
-        for win, data in self.win_options.items():
-            data['checkbox'].setEnabled(not downloading)
-            if 'radios' in data:
-                for rb in data['radios'].values():
-                    rb.setEnabled(not downloading)
-        self.back_button.setVisible(not downloading)
-        self.next_button.setVisible(not downloading)
+        # Trạng thái bật/tắt của các control (True = bật, False = tắt)
+        is_enabled = not downloading
+
+        # Vô hiệu hóa toàn bộ các group thay vì từng control lẻ
+        self.iso_list_group.setEnabled(is_enabled)
+        self.source_group.setEnabled(is_enabled)
+        self.microsoft_download_group.setEnabled(is_enabled)
+        self.massgrave_download_group.setEnabled(is_enabled)
+        
+        # Ẩn/hiện các nút điều hướng
+        self.back_button.setVisible(is_enabled)
+        self.next_button.setVisible(is_enabled)
         self.cancel_button.setVisible(downloading)
-        self.download_button.setEnabled(not downloading)
 
         # Các thành phần UI cho tác vụ chạy nền dài (ví dụ: thanh tiến trình)
         if hasattr(self, "progress_bar"):
