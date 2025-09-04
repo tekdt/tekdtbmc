@@ -1,4 +1,6 @@
 {
+  "Windows XP Home Edition": "XXXXX-XXXXX-XXXXX-XXXXX-XXXXX",
+  "Windows XP Professional": "XXXXX-XXXXX-XXXXX-XXXXX-XXXXX",
   "Windows Vista Starter": "X9XPC-JCJGM-W6CDK-7BP7M-GPRPY",
   "Windows Vista Home Basic": "RCG7P-TX42D-XM3YQ-CDTTJ-XCGKP",
   "Windows Vista Home Premium": "X9HTF-MCMK6-RJF3D-4PRJ6-29G2Y",
@@ -41,6 +43,8 @@
   "Windows Server 2019 Datacenter": "WMDGN-G9WCR-XD22W-M6GPF-MVKDQ",
   "Windows Server 2022 Standard": "VDYBN-27WGF-WJPM7-GDKR2-MWP2W",
   "Windows Server 2022 Datacenter": "WX4NM-KYP2Q-JJDVC-JQG84-K9GMG",
+  "Windows Server 2025 Standard (dự kiến)": "XXXXX-XXXXX-XXXXX-XXXXX-XXXXX",
+  "Windows Server 2025 Datacenter (dự kiến)": "XXXXX-XXXXX-XXXXX-XXXXX-XXXXX",
   "Windows 8.1 Pro (KMS/GVLK)": "GCRJD-8NW9H-F2CDX-CCM8D-9D6T9",
   "Windows 8.1 Pro N (KMS/GVLK)": "HMCNV-VVBFX-7HMBH-CTY9B-B4FXY",
   "Windows 8.1 Enterprise (KMS/GVLK)": "MHF9N-XY6XB-WVXMC-BTDCT-MKKG7",
