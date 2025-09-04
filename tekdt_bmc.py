@@ -15,10 +15,10 @@ import string
 import ctypes
 import shlex
 import webbrowser
-import cloudscraper
 from ctypes import wintypes
 from pathlib import Path
 from subprocess import run
+from urllib.parse import urlparse
 from urllib.request import urlretrieve
 from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QButtonGroup,
                              QHBoxLayout, QPushButton, QComboBox, QCheckBox, QGridLayout,
@@ -155,18 +155,34 @@ class Worker(QThread):
         print(f"Luồng '{self.name}' đã được tạo.")
 
     def run(self):
+        """
+        Chạy target trong thread, luôn phát result (cả khi là None)
+        và đảm bảo phát finished/about_to_finish đúng.
+        """
+        res = None
         try:
             res = self.target(*self.args, **self.kwargs)
-            if res is not None:
+            # emit kết quả (cả khi None) để UI luôn có cơ hội cập nhật
+            try:
                 self.result.emit(res)
+            except Exception as e:
+                print(f"Lỗi khi emit result trong Worker '{self.name}': {e}")
             self.finished.emit(True, "Tác vụ hoàn thành thành công.")
         except Exception as e:
-            # Bỏ qua lỗi khi luồng bị terminate đột ngột
+            # Bắt lỗi chung, log và emit result=None để UI biết
             if not isinstance(e, SystemExit):
-                 self.finished.emit(False, f"Lỗi trong luồng Worker '{self.name}':\n{str(e)}")
+                print(f"Lỗi trong luồng Worker '{self.name}': {e}")
+                try:
+                    self.result.emit(None)
+                except Exception:
+                    pass
+                self.finished.emit(False, f"Lỗi trong luồng Worker '{self.name}':\n{str(e)}")
         finally:
-            # Luôn phát tín hiệu này, dù tác vụ thành công hay thất bại
-            self.about_to_finish.emit(self)
+            # Luôn phát tín hiệu about_to_finish để dọn dẹp
+            try:
+                self.about_to_finish.emit(self)
+            except Exception:
+                pass
 
 # --- Lớp chính của ứng dụng ---
 class USBBootCreator(QMainWindow):
@@ -596,8 +612,33 @@ class USBBootCreator(QMainWindow):
             self.save_config()
     
     def _create_and_start_worker(self, name, target, on_result=None, on_finished=None, on_status=None, on_progress=None, *args, **kwargs):
-        """Tạo, cấu hình, theo dõi và khởi chạy một Worker."""
-        worker = Worker(name, target, *args, **kwargs)
+        """
+        Tạo Worker, hỗ trợ 2 kiểu truyền tham số cho target:
+          - truyền positional trực tiếp: _create_and_start_worker(..., product_id)
+          - hoặc truyền bằng keyword 'args' (danh sách/tuple) như code cũ: _create_and_start_worker(..., args=[product_id])
+        """
+        # Nếu caller dùng args=[...], lấy ra
+        forwarded_args = []
+        if 'args' in kwargs and isinstance(kwargs['args'], (list, tuple)):
+            forwarded_args = list(kwargs.pop('args'))
+
+        # Nếu caller dùng worker_kwargs= {...} để truyền kwargs cho target
+        forwarded_kwargs = {}
+        if 'worker_kwargs' in kwargs and isinstance(kwargs['worker_kwargs'], dict):
+            forwarded_kwargs = kwargs.pop('worker_kwargs')
+
+        # Bất kỳ kwargs còn lại (không phải on_result/on_finished...) sẽ coi là worker kwargs
+        # (nếu bạn không muốn như vậy, có thể thay đổi)
+        # Gộp forwarded_kwargs với bất kỳ kwargs còn lại
+        for k in list(kwargs.keys()):
+            # tránh ghi đè 'on_result','on_finished','on_status','on_progress' (đã là tham số)
+            if k not in ('on_result','on_finished','on_status','on_progress'):
+                forwarded_kwargs[k] = kwargs.pop(k)
+
+        # Kết hợp positional args (truyền cả forwarded_args và *args)
+        combined_args = forwarded_args + list(args)
+
+        worker = Worker(name, target, *combined_args, **forwarded_kwargs)
 
         # Kết nối các tín hiệu nếu có hàm xử lý tương ứng
         if on_result: worker.result.connect(on_result)
@@ -605,7 +646,7 @@ class USBBootCreator(QMainWindow):
         if on_status: worker.status.connect(on_status)
         if on_progress: worker.progress.connect(on_progress)
 
-        # Quan trọng: Kết nối tín hiệu tự hủy theo dõi
+        # Kết nối tín hiệu tự hủy theo dõi
         worker.about_to_finish.connect(self._on_worker_finished)
 
         # Thêm vào danh sách theo dõi và khởi chạy
@@ -613,6 +654,7 @@ class USBBootCreator(QMainWindow):
         print(f"Số luồng đang hoạt động: {len(self.active_workers)}")
         worker.start()
         return worker
+
 
     def _on_worker_finished(self, worker_thread):
         """Xóa worker khỏi danh sách theo dõi khi nó kết thúc."""
@@ -1993,6 +2035,7 @@ class PageDeviceSelect(QWidget):
         self.next_button.setEnabled(True)
 
         self.main_app.usb_monitor_timer.start(2000)
+
 class PageISOSelect(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -2002,8 +2045,6 @@ class PageISOSelect(QWidget):
         self.downloads_queue = []
         self.arch_button_group = QButtonGroup(self)
         self.source_button_group = QButtonGroup(self)
-        self.massgrave_links = {} # Lưu trữ link từ file JSON
-        self.massgrave_checkboxes = [] # Lưu trữ các checkbox của MassGrave
         self.init_ui()
 
     def init_ui(self):
@@ -2110,40 +2151,6 @@ class PageISOSelect(QWidget):
             
         # Thêm layout lưới vào layout chính của group
         self.microsoft_download_group_layout.addLayout(microsoft_options_layout)
-        
-        # fido_versions = { "Windows 11": ["x64"], "Windows 10": ["x64", "x86"] }
-        # for win, archs in fido_versions.items():
-            # cb = QCheckBox(f"{win} ({', '.join(archs)})")
-            # self.win_options[win] = {'checkbox': cb, 'type': 'fido', 'archs': archs}
-            # self.microsoft_download_group_layout.addWidget(cb)
-            
-            # # Nếu là Windows 10 thì tạo radio button chọn kiến trúc
-            # if win == "Windows 10":
-                # radios = {}
-                # radio_layout = QHBoxLayout()
-                # for arch in archs:
-                    # rb = QRadioButton(arch)
-                    # rb.setVisible(False)
-                    # radio_layout.addWidget(rb)
-                    # self.arch_button_group.addButton(rb)
-                    # radios[arch] = rb
-                # self.win_options[win]['radios'] = radios
-                # self.microsoft_download_group_layout.addLayout(radio_layout)
-                # # Sự kiện hiện/ẩn radio khi tick checkbox
-                # cb.toggled.connect(lambda checked, win=win: self.toggle_arch_options(checked, win))
-
-        # self.microsoft_download_group_layout.addWidget(QFrame(self, frameShape=QFrame.Shape.HLine, frameShadow=QFrame.Shadow.Sunken))
-
-        # # Windows Server (dùng link trực tiếp)
-        # server_versions = {
-            # "Windows Server 2025": WINDOWS_SERVER_2025_URL,
-            # "Windows Server 2022": WINDOWS_SERVER_2022_URL,
-            # "Windows Server 2016": WINDOWS_SERVER_2016_URL
-        # }
-        # for name, url in server_versions.items():
-            # cb = QCheckBox(name)
-            # self.win_options[name] = {'checkbox': cb, 'type': 'direct', 'url': url}
-            # self.microsoft_download_group_layout.addWidget(cb)
 
         self.download_button = QPushButton("Tải các mục đã chọn")
         self.download_button.clicked.connect(self.start_downloads)
@@ -2158,11 +2165,30 @@ class PageISOSelect(QWidget):
         self.massgrave_download_group = QGroupBox("Tải tự động từ MassGrave.Dev")
         massgrave_main_layout = QVBoxLayout(self.massgrave_download_group)
 
-        # Layout lưới cho các checkbox, sẽ được thêm nội dung sau
-        self.massgrave_grid_layout = QGridLayout()
-        massgrave_main_layout.addLayout(self.massgrave_grid_layout)
+        # 1. Label và ComboBox cho việc chọn Sản phẩm (Product)
+        massgrave_main_layout.addWidget(QLabel("1. Chọn phiên bản Windows:"))
+        self.massgrave_product_combo = QComboBox()
+        self.massgrave_product_combo.addItem("Vui lòng chọn nguồn tải...", None)
+        massgrave_main_layout.addWidget(self.massgrave_product_combo)
 
-        self.massgrave_download_button = QPushButton("Tải các mục đã chọn")
+        # 2. Label và ComboBox cho việc chọn Ngôn ngữ/Bản dựng (SKU)
+        self.massgrave_sku_label = QLabel("2. Chọn ngôn ngữ và kiến trúc:")
+        self.massgrave_sku_combo = QComboBox()
+
+        # Ẩn các thành phần này lúc đầu
+        self.massgrave_sku_label.setVisible(False)
+        self.massgrave_sku_combo.setVisible(False)
+
+        massgrave_main_layout.addWidget(self.massgrave_sku_label)
+        massgrave_main_layout.addWidget(self.massgrave_sku_combo)
+
+        # Thêm một khoảng trống để giao diện đẹp hơn
+        massgrave_main_layout.addStretch() 
+
+        # Nút tải sẽ được hiển thị sau khi chọn SKU
+        self.massgrave_download_button = QPushButton("Tải mục đã chọn")
+        # Ẩn nút tải lúc đầu
+        self.massgrave_download_button.setVisible(False)
         self.massgrave_download_button.clicked.connect(self.start_downloads)
         massgrave_main_layout.addWidget(self.massgrave_download_button)
 
@@ -2187,31 +2213,15 @@ class PageISOSelect(QWidget):
         layout.addLayout(nav_layout)
 
         self.cancel_button.clicked.connect(self.cancel_download_clicked)
+        
+        self.massgrave_product_combo.currentIndexChanged.connect(self._on_product_selected)
+        self.massgrave_sku_combo.currentIndexChanged.connect(self._on_sku_selected)
 
     def update_next_button_state(self):
         """Kích hoạt nút 'Tiếp theo' chỉ khi có ISO và USB vẫn được kết nối."""
         has_iso = len(self.main_app.config["iso_list"]) > 0
         is_usb_present = self.main_app.config.get("device_details") is not None
         self.next_button.setEnabled(has_iso and is_usb_present)
-
-    def toggle_arch_options(self, checked, win_version):
-        options_data = self.win_options[win_version]
-        for rb in options_data['radios'].values():
-            rb.setVisible(checked)
-        if checked:
-            # Bỏ chọn các checkbox khác
-            for other_win, data in self.win_options.items():
-                if other_win != win_version:
-                    data['checkbox'].setChecked(False)
-            # Tự động chọn radio button đầu tiên nếu chưa chọn
-            if not any(rb.isChecked() for rb in options_data['radios'].values()):
-                list(options_data['radios'].values())[0].setChecked(True)
-        else:
-            # Bỏ chọn radio nếu bỏ tick
-            self.arch_button_group.setExclusive(False)
-            for rb in options_data['radios'].values():
-                rb.setChecked(False)
-            self.arch_button_group.setExclusive(True)
     
     def _on_source_changed(self, button, checked):
         """Xử lý khi người dùng thay đổi nguồn tải."""
@@ -2223,89 +2233,186 @@ class PageISOSelect(QWidget):
         self.massgrave_download_group.setVisible(not is_microsoft)
 
         # Nếu chuyển sang MassGrave và chưa có dữ liệu, hãy tải nó
-        if not is_microsoft and not self.massgrave_links:
-            self._fetch_and_populate_massgrave_links()
+        if not is_microsoft and self.massgrave_product_combo.count() <= 1:
+            self._fetch_products()
 
-    def _get_cloudflare_bypass(self, url):
-        """Sử dụng cloudscraper để bypass CloudFlare và lấy header/cookie cho aria2c."""
+    def _fetch_products(self):
+        """Bắt đầu một luồng để tải danh sách sản phẩm."""
+        self.massgrave_product_combo.clear()
+        self.massgrave_product_combo.addItem("Đang tải danh sách sản phẩm...", None)
+        self.main_app._create_and_start_worker(
+            name="ProductFetcher",
+            target=self._fetch_products_task,
+            on_result=self._populate_product_combo,
+            on_finished=lambda s, m: print(f"Product fetch finished: {s}, {m}")
+        )
+
+    def _fetch_products_task(self):
+        """Tác vụ nền: Lấy JSON danh sách sản phẩm."""
+        url = "https://github.com/gravesoft/msdl/raw/refs/heads/main/data/products.json"
         try:
-            # Nâng cấp scraper với browser preset để giả lập Chrome trên Windows
-            scraper = cloudscraper.create_scraper(
-                browser={'browser': 'chrome', 'platform': 'windows', 'desktop': True}
-            )
-            
-            # Thêm delay ngắn để tránh rate limit CloudFlare
-            time.sleep(1)
-            
-            # Sử dụng GET thay vì HEAD để fetch đầy đủ hơn (nếu có challenge JS)
-            response = scraper.get(url, stream=True)  # stream=True để không tải full file lớn
-            
-            if response.status_code != 200:
-                raise Exception(f"Không thể bypass CloudFlare cho {url}. Mã lỗi: {response.status_code}. Nội dung lỗi: {response.text[:200]}")  # Thêm text để debug
-            
-            # Lấy headers từ scraper (thêm Referer mặc định)
-            headers = {
-                'User-Agent': scraper.headers.get('User-Agent', ''),
-                'Referer': 'https://massgrave.dev/',  # Thêm Referer để bypass check từ massgrave.dev
-                'Accept': scraper.headers.get('Accept', '*/*'),
-                'Accept-Language': scraper.headers.get('Accept-Language', 'en-US,en;q=0.9'),
-                # Thêm các header khác nếu cần từ scraper
-            }
-            
-            # Lưu cookies vào file tạm (aria2c hỗ trợ --load-cookies)
-            cookie_file = os.path.join(tempfile.gettempdir(), f"cookies_{os.path.basename(url)}.txt")
-            with open(cookie_file, 'w') as f:
-                for name, value in scraper.cookies.items():
-                    f.write(f".{urlparse(url).netloc}\tTRUE\t/\tFALSE\t0\t{name}\t{value}\n")
-            
-            # Trả về list header dưới dạng ['Key: Value'] cho aria2c --header
-            header_list = [f"{k}: {v}" for k, v in headers.items() if v]
-            
-            return header_list, cookie_file
-        except Exception as e:
-            raise Exception(f"Lỗi khi bypass CloudFlare: {e}")
-    
-    def _fetch_and_populate_massgrave_links(self):
-        """Lấy danh sách link từ GitHub và tạo các checkbox tương ứng."""
-        url = "https://raw.githubusercontent.com/tekdt/tekdtbmc/refs/heads/main/ISOs_link.json"
-        try:
-            QApplication.processEvents() # Cập nhật giao diện
-            
-            response = requests.get(url, timeout=10)
+            response = requests.get(url, timeout=15)
             response.raise_for_status()
-            self.massgrave_links = response.json()
-            
-            # Xóa các widget cũ trong layout (nếu có)
-            for i in reversed(range(self.massgrave_grid_layout.count())): 
-                self.massgrave_grid_layout.itemAt(i).widget().setParent(None)
-            self.massgrave_checkboxes.clear()
+            return response.json()
+        except Exception as e:
+            print(f"Lỗi khi tải products.json: {e}")
+            return None
 
-            # Tạo các checkbox mới
-            items = list(self.massgrave_links.items())
-            num_items = len(items)
-            
-            if num_items > 5: # Chia 2 cột
-                midpoint = (num_items + 1) // 2
-                for i, (name, link) in enumerate(items):
-                    cb = QCheckBox(name)
-                    self.massgrave_checkboxes.append((cb, link))
-                    if i < midpoint:
-                        self.massgrave_grid_layout.addWidget(cb, i, 0)
-                    else:
-                        self.massgrave_grid_layout.addWidget(cb, i - midpoint, 1)
-            else: # Dùng 1 cột
-                for i, (name, link) in enumerate(items):
-                    cb = QCheckBox(name)
-                    self.massgrave_checkboxes.append((cb, link))
-                    self.massgrave_grid_layout.addWidget(cb, i, 0)
+    def _populate_product_combo(self, products_data):
+        """Điền dữ liệu sản phẩm vào combobox đầu tiên."""
+        self.massgrave_product_combo.clear()
+        if not products_data:
+            self.massgrave_product_combo.addItem("Lỗi tải dữ liệu", None)
+            return
 
-        except requests.exceptions.RequestException as e:
-            self.download_status_label.setText("Lỗi: Không thể kết nối hoặc lấy dữ liệu.\nVui lòng kiểm tra lại kết nối Internet.")
-            print(f"Lỗi khi lấy file JSON: {e}")
-            # Xóa các widget cũ (nếu có) để đảm bảo group trống
-            for i in reversed(range(self.massgrave_grid_layout.count())):
-                self.massgrave_grid_layout.itemAt(i).widget().setParent(None)
-            self.massgrave_checkboxes.clear()
+        self.massgrave_product_combo.addItem("Vui lòng chọn phiên bản Windows...", None)
+        # Sắp xếp các sản phẩm theo tên để dễ tìm
+        sorted_products = sorted(products_data.items(), key=lambda item: item[1])
+        for product_id, product_name in sorted_products:
+            self.massgrave_product_combo.addItem(product_name, product_id)
+
+    def _on_product_selected(self, index):
+        """Kích hoạt khi người dùng chọn một sản phẩm."""
+        # Ẩn và xóa các lựa chọn cũ
+        self.massgrave_sku_label.setVisible(False)
+        self.massgrave_sku_combo.setVisible(False)
+        self.massgrave_download_button.setVisible(False)
+        self.massgrave_sku_combo.clear()
+
+        product_id = self.massgrave_product_combo.itemData(index)
+        if not product_id:
+            return
+
+        # Hiển thị trạng thái đang tải và bắt đầu worker
+        self.massgrave_sku_label.setVisible(True)
+        self.massgrave_sku_combo.setVisible(True)
+        self.massgrave_sku_combo.addItem("Đang tải ngôn ngữ/phiên bản...", None)
+
+        self.main_app._create_and_start_worker(
+            name="SkuFetcher",
+            target=self._fetch_skus_task,
+            on_result=self._populate_sku_combo,
+            args=[product_id] # Truyền product_id vào worker
+        )
+
+    def _fetch_skus_task(self, product_id):
+        """Tác vụ nền: Lấy thông tin SKU cho một sản phẩm."""
+        url = f"https://api.gravesoft.dev/msdl/skuinfo?product_id={product_id}"
+        try:
+            # API của MassGrave yêu cầu User-Agent để hoạt động
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+            }
+            response = requests.get(url, headers=headers, timeout=15)
+            response.raise_for_status()
+            # đảm bảo trả về list (một số API trả object)
+            data = response.json()
+            if data is None:
+                return []
+            return data
+        except ValueError:
+            print("Phản hồi không phải JSON:", getattr(response, 'text', '')[:200])
+            return []
+        except Exception as e:
+            print(f"Lỗi khi tải SKU info: {e}")
+            return []
+
+    def _guess_arch_from_filename(self, filename):
+        """Thử đoán arch từ tên file (ví dụ contains '_x64' hoặc '_x32')"""
+        if not filename:
+            return "unknown"
+        fn = filename.lower()
+        if "_x64" in fn or "x64" in fn:
+            return "x64"
+        if "_x86" in fn or "_x32" in fn or "x32" in fn:
+            return "x32"
+        # fallback kiểm tra '64' hay '32' ở cuối token
+        m = re.search(r'[_\-](x?64|x?86|x?32)\b', fn)
+        if m:
+            return m.group(1)
+        return "unknown"
+
+    def _populate_sku_combo(self, skus_data):
+        """
+        Điền dữ liệu cho combobox ngôn ngữ/phiên bản (combobox thứ 2).
+        Hỗ trợ cả 2 trường hợp: skus_data là dict có 'Skus' hoặc là list.
+        Mỗi item trong combobox sẽ tương ứng 1 FriendlyFileNames (ví dụ x32/x64).
+        """
+        # reset
+        try:
+            self.massgrave_sku_combo.blockSignals(True)
+        except Exception:
+            pass
+        self.massgrave_sku_combo.clear()
+
+        # Lấy list thực tế
+        if not skus_data:
+            self.massgrave_sku_combo.addItem("Không có phiên bản (dữ liệu rỗng)", None)
+            try:
+                self.massgrave_sku_combo.blockSignals(False)
+            except Exception:
+                pass
+            return
+
+        if isinstance(skus_data, dict) and 'Skus' in skus_data:
+            skus_list = skus_data.get('Skus') or []
+        elif isinstance(skus_data, list):
+            skus_list = skus_data
+        else:
+            # dữ liệu lạ
+            self.massgrave_sku_combo.addItem("Dữ liệu không đúng định dạng", None)
+            try:
+                self.massgrave_sku_combo.blockSignals(False)
+            except Exception:
+                pass
+            return
+
+        if not skus_list:
+            self.massgrave_sku_combo.addItem("Không có phiên bản", None)
+            try:
+                self.massgrave_sku_combo.blockSignals(False)
+            except Exception:
+                pass
+            return
+
+        # Thêm placeholder
+        self.massgrave_sku_combo.addItem("Chọn ngôn ngữ / phiên bản...", None)
+
+        # Duyệt từng sku (mỗi sku là dict trong JSON bạn đưa)
+        for sku in skus_list:
+            if not isinstance(sku, dict):
+                # phòng hờ: nếu không phải dict -> hiển thị chuỗi đơn giản
+                display = str(sku)
+                self.massgrave_sku_combo.addItem(display, {"sku_id": None, "language": display, "filename": None, "arch": None})
+                continue
+
+            sku_id = sku.get("Id") or sku.get("id") or sku.get("SkuId") or None
+            language = sku.get("Language") or sku.get("LocalizedLanguage") or sku.get("ProductDisplayName") or "Unknown language"
+
+            friendly_files = sku.get("FriendlyFileNames") or sku.get("FriendlyFiles") or []
+            # Nếu API không trả FriendlyFileNames, fallback tạo từ Description hoặc Id
+            if not friendly_files:
+                # tạo một mục đại diện
+                display = f"{language} - {sku_id or 'n/a'}"
+                self.massgrave_sku_combo.addItem(display, {"sku_id": sku_id, "language": language, "filename": None, "arch": None})
+                continue
+
+            # Thêm một item cho mỗi filename (thường có 2: x32 và x64)
+            for fname in friendly_files:
+                arch = self._guess_arch_from_filename(fname)
+                display = f"{language} — {arch} ({fname})"
+                userdata = {"sku_id": sku_id, "language": language, "filename": fname, "arch": arch}
+                self.massgrave_sku_combo.addItem(display, userdata)
+
+        try:
+            self.massgrave_sku_combo.blockSignals(False)
+        except Exception:
+            pass
+
+    def _on_sku_selected(self, index):
+        """Kích hoạt khi người dùng chọn SKU, hiển thị nút tải."""
+        sku_data = self.massgrave_sku_combo.itemData(index)  # Đây là dict với "sku_id", "language", "filename", "arch"
+        self.massgrave_download_button.setVisible(bool(sku_data and sku_data.get("sku_id")))
     
     def browse_iso(self):
         file_paths, _ = QFileDialog.getOpenFileNames(self, "Chọn các file ISO", str(ISOS_DIR), "ISO Files (*.iso)")
@@ -2560,13 +2667,11 @@ class PageISOSelect(QWidget):
         options_data = self.win_options[win_version]
         for rb in options_data['radios'].values():
             rb.setVisible(checked)
-        
         if checked:
             # Bỏ chọn các checkbox khác
             for other_win, data in self.win_options.items():
                 if other_win != win_version:
                     data['checkbox'].setChecked(False)
-            
             # Tự động chọn radio button đầu tiên nếu chỉ có 1 lựa chọn
             if len(options_data['radios']) == 1:
                 list(options_data['radios'].values())[0].setChecked(True)
@@ -2579,22 +2684,28 @@ class PageISOSelect(QWidget):
                 self.arch_button_group.setExclusive(True)
 
     def start_downloads(self):
-        self.downloads_queue.clear()  # Dọn dẹp hàng đợi cũ
+        self.downloads_queue.clear()
 
         if self.microsoft_radio.isChecked():
-            # Logic cũ cho nguồn Microsoft
+            # Logic cho nguồn Microsoft giữ nguyên
             for name, data in self.win_options.items():
                 if data['checkbox'].isChecked():
                     self.downloads_queue.append({'name': name, 'data': data})
         else:
-            # Logic mới cho nguồn MassGrave
-            for checkbox, url in self.massgrave_checkboxes:
-                if checkbox.isChecked():
-                    self.downloads_queue.append({
-                        'name': checkbox.text(),
-                        'data': {'type': 'direct', 'url': url},
-                        'is_massgrave': True  # Thêm flag để phân biệt MassGrave
-                    })
+            # THAY ĐỔI LOGIC CHO NGUỒN MASSGRAVE
+            product_id = self.massgrave_product_combo.currentData()
+            sku_data = self.massgrave_sku_combo.currentData()  # Lấy userdata dict từ combobox thứ hai
+            product_name = self.massgrave_product_combo.currentText()
+            sku_name = self.massgrave_sku_combo.currentText()
+
+            if product_id and sku_data and sku_data.get("sku_id"):
+                self.downloads_queue.append({
+                    'name': f"{product_name} ({sku_name})",
+                    'product_id': product_id,
+                    'sku_id': sku_data["sku_id"],  # Lấy sku_id từ userdata
+                    'selected_filename': sku_data.get("filename"),  # THÊM: Lưu filename đã chọn để so khớp sau
+                    'is_massgrave': True 
+                })
 
         if not self.downloads_queue:
             self.main_app.show_themed_message("Thông báo",
@@ -2638,7 +2749,7 @@ class PageISOSelect(QWidget):
         except Exception as e:
             print(f"Lỗi lấy link cuối cùng: {e}")
             return url
-    
+
     def _download_task(self):
         """Tác vụ tải file theo hàng đợi."""
         if not os.path.exists(ARIA2_EXE):
@@ -2646,46 +2757,93 @@ class PageISOSelect(QWidget):
 
         total_downloads = len(self.downloads_queue)
         for i, item in enumerate(self.downloads_queue):
-            if self.is_cancelling: break
-            
-            name = item['name']
-            data = item['data']
-            self.download_worker.status.emit(f"({i+1}/{total_downloads}) Đang chuẩn bị tải {name}...")
-            
-            iso_url = ""
-            if data['type'] == 'fido':
-                if not os.path.exists(FIDO_SCRIPT_PATH):
-                    raise FileNotFoundError("Chưa tìm thấy Fido.ps1.")
-                
-                fido_version_map = {"Windows 11": "11", "Windows 10": "10"}
-                version_arg = fido_version_map.get(name)
-                # Lấy kiến trúc từ radio nếu là Win 10, còn lại mặc định x64
-                if name == "Windows 10":
-                    arch_arg = "x64"  # Mặc định
-                    for arch, rb in data.get('radios', {}).items():
-                        if rb.isChecked():
-                            arch_arg = arch
-                            break
-                else:
-                    arch_arg = "x64"
+            if self.is_cancelling:
+                break
 
-                self.download_worker.status.emit(f"({i+1}/{total_downloads}) Đang lấy link cho {name}...")
-                fido_cmd = ['powershell.exe', '-ExecutionPolicy', 'Bypass', '-File', FIDO_SCRIPT_PATH, '-Win', version_arg, '-Arch', arch_arg, '-Lang', 'Eng', '-GetUrl']
-                process = subprocess.run(fido_cmd, capture_output=True, text=True, check=True, creationflags=subprocess.CREATE_NO_WINDOW)
-                iso_url = process.stdout.strip()
-            
-            elif data['type'] == 'direct':
-                iso_url = self.get_final_url(data['url'])
+            name = item['name']
+            self.download_worker.status.emit(f"({i+1}/{total_downloads}) Đang chuẩn bị tải {name}...")
+
+            iso_url = ""
+            header_list = []  # Giữ empty, vì API không trả headers
+            cookie_file = None  # Bỏ, vì không có cookies
+
+            if item.get('is_massgrave'):
+                self.download_worker.status.emit(f"Bước 1/2: Lấy link tải cho {name}...")
+                product_id = item['product_id']
+                sku_id = item['sku_id']
+                selected_filename = item.get('selected_filename')  # THÊM: Filename đã chọn từ combobox
+                proxy_url = f"https://api.gravesoft.dev/msdl/proxy?product_id={product_id}&sku_id={sku_id}"
+
+                try:
+                    headers_api = {
+                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+                    }
+                    response = requests.get(proxy_url, headers=headers_api, timeout=20)
+                    response.raise_for_status()
+                    link_data = response.json()
+                    
+                    options = link_data.get("ProductDownloadOptions", [])  # THAY ĐỔI: Lấy mảng options
+                    if not options:
+                        raise Exception("API không trả về ProductDownloadOptions.")
+
+                    # THÊM: Tìm đúng Uri dựa trên selected_filename
+                    found = False
+                    for opt in options:
+                        uri = opt.get("Uri")
+                        if not uri:
+                            continue
+                        parsed_uri = urlparse(uri)
+                        filename_from_uri = os.path.basename(parsed_uri.path)  # Lấy tên file từ path (bỏ query ?t=...)
+                        if filename_from_uri == selected_filename:
+                            iso_url = uri  # Uri đầy đủ với query params
+                            found = True
+                            break
+
+                    if not found:
+                        raise Exception(f"Không tìm thấy Uri khớp với filename: {selected_filename}")
+
+                    # Bỏ logic headers và cookies, vì response không có. Nếu cần, thêm hardcode:
+                    # header_list.append("User-Agent: Mozilla/5.0 ...")  # Nếu API yêu cầu
+
+                except Exception as e:
+                    raise Exception(f"Không thể lấy link tải từ API: {e}")
+            else:  # Logic cho Fido và Direct URL (giữ nguyên, không thay đổi)
+                data = item['data']
+                if data['type'] == 'fido':
+                    if not os.path.exists(FIDO_SCRIPT_PATH):
+                        raise FileNotFoundError("Chưa tìm thấy Fido.ps1.")
+                    
+                    fido_version_map = {"Windows 11": "11", "Windows 10": "10"}
+                    version_arg = fido_version_map.get(name)
+                    if name == "Windows 10":
+                        arch_arg = "x64"
+                        for arch, rb in data.get('radios', {}).items():
+                            if rb.isChecked():
+                                arch_arg = arch; break
+                    else:
+                        arch_arg = "x64"
+
+                    self.download_worker.status.emit(f"({i+1}/{total_downloads}) Đang lấy link cho {name}...")
+                    fido_cmd = ['powershell.exe', '-ExecutionPolicy', 'Bypass', '-File', FIDO_SCRIPT_PATH, '-Win', version_arg, '-Arch', arch_arg, '-Lang', 'Eng', '-GetUrl']
+                    process = subprocess.run(fido_cmd, capture_output=True, text=True, check=True, creationflags=subprocess.CREATE_NO_WINDOW)
+                    iso_url = process.stdout.strip()
+                
+                elif data['type'] == 'direct':
+                    iso_url = self.get_final_url(data['url'])
 
             if not iso_url or not iso_url.startswith("http"):
                 raise Exception(f"Không lấy được URL hợp lệ cho {name}.")
-            iso_filename = os.path.basename(iso_url.split('?')[0])
+            
+            # THAY ĐỔI: Sử dụng selected_filename nếu là MassGrave, nếu không thì parse từ iso_url
+            if item.get('is_massgrave'):
+                iso_filename = selected_filename
+            else:
+                iso_filename = os.path.basename(iso_url.split('?')[0])
             iso_filepath = os.path.join(ISOS_DIR, iso_filename)
             
             aria2_control_file = iso_filepath + ".aria2"
             if os.path.exists(aria2_control_file):
                 self.download_worker.status.emit("Phát hiện file tải dở. Đang dọn dẹp...")
-                print(f"Đang xóa file tải dở: {iso_filepath} và {aria2_control_file}")
                 try:
                     os.remove(aria2_control_file)
                     if os.path.exists(iso_filepath):
@@ -2697,82 +2855,58 @@ class PageISOSelect(QWidget):
 
             if os.path.exists(iso_filepath):
                 self.download_worker.status.emit(f"({i+1}/{total_downloads}) File {iso_filename} đã tồn tại. Bỏ qua.")
-                self.download_worker.result.emit(iso_filepath) # Gửi tín hiệu để thêm vào danh sách
+                self.download_worker.result.emit(iso_filepath)
                 continue
 
             self.download_worker.status.emit(f"({i+1}/{total_downloads}) Đang tải {iso_filename}...")
 
-            # THÊM PHẦN BYPASS CLOUDFLARE CHO MASSGRAVE
-            header_list = []  # Mặc định không có header đặc biệt
-            cookie_file = None  # Mặc định không có cookie
-            if item.get('is_massgrave'):  # Chỉ áp dụng cho MassGrave
-                self.download_worker.status.emit(f"Bước 1/2: Đang bypass CloudFlare cho {name}...")
-                header_list, cookie_file = self._get_cloudflare_bypass(iso_url)
-                self.download_worker.status.emit(f"Bước 2/2: Đã bypass. Đang tải file {iso_filename}...")
-            else:
-                self.download_worker.status.emit(f"Bước 2/2: Đang tải file {iso_filename}...")
-            
-            # Lệnh aria2c cơ bản
             aria2_cmd = [
-                ARIA2_EXE,
-                '--console-log-level=info',
-                '--summary-interval=1',
-                '-c', '-x16', '-s16',
-                '-d', ISOS_DIR,
-                '-o', iso_filename,
-                iso_url
+                str(ARIA2_EXE), '--console-log-level=info', '--summary-interval=1',
+                '-c', '-x16', '-s16', '-d', str(ISOS_DIR), '-o', iso_filename
             ]
             
-            # Thêm header nếu có (cho MassGrave)
             for header in header_list:
                 aria2_cmd.extend(['--header', header])
             
-            # Thêm cookie nếu có (cho MassGrave)
-            if cookie_file:
+            if cookie_file:  # Giữ nhưng sẽ không dùng vì None
                 aria2_cmd.extend(['--load-cookies', cookie_file])
+            
+            aria2_cmd.append(iso_url)
 
             self.aria2_process = subprocess.Popen(
-                aria2_cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
-                encoding='utf-8',
-                creationflags=subprocess.CREATE_NO_WINDOW,
-                bufsize=1  # Buộc ghi vào pipe sau mỗi dòng
+                aria2_cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                text=True, encoding='utf-8', creationflags=subprocess.CREATE_NO_WINDOW, bufsize=1
             )
             
             for line in iter(self.aria2_process.stdout.readline, ''):
-                if not self.aria2_process: break
+                if not self.aria2_process or self.is_cancelling: break
                 line = line.strip()
                 print(f"[Aria2 Output]: {line}")
-
-                # Mẫu của aria2 thường là: ... CN:1 DL:11MiB ETA:1m1s) (1%)
                 match = re.search(r'\((\d{1,3})%\)', line)
                 if match:
                     percent = int(match.group(1))
-                    # Tạo một chuỗi trạng thái chi tiết hơn
                     speed_match = re.search(r'DL:([^\s]+)', line)
                     eta_match = re.search(r'ETA:([^\)]+)', line)
                     status_text = f"Đang tải {iso_filename}: {percent}%"
-                    if speed_match:
-                        status_text += f" ({speed_match.group(1)})"
-                    if eta_match:
-                        status_text += f" - ETA: {eta_match.group(1)}"
+                    if speed_match: status_text += f" ({speed_match.group(1)})"
+                    if eta_match: status_text += f" - ETA: {eta_match.group(1)}"
                     self.download_worker.status.emit(status_text)
             
             self.aria2_process.wait()
+
+            if cookie_file and os.path.exists(cookie_file):  # Giữ nhưng sẽ không chạy
+                try:
+                    os.remove(cookie_file)
+                    print(f"Đã xóa file cookie tạm: {cookie_file}")
+                except OSError: pass
+
+            if self.is_cancelling:
+                break
+                
             if self.aria2_process and self.aria2_process.returncode != 0:
-                if not self.is_cancelling:
-                    raise Exception(f"aria2 thất bại với mã lỗi {self.aria2_process.returncode}")
+                raise Exception(f"aria2 thất bại với mã lỗi {self.aria2_process.returncode}")
 
-            # Dọn dẹp file cookie tạm sau khi tải xong (nếu có)
-            if cookie_file and os.path.exists(cookie_file):
-                os.remove(cookie_file)
-                print(f"Đã xóa file cookie tạm: {cookie_file}")
-
-            if not self.is_cancelling:
-                self.download_worker.result.emit(iso_filepath)
-            return None
+            self.download_worker.result.emit(iso_filepath)
 
     def on_download_result(self, iso_path):
         """Xử lý khi có kết quả từ luồng tải về."""
@@ -2803,25 +2937,6 @@ class PageISOSelect(QWidget):
                             radio_button.setChecked(False)
                             self.arch_button_group.setExclusive(True)
                             break
-            
-    def _set_ui_state(self, downloading=False, long_task=False):
-        """Cập nhật trạng thái UI cho các tác vụ tải hoặc tác vụ nền dài."""
-        # Download-related UI
-        self.iso_list_group.setEnabled(not downloading)
-        for win, data in self.win_options.items():
-            data['checkbox'].setEnabled(not downloading)
-            if 'radios' in data:
-                for rb in data['radios'].values():
-                    rb.setEnabled(not downloading)
-        self.back_button.setVisible(not downloading)
-        self.next_button.setVisible(not downloading)
-        self.cancel_button.setVisible(downloading)
-        self.download_button.setEnabled(not downloading)
-        # Long-running task UI (example: progress bar, disabling main window)
-        if hasattr(self, "progress_bar"):
-            self.progress_bar.setVisible(long_task)
-        if hasattr(self, "start_button"):
-            self.start_button.setEnabled(not long_task)
 
     def stop_download_process(self):
         """Dừng tiến trình aria2c.exe VÀ luồng QThread quản lý nó."""
