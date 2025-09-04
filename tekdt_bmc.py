@@ -491,29 +491,42 @@ class USBBootCreator(QMainWindow):
             return False
  
     def closeEvent(self, event):
-        """Sự kiện đóng ứng dụng, đảm bảo dừng tất cả các tác vụ nền."""
+        """Sự kiện đóng ứng dụng, hiển thị xác nhận và đảm bảo dừng tất cả các tác vụ nền."""
+        
+        # Thêm hộp thoại xác nhận trước khi thoát
+        reply = self.show_themed_message(
+            "Xác nhận thoát",
+            "Bạn có chắc chắn muốn thoát chương trình không?",
+            icon=QMessageBox.Icon.Question,
+            buttons=QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            defaultButton=QMessageBox.StandardButton.No
+        )
+
+        if reply == QMessageBox.StandardButton.No:
+            event.ignore()  # Hủy sự kiện đóng cửa sổ
+            return
+
+        # Nếu người dùng chọn "Yes", tiếp tục với quy trình dọn dẹp hiện có
         print("Cửa sổ đang đóng, bắt đầu quy trình dọn dẹp...")
 
         # Dừng các tiến trình và timer không phải QThread trước
         self.usb_monitor_timer.stop()
-        self.page2.is_cancelling = True # Báo cho luồng tải biết để hủy
+        self.page2.is_cancelling = True 
         if self.page2.aria2_process:
              self.page2.aria2_process.kill()
         self._stop_tekdtais()
         self.uninstall_wincdemu_driver()
 
         # Dừng tất cả các luồng worker đang chạy
-        # Lặp qua một bản sao của danh sách để tránh lỗi khi xóa phần tử
         for worker in list(self.active_workers):
             if worker.isRunning():
                 print(f"Đang yêu cầu dừng luồng '{worker.name}'...")
                 worker.terminate()
-                # Chờ tối đa 5 giây cho mỗi luồng
                 if not worker.wait(5000):
                     print(f"CẢNH BÁO: Luồng '{worker.name}' không phản hồi sau 5 giây.")
 
         print("Quy trình dọn dẹp hoàn tất. Ứng dụng sẽ đóng.")
-        event.accept()
+        event.accept() # Chấp nhận sự kiện đóng cửa sổ
     
     def show_themed_message(self, title, text, icon=QMessageBox.Icon.NoIcon, 
                             buttons=QMessageBox.StandardButton.Ok, 
