@@ -583,30 +583,35 @@ class USBBootCreator(QMainWindow):
     def start_tekdtais(self):
         if not os.path.exists(TEKDTAIS_EXE) or self.is_tekdtais_running():
             return
-            
+
         if os.path.exists(SHUTDOWN_SIGNAL_TEKDTAIS):
-                    try:
-                        os.remove(SHUTDOWN_SIGNAL_TEKDTAIS)
-                        print(f"Đã xóa file tín hiệu shutdown_signal.txt cho TekDT AIS: {SHUTDOWN_SIGNAL_TEKDTAIS}")
-                    except OSError as e:
-                        print(f"Không thể xóa file tín hiệu shutdown_signal.txt cho TekDT AIS: {e}")
+            try:
+                os.remove(SHUTDOWN_SIGNAL_TEKDTAIS)
+                print(f"Đã xóa file tín hiệu shutdown_signal.txt cho TekDT AIS: {SHUTDOWN_SIGNAL_TEKDTAIS}")
+            except OSError as e:
+                print(f"Không thể xóa file tín hiệu shutdown_signal.txt cho TekDT AIS: {e}")
 
         try:
             print("Đang khởi chạy TekDT AIS ở chế độ nền...")
             startupinfo = subprocess.STARTUPINFO()
             startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-            startupinfo.wShowWindow = 0 # SW_HIDE
+            startupinfo.wShowWindow = 0  # SW_HIDE
 
-            flags = subprocess.CREATE_NEW_PROCESS_GROUP
-            
+            # Kết hợp CREATE_NEW_PROCESS_GROUP và CREATE_NO_WINDOW (tránh console window)
+            flags = subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.CREATE_NO_WINDOW
+
             self.ais_process = subprocess.Popen(
-                [TEKDTAIS_EXE, "--embed-mode"], # Argument để AIS biết nó đang được nhúng
+                [TEKDTAIS_EXE, "--embed-mode"],
                 cwd=TEKDTAIS_DIR,
                 startupinfo=startupinfo,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
                 creationflags=flags
             )
+
+            # Reset bất kỳ trạng thái HWND cũ
+            self.ais_hwnds = None
+            self.ais_hwnd = None
 
             self.find_ais_window_timer = QTimer(self)
             self.find_ais_window_timer.attempts = 0
@@ -696,37 +701,77 @@ class USBBootCreator(QMainWindow):
             print(f"Luồng '{worker_thread.name}' đã kết thúc và được xóa. Còn lại: {len(self.active_workers)} luồng.")
         worker_thread.deleteLater() # Đảm bảo worker được dọn dẹp an toàn
     
+    def _get_windows_for_pid(self, pid):
+        """
+        Trả về danh sách HWND (int) của tất cả cửa sổ thuộc process `pid`.
+        Dùng EnumWindows + GetWindowThreadProcessId để tìm mọi cửa sổ (visible hoặc không).
+        """
+        hwnds = []
+
+        EnumWindowsProc = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+
+        @EnumWindowsProc
+        def _enum(hwnd, lParam):
+            pid_dw = wintypes.DWORD()
+            ctypes.windll.user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid_dw))
+            if pid_dw.value == pid:
+                hwnds.append(hwnd)
+            return True  # tiếp tục enumerate
+
+        ctypes.windll.user32.EnumWindows(_enum, 0)
+        return hwnds
+    
     def _find_ais_window_task(self):
+        """
+        Tìm mọi cửa sổ thuộc tiến trình TekDT AIS (dựa trên PID).
+        Nếu tìm thấy, chuyển tất cả các cửa sổ đó về TOOLWINDOW (ẩn khỏi taskbar),
+        ẩn tạm, rồi nếu đang ở page3 -> nhúng (embed).
+        """
         self.find_ais_window_timer.attempts += 1
-        # Chỉ tìm kiếm nếu chưa tìm thấy
-        if not self.ais_hwnd:
-            self.ais_hwnd = ctypes.windll.user32.FindWindowW(None, "TekDT AIS")
 
-        if self.ais_hwnd:
+        # Nếu đã có danh sách hwnds thì không cần tìm lại
+        if getattr(self, "ais_hwnds", None):
+            return
+
+        # Nếu chưa có process hoặc PID, cố gắng lấy từ self.ais_process
+        pid = None
+        if getattr(self, "ais_process", None):
+            try:
+                pid = self.ais_process.pid
+            except Exception:
+                pid = None
+
+        # Nếu có PID -> enumerate windows của PID
+        if pid:
+            hwnds = self._get_windows_for_pid(pid)
+        else:
+            # fallback cũ: tìm theo tiêu đề "TekDT AIS" (vẫn giữ để backward compat)
+            h = ctypes.windll.user32.FindWindowW(None, "TekDT AIS")
+            hwnds = [h] if h else []
+
+        if hwnds:
+            # Lưu lại list các hwnd (dùng cho embed/resize/hide sau này)
+            self.ais_hwnds = hwnds
             self.find_ais_window_timer.stop()
-            print(f"Đã tìm thấy cửa sổ TekDT AIS (HWND: {self.ais_hwnd}).")
+            print(f"Đã tìm thấy {len(hwnds)} cửa sổ TekDT AIS: {hwnds} (PID={pid})")
 
-            # Thay đổi style của cửa sổ để loại bỏ icon khỏi thanh taskbar
-            # Bằng cách biến nó thành một "Tool Window"
+            # Thay đổi style cho từng cửa sổ để loại bỏ icon khỏi taskbar, ẩn nhanh
             GWL_EXSTYLE = -20
             WS_EX_APPWINDOW = 0x00040000
             WS_EX_TOOLWINDOW = 0x00000080
-            
-            # Lấy style mở rộng hiện tại
-            ex_style = ctypes.windll.user32.GetWindowLongW(self.ais_hwnd, GWL_EXSTYLE)
-            # Xóa cờ APPWINDOW và thêm cờ TOOLWINDOW
-            ex_style = (ex_style & ~WS_EX_APPWINDOW) | WS_EX_TOOLWINDOW
-            # Áp dụng style mới
-            ctypes.windll.user32.SetWindowLongW(self.ais_hwnd, GWL_EXSTYLE, ex_style)
+            for hwnd in hwnds:
+                try:
+                    ex_style = ctypes.windll.user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
+                    ex_style = (ex_style & ~WS_EX_APPWINDOW) | WS_EX_TOOLWINDOW
+                    ctypes.windll.user32.SetWindowLongW(hwnd, GWL_EXSTYLE, ex_style)
+                    ctypes.windll.user32.ShowWindow(hwnd, 0)  # SW_HIDE
+                except Exception as e:
+                    print(f"Lỗi khi chỉnh style cho HWND {hwnd}: {e}")
 
-            # Ẩn cửa sổ ngay lập tức để không bị "nháy" trên màn hình
-            ctypes.windll.user32.ShowWindow(self.ais_hwnd, 0)  # SW_HIDE = 0
-
-            # Nếu người dùng đang ở trang 3 thì nhúng vào luôn
+            # Nếu ở trang 3 thì nhúng ngay
             if self.stacked_widget.currentWidget() == self.page3:
                 self.embed_ais_window()
-
-        elif self.find_ais_window_timer.attempts > 40:  # Thử trong 10 giây
+        elif self.find_ais_window_timer.attempts > 40:
             self.find_ais_window_timer.stop()
             print("Không thể tìm thấy cửa sổ TekDT AIS sau 10 giây.")
             self._stop_tekdtais()
@@ -749,69 +794,87 @@ class USBBootCreator(QMainWindow):
             self.start_tekdtais()
     
     def embed_ais_window(self):
-        # Kiểm tra điều kiện cơ bản
-        if not self.ais_hwnd or not self.page3:
+        # Nếu chưa có hwnds hoặc page không tồn tại -> thôi
+        hwnds = getattr(self, "ais_hwnds", None)
+        if not hwnds or not self.page3:
             return
-        
-        # Lấy container từ giao diện
+
         container = self.page3.embed_container
         container_id = int(container.winId())
 
-        # Thiết lập style cho cửa sổ B
         GWL_STYLE = -16
-        style = ctypes.windll.user32.GetWindowLongW(self.ais_hwnd, GWL_STYLE)
-        style |= 0x40000000  # WS_CHILD: Đặt B là child window
-        style &= ~0x00C00000  # Loại bỏ WS_CAPTION (thanh tiêu đề)
-        style &= ~0x00040000  # Loại bỏ WS_THICKFRAME (viền resize)
-        ctypes.windll.user32.SetWindowLongW(self.ais_hwnd, GWL_STYLE, style)
-        
-        # Đặt cửa sổ B làm con của container
-        ctypes.windll.user32.SetParent(self.ais_hwnd, container_id)
-
-        # Lấy kích thước logic của container
-        container_size = container.size()
-        container_width = container_size.width()
-        container_height = container_size.height()
-
-        # Lấy tỷ lệ DPI của thiết bị
-        pixel_ratio = self.devicePixelRatioF()
-
-        # Tính kích thước vật lý
-        physical_width = int(container_width * pixel_ratio)
-        physical_height = int(container_height * pixel_ratio)
-
-        # Đặt kích thước và vị trí cho cửa sổ B
         SWP_FRAMECHANGED = 0x0020
-        ctypes.windll.user32.SetWindowPos(
-            self.ais_hwnd, 0, 0, 0, physical_width, physical_height,
-            SWP_FRAMECHANGED | 0x0004  # SWP_NOZORDER
-        )
+        SWP_NOZORDER = 0x0004
+        SWP_SHOWWINDOW = 0x0040
 
-        # Hiển thị cửa sổ B
-        ctypes.windll.user32.ShowWindow(self.ais_hwnd, 1)  # SW_SHOW = 1
+        pixel_ratio = self.devicePixelRatioF()
+        container_size = container.size()
+        physical_width = int(container_size.width() * pixel_ratio)
+        physical_height = int(container_size.height() * pixel_ratio)
+
+        for hwnd in hwnds:
+            try:
+                # Thiết lập style: WS_CHILD, remove caption/thickframe
+                style = ctypes.windll.user32.GetWindowLongW(hwnd, GWL_STYLE)
+                style |= 0x40000000  # WS_CHILD
+                style &= ~0x00C00000  # remove WS_CAPTION
+                style &= ~0x00040000  # remove WS_THICKFRAME
+                ctypes.windll.user32.SetWindowLongW(hwnd, GWL_STYLE, style)
+
+                # Set parent
+                ctypes.windll.user32.SetParent(hwnd, container_id)
+
+                # Đặt kích thước (dùng SetWindowPos kèm FRAMECHANGED)
+                ctypes.windll.user32.SetWindowPos(
+                    hwnd, 0, 0, 0, physical_width, physical_height,
+                    SWP_FRAMECHANGED | SWP_NOZORDER | SWP_SHOWWINDOW
+                )
+
+                # Hiển thị
+                ctypes.windll.user32.ShowWindow(hwnd, 1)  # SW_SHOW
+
+            except Exception as e:
+                print(f"Lỗi khi nhúng HWND {hwnd}: {e}")
+
         container.setVisible(True)
 
-        # Thêm timer để điều chỉnh kích thước sau khi hiển thị
+        # Chỉnh lại kích thước chính xác sau 100ms
         QTimer.singleShot(100, self.resize_ais_window)
+
     
     def hide_ais_window(self):
-        if not self.ais_hwnd: return
-        ctypes.windll.user32.ShowWindow(self.ais_hwnd, 0)
-        ctypes.windll.user32.SetParent(self.ais_hwnd, 0)
-        self.page3.embed_container.setVisible(False)
+        hwnds = getattr(self, "ais_hwnds", None)
+        if not hwnds:
+            return
+        for hwnd in hwnds:
+            try:
+                ctypes.windll.user32.ShowWindow(hwnd, 0)  # SW_HIDE
+                ctypes.windll.user32.SetParent(hwnd, 0)
+            except Exception as e:
+                print(f"Lỗi khi hide HWND {hwnd}: {e}")
+        # Ẩn container UI
+        try:
+            self.page3.embed_container.setVisible(False)
+        except Exception:
+            pass
 
     def resize_ais_window(self):
-        if self.ais_hwnd and self.page3.embed_container.isVisible():
-            container = self.page3.embed_container
-            pixel_ratio = self.devicePixelRatioF()
-            width = int(container.width() * pixel_ratio)
-            height = int(container.height() * pixel_ratio)
+        hwnds = getattr(self, "ais_hwnds", None)
+        if not hwnds or not self.page3.embed_container.isVisible():
+            return
 
-            # Đặt vị trí tại (0,0) trong container và giữ nguyên kích thước
-            ctypes.windll.user32.SetWindowPos(
-                self.ais_hwnd, 0, 0, 0, width, height, 
-                0x0004  # Chỉ SWP_NOZORDER, bỏ SWP_NOMOVE để đặt lại vị trí
-            )
+        pixel_ratio = self.devicePixelRatioF()
+        width = int(self.page3.embed_container.width() * pixel_ratio)
+        height = int(self.page3.embed_container.height() * pixel_ratio)
+
+        for hwnd in hwnds:
+            try:
+                ctypes.windll.user32.SetWindowPos(
+                    hwnd, 0, 0, 0, width, height,
+                    0x0004  # SWP_NOZORDER
+                )
+            except Exception as e:
+                print(f"Lỗi khi resize HWND {hwnd}: {e}")
     
     def is_tekdtais_running(self):
         return self.ais_process and self.ais_process.poll() is None
@@ -2787,14 +2850,148 @@ class PageISOSelect(QWidget):
             print(f"Lỗi lấy link cuối cùng: {e}")
             return url
 
+    def _run_aria2_stream(self, aria2_cmd, iso_filename, download_worker=None, poll_interval=0.5):
+        """
+        Chạy aria2c bằng subprocess, đọc stdout trong một luồng riêng, đưa dòng đọc được vào Queue.
+        Bắt mọi ngoại lệ trong thread đọc để tránh crash ứng dụng khi pipe bị đóng đột ngột.
+        Trả về returncode của tiến trình (int) hoặc None nếu không khởi chạy được.
+        """
+        try:
+            self.aria2_process = subprocess.Popen(
+                aria2_cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                encoding='utf-8',
+                errors='replace',
+                creationflags=subprocess.CREATE_NO_WINDOW,
+                bufsize=1
+            )
+        except Exception as e:
+            # Không thể khởi chạy aria2
+            print(f"[_run_aria2_stream] Lỗi khởi chạy aria2c: {e}")
+            self.aria2_process = None
+            return None
+
+        output_queue = Queue()
+
+        def _reader(proc, q):
+            """Luồng đọc: phải bắt mọi exception để không làm rớt tiến trình chính."""
+            try:
+                # Dùng readline lặp cho tới EOF. Nếu pipe đột ngột đóng, có thể raise -> catch bên ngoài.
+                while True:
+                    try:
+                        line = proc.stdout.readline()
+                    except Exception as e:
+                        print(f"[_reader] Lỗi khi đọc stdout aria2: {e}")
+                        break
+                    if line == '':
+                        # EOF
+                        break
+                    q.put(line)
+            except Exception as e:
+                print(f"[_reader] Ngoại lệ bất ngờ: {e}")
+            finally:
+                # Đảm bảo luôn gửi sentinel hoàn tất
+                try:
+                    q.put(None)
+                except Exception:
+                    pass
+
+        reader_thread = threading.Thread(target=_reader, args=(self.aria2_process, output_queue), daemon=True)
+        reader_thread.start()
+
+        try:
+            # Vòng lặp chính: lấy dòng từ queue và xử lý; cho phép kiểm tra is_cancelling định kỳ
+            while True:
+                if getattr(self, "is_cancelling", False):
+                    # Nếu user yêu cầu dừng, break ra để dọn dẹp
+                    print("[_run_aria2_stream] is_cancelling được bật, sẽ dừng aria2.")
+                    break
+
+                # Nếu process đã kết thúc và queue rỗng -> thoát
+                if self.aria2_process.poll() is not None and output_queue.empty():
+                    break
+
+                try:
+                    line = output_queue.get(timeout=poll_interval)
+                except Empty:
+                    # timeout -> quay lại vòng để check is_cancelling hoặc poll
+                    continue
+
+                # sentinel: None nghĩa luồng đọc đã xong
+                if line is None:
+                    break
+
+                line = line.strip()
+                if not line:
+                    continue
+
+                # Debug/log
+                print(f"[Aria2] {line}")
+
+                # Cập nhật UI nếu có download_worker (giữ logic cũ của bạn)
+                try:
+                    m = re.search(r'\((\d{1,3})%\)', line)
+                    if m and download_worker:
+                        percent = int(m.group(1))
+                        speed_match = re.search(r'DL:([^\s]+)', line)
+                        eta_match = re.search(r'ETA:([^)]+)', line)
+                        status_text = f"Đang tải {iso_filename}: {percent}%"
+                        if speed_match:
+                            status_text += f" ({speed_match.group(1)})"
+                        if eta_match:
+                            status_text += f" - ETA: {eta_match.group(1)}"
+                        try:
+                            download_worker.status.emit(status_text)
+                        except Exception:
+                            # Nếu emit lỗi thì bỏ qua, không làm crash
+                            pass
+                except Exception as e:
+                    print(f"[_run_aria2_stream] Lỗi khi phân tích dòng: {e}")
+
+            # Kết thúc vòng đọc: chờ process kết thúc (với timeout ngắn)
+            try:
+                if self.aria2_process and self.aria2_process.poll() is None:
+                    self.aria2_process.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                # Nếu không tự exit, kill để dọn dẹp
+                try:
+                    self.aria2_process.kill()
+                except Exception as e:
+                    print(f"[_run_aria2_stream] Lỗi kill aria2: {e}")
+
+        finally:
+            # Dọn dẹp: đóng stdout và signal queue
+            try:
+                if getattr(self.aria2_process, "stdout", None):
+                    try:
+                        self.aria2_process.stdout.close()
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+
+            try:
+                output_queue.put(None)
+            except Exception:
+                pass
+
+            # Join luồng đọc với timeout ngắn
+            reader_thread.join(timeout=3)
+            if reader_thread.is_alive():
+                print("[_run_aria2_stream] Cảnh báo: reader_thread vẫn alive sau 3s; thread là daemon nên sẽ kết thúc khi app thoát.")
+
+        return getattr(self.aria2_process, "returncode", None)
+    
     def _download_task(self):
-        """Tác vụ tải file theo hàng đợi, xử lý output của subprocess một cách an toàn."""
+        """Tác vụ tải file theo hàng đợi, sử dụng _run_aria2_stream để chạy aria2 an toàn."""
         if not os.path.exists(ARIA2_EXE):
             raise FileNotFoundError("Chưa tìm thấy aria2c.exe.")
 
         total_downloads = len(self.downloads_queue)
         for i, item in enumerate(self.downloads_queue):
-            if self.is_cancelling:
+            if getattr(self, "is_cancelling", False):
                 break
 
             name = item['name']
@@ -2803,72 +3000,66 @@ class PageISOSelect(QWidget):
             iso_url = ""
             header_list = []
             cookie_file = None
+            selected_filename = item.get('selected_filename', None)
 
-            if item.get('is_gravesoft'):
-                self.download_worker.status.emit(f"Bước 1/2: Lấy link tải cho {name}...")
-                product_id = item['product_id']
-                sku_id = item['sku_id']
-                selected_filename = item.get('selected_filename')
-                proxy_url = f"https://api.gravesoft.dev/msdl/proxy?product_id={product_id}&sku_id={sku_id}"
+            # -- xác định iso_url (giữ nguyên logic cũ) --
+            try:
+                if item.get('is_gravesoft'):
+                    self.download_worker.status.emit(f"Bước 1/2: Lấy link tải cho {name}...")
+                    product_id = item['product_id']
+                    sku_id = item['sku_id']
+                    proxy_url = f"https://api.gravesoft.dev/msdl/proxy?product_id={product_id}&sku_id={sku_id}"
 
-                try:
                     headers_api = {
-                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'
                     }
                     response = requests.get(proxy_url, headers=headers_api, timeout=20)
                     response.raise_for_status()
                     link_data = response.json()
-                    
                     options = link_data.get("ProductDownloadOptions", [])
                     if not options:
                         raise Exception("API không trả về ProductDownloadOptions.")
-
                     found = False
                     for opt in options:
                         uri = opt.get("Uri")
                         if not uri: continue
-                        
                         parsed_uri = urlparse(uri)
                         filename_from_uri = os.path.basename(parsed_uri.path)
                         if filename_from_uri == selected_filename:
                             iso_url = uri
                             found = True
                             break
-
                     if not found:
                         raise Exception(f"Không tìm thấy Uri khớp với filename: {selected_filename}")
-
-                except Exception as e:
-                    raise Exception(f"Không thể lấy link tải từ API: {e}")
-            else:
-                data = item['data']
-                if data['type'] == 'fido':
-                    if not os.path.exists(FIDO_SCRIPT_PATH):
-                        raise FileNotFoundError("Chưa tìm thấy Fido.ps1.")
-                    
-                    fido_version_map = {"Windows 11": "11", "Windows 10": "10"}
-                    version_arg = fido_version_map.get(name)
-                    arch_arg = "x64"
-                    if name == "Windows 10":
-                        for arch, rb in data.get('radios', {}).items():
-                            if rb.isChecked():
-                                arch_arg = arch
-                                break
-
-                    self.download_worker.status.emit(f"({i+1}/{total_downloads}) Đang lấy link cho {name}...")
-                    fido_cmd = ['powershell.exe', '-ExecutionPolicy', 'Bypass', '-File', FIDO_SCRIPT_PATH, '-Win', version_arg, '-Arch', arch_arg, '-Lang', 'Eng', '-GetUrl']
-                    process = subprocess.run(fido_cmd, capture_output=True, text=True, check=True, creationflags=subprocess.CREATE_NO_WINDOW)
-                    iso_url = process.stdout.strip()
-                
-                elif data['type'] == 'direct':
-                    iso_url = self.get_final_url(data['url'])
+                else:
+                    data = item['data']
+                    if data['type'] == 'fido':
+                        if not os.path.exists(FIDO_SCRIPT_PATH):
+                            raise FileNotFoundError("Chưa tìm thấy Fido.ps1.")
+                        fido_version_map = {"Windows 11": "11", "Windows 10": "10"}
+                        version_arg = fido_version_map.get(name)
+                        arch_arg = "x64"
+                        if name == "Windows 10":
+                            for arch, rb in data.get('radios', {}).items():
+                                if rb.isChecked():
+                                    arch_arg = arch
+                                    break
+                        self.download_worker.status.emit(f"({i+1}/{total_downloads}) Đang lấy link cho {name}...")
+                        fido_cmd = ['powershell.exe', '-ExecutionPolicy', 'Bypass', '-File', FIDO_SCRIPT_PATH, '-Win', version_arg, '-Arch', arch_arg, '-Lang', 'Eng', '-GetUrl']
+                        process = subprocess.run(fido_cmd, capture_output=True, text=True, check=True, creationflags=subprocess.CREATE_NO_WINDOW)
+                        iso_url = process.stdout.strip()
+                    elif data['type'] == 'direct':
+                        iso_url = self.get_final_url(data['url'])
+            except Exception as e:
+                raise Exception(f"Không thể lấy URL cho {name}: {e}")
 
             if not iso_url or not iso_url.startswith("http"):
                 raise Exception(f"Không lấy được URL hợp lệ cho {name}.")
-            
+
             iso_filename = selected_filename if item.get('is_gravesoft') else os.path.basename(iso_url.split('?')[0])
             iso_filepath = os.path.join(ISOS_DIR, iso_filename)
-            
+
+            # Nếu có file .aria2 (dang dở) -> xóa
             aria2_control_file = iso_filepath + ".aria2"
             if os.path.exists(aria2_control_file):
                 self.download_worker.status.emit("Phát hiện file tải dở. Đang dọn dẹp...")
@@ -2886,101 +3077,38 @@ class PageISOSelect(QWidget):
                 self.download_worker.result.emit(iso_filepath)
                 continue
 
+            # Chuẩn bị command aria2
             self.download_worker.status.emit(f"({i+1}/{total_downloads}) Đang tải {iso_filename}...")
-
             aria2_cmd = [str(ARIA2_EXE), '--console-log-level=warn', '--summary-interval=1', '-c', '-x16', '-s16', '-d', str(ISOS_DIR), '-o', iso_filename]
-            
             for header in header_list:
                 aria2_cmd.extend(['--header', header])
-            
             if cookie_file:
                 aria2_cmd.extend(['--load-cookies', cookie_file])
-            
             aria2_cmd.append(iso_url)
 
+            # GỌI helper an toàn để chạy aria2 và đọc output
             try:
-                self.aria2_process = subprocess.Popen(
-                    aria2_cmd, 
-                    stdout=subprocess.PIPE, 
-                    stderr=subprocess.STDOUT, # Gộp stderr vào stdout
-                    text=True, 
-                    encoding='utf-8', 
-                    errors='replace', # Xử lý lỗi ký tự
-                    creationflags=subprocess.CREATE_NO_WINDOW,
-                    bufsize=1 # Bật chế độ line-buffered
-                )
-                
-                # Tạo một Queue để giao tiếp giữa luồng đọc và luồng chính
-                output_queue = Queue()
-                
-                # Hàm này sẽ chạy trong một luồng riêng, chỉ để đọc output
-                def read_output_thread(process, queue):
-                    try:
-                        # Đọc từng dòng cho đến khi tiến trình kết thúc
-                        for line in iter(process.stdout.readline, ''):
-                            queue.put(line)
-                    finally:
-                        # Đặt một giá trị đặc biệt để báo hiệu đã đọc xong
-                        queue.put(None)
-
-                # Khởi động luồng đọc
-                reader_thread = threading.Thread(target=read_output_thread, args=(self.aria2_process, output_queue), daemon=True)
-                reader_thread.start()
-                
-                # Vòng lặp chính để xử lý output từ Queue
-                while True:
-                    if self.is_cancelling:
-                        break
-                    
-                    # Kiểm tra xem tiến trình aria2 có còn chạy không
-                    if self.aria2_process.poll() is not None and output_queue.empty():
-                        break
-
-                    try:
-                        # Lấy một dòng từ queue với timeout để không bị block mãi mãi
-                        line = output_queue.get(timeout=0.5)
-                        
-                        if line is None: # Tín hiệu kết thúc từ luồng đọc
-                            break
-                        
-                        line = line.strip()
-                        if line:
-                            # In ra console để debug (nếu có)
-                            print(f"[Aria2]: {line}")
-                            
-                            # Phân tích dòng để cập nhật UI
-                            match = re.search(r'\((\d{1,3})%\)', line)
-                            if match:
-                                percent = int(match.group(1))
-                                speed_match = re.search(r'DL:([^\s]+)', line)
-                                eta_match = re.search(r'ETA:([^)]+)', line)
-                                status_text = f"Đang tải {iso_filename}: {percent}%"
-                                if speed_match: status_text += f" ({speed_match.group(1)})"
-                                if eta_match: status_text += f" - ETA: {eta_match.group(1)}"
-                                self.download_worker.status.emit(status_text)
-
-                    except Empty:
-                        # Timeout, tiếp tục vòng lặp để kiểm tra is_cancelling
-                        continue
-                
-                # Đợi tiến trình aria2 kết thúc hoàn toàn
-                self.aria2_process.wait()
-                # Đảm bảo luồng đọc cũng đã kết thúc
-                reader_thread.join()
-
+                rc = self._run_aria2_stream(aria2_cmd, iso_filename, download_worker=self.download_worker)
             except Exception as e:
+                # Nếu helper raise lỗi, bọc và ném tiếp để on_download_finished xử lý
                 raise Exception(f"Lỗi khi chạy aria2c: {e}")
 
+            # Dọn cookie tạm (nếu có)
             if cookie_file and os.path.exists(cookie_file):
                 try: os.remove(cookie_file)
                 except OSError: pass
 
-            if self.is_cancelling:
+            if getattr(self, "is_cancelling", False):
+                # Nếu user đã hủy trong quá trình tải
                 break
-                
-            if self.aria2_process and self.aria2_process.returncode != 0:
-                raise Exception(f"aria2 thất bại với mã lỗi {self.aria2_process.returncode}")
 
+            # Kiểm tra mã trả về
+            if rc is None:
+                raise Exception("Không thể khởi chạy aria2 (rc=None).")
+            if rc != 0:
+                raise Exception(f"aria2 thất bại với mã lỗi {rc}")
+
+            # Thành công
             self.download_worker.result.emit(iso_filepath)
 
     def on_download_result(self, iso_path):
@@ -3014,34 +3142,59 @@ class PageISOSelect(QWidget):
                             break
 
     def stop_download_process(self):
-        """Dừng tiến trình aria2c.exe VÀ luồng QThread quản lý nó."""
-        # Dừng tiến trình con aria2c.exe (logic cũ)
-        if self.aria2_process and self.aria2_process.poll() is None:
-            print("Đang dừng tiến trình aria2c.exe...")
-            self.aria2_process.terminate()
-            try:
-                self.aria2_process.wait(timeout=1)
-            except subprocess.TimeoutExpired:
-                self.aria2_process.kill()
+        """Dừng tiến trình aria2c.exe VÀ luồng QThread quản lý nó một cách an toàn."""
+        # Đánh cờ is_cancelling để helper/luồng biết cần dừng
+        self.is_cancelling = True
+
+        # Nếu tiến trình aria2 đang chạy, cố terminate/kills
+        try:
+            if getattr(self, "aria2_process", None) and self.aria2_process.poll() is None:
+                print("[stop_download_process] Đang terminate aria2...")
+                try:
+                    self.aria2_process.terminate()
+                    try:
+                        self.aria2_process.wait(timeout=1)
+                    except subprocess.TimeoutExpired:
+                        self.aria2_process.kill()
+                except Exception as e:
+                    print(f"[stop_download_process] Lỗi khi terminate/kill aria2: {e}")
+        except Exception as e:
+            print(f"[stop_download_process] Lỗi kiểm tra aria2_process: {e}")
+
+        # Đóng stdout nếu còn mở
+        try:
+            if getattr(self, "aria2_process", None) and getattr(self.aria2_process, "stdout", None):
+                try:
+                    self.aria2_process.stdout.close()
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+        # Reset object
         self.aria2_process = None
 
-        # Kiểm tra xem download_worker có tồn tại và đang chạy không
-        if hasattr(self, 'download_worker') and self.download_worker.isRunning():
-            print("Đang dừng luồng tải file...")
-            self.download_worker.terminate() # Dừng luồng một cách bắt buộc
-            # Chờ luồng kết thúc hoàn toàn trong tối đa 2 giây
-            # Đây là bước quan trọng nhất để sửa lỗi
-            self.download_worker.wait(2000) 
-            print("Luồng tải file đã dừng.")
-            
-        temp_dir = tempfile.gettempdir()
-        for file in os.listdir(temp_dir):
-            if file.startswith("cookies_") and file.endswith(".txt"):
-                try:
-                    os.remove(os.path.join(temp_dir, file))
-                    print(f"Đã xóa file cookie tạm khi hủy: {file}")
-                except OSError:
-                    pass
+        # Dừng QThread download_worker (nếu có)
+        try:
+            if hasattr(self, 'download_worker') and self.download_worker.isRunning():
+                print("[stop_download_process] Dừng download_worker...")
+                # Sử dụng terminate() + wait short timeout để dọn dẹp
+                self.download_worker.terminate()
+                self.download_worker.wait(2000)
+        except Exception as e:
+            print(f"[stop_download_process] Lỗi dừng download_worker: {e}")
+
+        # Xóa cookie tạm
+        try:
+            temp_dir = tempfile.gettempdir()
+            for file in os.listdir(temp_dir):
+                if file.startswith("cookies_") and file.endswith(".txt"):
+                    try:
+                        os.remove(os.path.join(temp_dir, file))
+                    except OSError:
+                        pass
+        except Exception:
+            pass
 
     def cancel_download_clicked(self):
         """Xử lý khi người dùng bấm nút Hủy Tải."""
