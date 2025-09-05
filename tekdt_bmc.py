@@ -706,14 +706,27 @@ class USBBootCreator(QMainWindow):
             self.find_ais_window_timer.stop()
             print(f"Đã tìm thấy cửa sổ TekDT AIS (HWND: {self.ais_hwnd}).")
 
-            # Ẩn cửa sổ ngay lập tức để không hiện trên taskbar
-            ctypes.windll.user32.ShowWindow(self.ais_hwnd, 0) # SW_HIDE = 0
+            # Thay đổi style của cửa sổ để loại bỏ icon khỏi thanh taskbar
+            # Bằng cách biến nó thành một "Tool Window"
+            GWL_EXSTYLE = -20
+            WS_EX_APPWINDOW = 0x00040000
+            WS_EX_TOOLWINDOW = 0x00000080
+            
+            # Lấy style mở rộng hiện tại
+            ex_style = ctypes.windll.user32.GetWindowLongW(self.ais_hwnd, GWL_EXSTYLE)
+            # Xóa cờ APPWINDOW và thêm cờ TOOLWINDOW
+            ex_style = (ex_style & ~WS_EX_APPWINDOW) | WS_EX_TOOLWINDOW
+            # Áp dụng style mới
+            ctypes.windll.user32.SetWindowLongW(self.ais_hwnd, GWL_EXSTYLE, ex_style)
+
+            # Ẩn cửa sổ ngay lập tức để không bị "nháy" trên màn hình
+            ctypes.windll.user32.ShowWindow(self.ais_hwnd, 0)  # SW_HIDE = 0
 
             # Nếu người dùng đang ở trang 3 thì nhúng vào luôn
             if self.stacked_widget.currentWidget() == self.page3:
                 self.embed_ais_window()
 
-        elif self.find_ais_window_timer.attempts > 40: # Thử trong 10 giây
+        elif self.find_ais_window_timer.attempts > 40:  # Thử trong 10 giây
             self.find_ais_window_timer.stop()
             print("Không thể tìm thấy cửa sổ TekDT AIS sau 10 giây.")
             self._stop_tekdtais()
