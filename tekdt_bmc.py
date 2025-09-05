@@ -15,6 +15,9 @@ import string
 import ctypes
 import shlex
 import webbrowser
+import select
+import threading
+from queue import Queue, Empty
 from ctypes import wintypes
 from pathlib import Path
 from subprocess import run
@@ -2772,7 +2775,7 @@ class PageISOSelect(QWidget):
             return url
 
     def _download_task(self):
-        """Tác vụ tải file theo hàng đợi."""
+        """Tác vụ tải file theo hàng đợi, xử lý output của subprocess một cách an toàn."""
         if not os.path.exists(ARIA2_EXE):
             raise FileNotFoundError("Chưa tìm thấy aria2c.exe.")
 
@@ -2785,14 +2788,14 @@ class PageISOSelect(QWidget):
             self.download_worker.status.emit(f"({i+1}/{total_downloads}) Đang chuẩn bị tải {name}...")
 
             iso_url = ""
-            header_list = []  # Giữ empty, vì API không trả headers
-            cookie_file = None  # Bỏ, vì không có cookies
+            header_list = []
+            cookie_file = None
 
             if item.get('is_gravesoft'):
                 self.download_worker.status.emit(f"Bước 1/2: Lấy link tải cho {name}...")
                 product_id = item['product_id']
                 sku_id = item['sku_id']
-                selected_filename = item.get('selected_filename')  # THÊM: Filename đã chọn từ combobox
+                selected_filename = item.get('selected_filename')
                 proxy_url = f"https://api.gravesoft.dev/msdl/proxy?product_id={product_id}&sku_id={sku_id}"
 
                 try:
@@ -2803,32 +2806,28 @@ class PageISOSelect(QWidget):
                     response.raise_for_status()
                     link_data = response.json()
                     
-                    options = link_data.get("ProductDownloadOptions", [])  # Lấy mảng options
+                    options = link_data.get("ProductDownloadOptions", [])
                     if not options:
                         raise Exception("API không trả về ProductDownloadOptions.")
 
-                    # THÊM: Tìm đúng Uri dựa trên selected_filename
                     found = False
                     for opt in options:
                         uri = opt.get("Uri")
-                        if not uri:
-                            continue
+                        if not uri: continue
+                        
                         parsed_uri = urlparse(uri)
-                        filename_from_uri = os.path.basename(parsed_uri.path)  # Lấy tên file từ path (bỏ query ?t=...)
+                        filename_from_uri = os.path.basename(parsed_uri.path)
                         if filename_from_uri == selected_filename:
-                            iso_url = uri  # Uri đầy đủ với query params
+                            iso_url = uri
                             found = True
                             break
 
                     if not found:
                         raise Exception(f"Không tìm thấy Uri khớp với filename: {selected_filename}")
 
-                    # Bỏ logic headers và cookies, vì response không có. Nếu cần, thêm hardcode:
-                    # header_list.append("User-Agent: Mozilla/5.0 ...")  # Nếu API yêu cầu
-
                 except Exception as e:
                     raise Exception(f"Không thể lấy link tải từ API: {e}")
-            else:  # Logic cho Fido và Direct URL (giữ nguyên, không thay đổi)
+            else:
                 data = item['data']
                 if data['type'] == 'fido':
                     if not os.path.exists(FIDO_SCRIPT_PATH):
@@ -2836,13 +2835,12 @@ class PageISOSelect(QWidget):
                     
                     fido_version_map = {"Windows 11": "11", "Windows 10": "10"}
                     version_arg = fido_version_map.get(name)
+                    arch_arg = "x64"
                     if name == "Windows 10":
-                        arch_arg = "x64"
                         for arch, rb in data.get('radios', {}).items():
                             if rb.isChecked():
-                                arch_arg = arch; break
-                    else:
-                        arch_arg = "x64"
+                                arch_arg = arch
+                                break
 
                     self.download_worker.status.emit(f"({i+1}/{total_downloads}) Đang lấy link cho {name}...")
                     fido_cmd = ['powershell.exe', '-ExecutionPolicy', 'Bypass', '-File', FIDO_SCRIPT_PATH, '-Win', version_arg, '-Arch', arch_arg, '-Lang', 'Eng', '-GetUrl']
@@ -2855,11 +2853,7 @@ class PageISOSelect(QWidget):
             if not iso_url or not iso_url.startswith("http"):
                 raise Exception(f"Không lấy được URL hợp lệ cho {name}.")
             
-            # Sử dụng selected_filename nếu là MassGrave, nếu không thì parse từ iso_url
-            if item.get('is_gravesoft'):
-                iso_filename = selected_filename
-            else:
-                iso_filename = os.path.basename(iso_url.split('?')[0])
+            iso_filename = selected_filename if item.get('is_gravesoft') else os.path.basename(iso_url.split('?')[0])
             iso_filepath = os.path.join(ISOS_DIR, iso_filename)
             
             aria2_control_file = iso_filepath + ".aria2"
@@ -2881,44 +2875,91 @@ class PageISOSelect(QWidget):
 
             self.download_worker.status.emit(f"({i+1}/{total_downloads}) Đang tải {iso_filename}...")
 
-            aria2_cmd = [
-                str(ARIA2_EXE), '--console-log-level=info', '--summary-interval=1',
-                '-c', '-x16', '-s16', '-d', str(ISOS_DIR), '-o', iso_filename
-            ]
+            aria2_cmd = [str(ARIA2_EXE), '--console-log-level=warn', '--summary-interval=1', '-c', '-x16', '-s16', '-d', str(ISOS_DIR), '-o', iso_filename]
             
             for header in header_list:
                 aria2_cmd.extend(['--header', header])
             
-            if cookie_file:  # Giữ nhưng sẽ không dùng vì None
+            if cookie_file:
                 aria2_cmd.extend(['--load-cookies', cookie_file])
             
             aria2_cmd.append(iso_url)
 
-            self.aria2_process = subprocess.Popen(
-                aria2_cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                text=True, encoding='utf-8', creationflags=subprocess.CREATE_NO_WINDOW, bufsize=1
-            )
-            
-            for line in iter(self.aria2_process.stdout.readline, ''):
-                if not self.aria2_process or self.is_cancelling: break
-                line = line.strip()
-                print(f"[Aria2 Output]: {line}")
-                match = re.search(r'\((\d{1,3})%\)', line)
-                if match:
-                    percent = int(match.group(1))
-                    speed_match = re.search(r'DL:([^\s]+)', line)
-                    eta_match = re.search(r'ETA:([^\)]+)', line)
-                    status_text = f"Đang tải {iso_filename}: {percent}%"
-                    if speed_match: status_text += f" ({speed_match.group(1)})"
-                    if eta_match: status_text += f" - ETA: {eta_match.group(1)}"
-                    self.download_worker.status.emit(status_text)
-            
-            self.aria2_process.wait()
+            try:
+                self.aria2_process = subprocess.Popen(
+                    aria2_cmd, 
+                    stdout=subprocess.PIPE, 
+                    stderr=subprocess.STDOUT, # Gộp stderr vào stdout
+                    text=True, 
+                    encoding='utf-8', 
+                    errors='replace', # Xử lý lỗi ký tự
+                    creationflags=subprocess.CREATE_NO_WINDOW,
+                    bufsize=1 # Bật chế độ line-buffered
+                )
+                
+                # Tạo một Queue để giao tiếp giữa luồng đọc và luồng chính
+                output_queue = Queue()
+                
+                # Hàm này sẽ chạy trong một luồng riêng, chỉ để đọc output
+                def read_output_thread(process, queue):
+                    try:
+                        # Đọc từng dòng cho đến khi tiến trình kết thúc
+                        for line in iter(process.stdout.readline, ''):
+                            queue.put(line)
+                    finally:
+                        # Đặt một giá trị đặc biệt để báo hiệu đã đọc xong
+                        queue.put(None)
 
-            if cookie_file and os.path.exists(cookie_file):  # Giữ nhưng sẽ không chạy
-                try:
-                    os.remove(cookie_file)
-                    print(f"Đã xóa file cookie tạm: {cookie_file}")
+                # Khởi động luồng đọc
+                reader_thread = threading.Thread(target=read_output_thread, args=(self.aria2_process, output_queue), daemon=True)
+                reader_thread.start()
+                
+                # Vòng lặp chính để xử lý output từ Queue
+                while True:
+                    if self.is_cancelling:
+                        break
+                    
+                    # Kiểm tra xem tiến trình aria2 có còn chạy không
+                    if self.aria2_process.poll() is not None and output_queue.empty():
+                        break
+
+                    try:
+                        # Lấy một dòng từ queue với timeout để không bị block mãi mãi
+                        line = output_queue.get(timeout=0.5)
+                        
+                        if line is None: # Tín hiệu kết thúc từ luồng đọc
+                            break
+                        
+                        line = line.strip()
+                        if line:
+                            # In ra console để debug (nếu có)
+                            print(f"[Aria2]: {line}")
+                            
+                            # Phân tích dòng để cập nhật UI
+                            match = re.search(r'\((\d{1,3})%\)', line)
+                            if match:
+                                percent = int(match.group(1))
+                                speed_match = re.search(r'DL:([^\s]+)', line)
+                                eta_match = re.search(r'ETA:([^)]+)', line)
+                                status_text = f"Đang tải {iso_filename}: {percent}%"
+                                if speed_match: status_text += f" ({speed_match.group(1)})"
+                                if eta_match: status_text += f" - ETA: {eta_match.group(1)}"
+                                self.download_worker.status.emit(status_text)
+
+                    except Empty:
+                        # Timeout, tiếp tục vòng lặp để kiểm tra is_cancelling
+                        continue
+                
+                # Đợi tiến trình aria2 kết thúc hoàn toàn
+                self.aria2_process.wait()
+                # Đảm bảo luồng đọc cũng đã kết thúc
+                reader_thread.join()
+
+            except Exception as e:
+                raise Exception(f"Lỗi khi chạy aria2c: {e}")
+
+            if cookie_file and os.path.exists(cookie_file):
+                try: os.remove(cookie_file)
                 except OSError: pass
 
             if self.is_cancelling:
