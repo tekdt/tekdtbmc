@@ -2633,7 +2633,7 @@ class PageISOSelect(QWidget):
                 return letter
         return None
     def analyze_iso(self, iso_info_dict):
-        """Phân tích file ISO bằng cách mount với WinCDEmu và đọc bằng wimlib. (Chỉ khởi tạo worker)"""
+        """Phân tích file ISO bằng cách ưu tiên mount với PowerShell, fallback sang WinCDEmu nếu thất bại."""
         iso_path = iso_info_dict['path']
         cache = {}
         if os.path.exists(ISO_ANALYSIS_CACHE):
@@ -2647,36 +2647,77 @@ class PageISOSelect(QWidget):
             self.show_edition_selection_dialog(cache[size_key], iso_info_dict)
             return
 
-        if not os.path.exists(WINCDEMU_EXE) or not os.path.exists(WIMLIB_EXE):
+        if not os.path.exists(WIMLIB_EXE):
             self.main_app.show_themed_message("Lỗi", 
-                                              "Không tìm thấy WinCDEmu hoặc wimlib-imagex.exe để phân tích ISO",
+                                              "Không tìm thấy wimlib-imagex.exe để phân tích ISO",
                                               icon=QMessageBox.Icon.Critical)
             return
 
         editions = {}
-        drive_letter = None
+        mounted_drive = None
         detected_arch = None
+        mount_method = None  # Track cách mount: 'powershell' hoặc 'wincdemu'
         try:
-            # Bước 1: Tìm một ký tự ổ đĩa trống
-            drive_letter = self._get_available_drive_letter()
-            if not drive_letter:
-                raise Exception("Không tìm thấy ký tự ổ đĩa trống để mount file ISO.")
-            
-            print(f"Sẽ mount ISO vào ổ đĩa: {drive_letter}:")
+            # Bước 0: Kiểm tra PowerShell tồn tại
+            powershell_path = shutil.which('powershell')
+            if powershell_path:
+                print("PowerShell tồn tại, thử mount bằng PowerShell.")
+                try:
+                    # Bước 1: Mount bằng PowerShell
+                    mount_cmd = [
+                        'powershell', '-NoProfile', '-Command',
+                        f'Mount-DiskImage -ImagePath "{iso_path}" -StorageType ISO'
+                    ]
+                    result = run(mount_cmd, capture_output=True, text=True, creationflags=subprocess.CREATE_NO_WINDOW)
+                    if result.returncode != 0:
+                        error_msg = result.stderr.strip() or f"PowerShell trả về mã lỗi {result.returncode}."
+                        raise Exception(f"Không thể mount ISO bằng PowerShell: {error_msg}")
 
-            # Bước 2: Mount ISO bằng WinCDEmu với cú pháp đúng và cờ /wait
-            # Cú pháp: wcdemu.exe <image_file> <drive_letter>: /wait
-            mount_cmd = [WINCDEMU_EXE, iso_path, f"{drive_letter}:", "/wait"]
-            result = run(mount_cmd, capture_output=True, text=True, creationflags=subprocess.CREATE_NO_WINDOW)
-            
-            if result.returncode != 0:
-                error_msg = result.stderr.strip() if result.stderr.strip() else f"WinCDEmu trả về mã lỗi {result.returncode}."
-                raise Exception(f"Không thể mount ISO: {error_msg}")
+                    # Lấy drive letter
+                    query_cmd = [
+                        'powershell', '-NoProfile', '-Command',
+                        f'(Get-DiskImage -ImagePath "{iso_path}" | Get-Volume).DriveLetter'
+                    ]
+                    result = run(query_cmd, capture_output=True, text=True, creationflags=subprocess.CREATE_NO_WINDOW)
+                    if result.returncode != 0:
+                        raise Exception(f"Không thể lấy drive letter từ PowerShell: {result.stderr.strip()}")
+                    
+                    drive_letter = result.stdout.strip()
+                    if not drive_letter:
+                        raise Exception("Không tìm thấy drive letter sau khi mount bằng PowerShell.")
+                    
+                    mounted_drive = f"{drive_letter}:"
+                    mount_method = 'powershell'
+                    print(f"Mount ISO thành công bằng PowerShell vào ổ {mounted_drive}")
+                except Exception as ps_err:
+                    print(f"Lỗi mount bằng PowerShell: {ps_err}. Fallback sang WinCDEmu.")
+                    # Tiếp tục fallback dưới
+            else:
+                print("PowerShell không tồn tại, fallback sang WinCDEmu.")
 
-            print(f"Mount ISO thành công vào ổ {drive_letter}:")
-            
-            # Bước 3: Tìm file install.wim hoặc install.esd
-            mounted_drive = f"{drive_letter}:"
+            # Nếu PowerShell thất bại hoặc không tồn tại, fallback sang WinCDEmu
+            if not mounted_drive:
+                if not os.path.exists(WINCDEMU_EXE):
+                    raise Exception("Không tìm thấy WinCDEmu.exe để fallback mount ISO.")
+
+                # Mount bằng WinCDEmu
+                drive_letter = self._get_available_drive_letter()
+                if not drive_letter:
+                    raise Exception("Không tìm thấy ký tự ổ đĩa trống để mount bằng WinCDEmu.")
+                
+                print(f"Sẽ mount ISO bằng WinCDEmu vào ổ đĩa: {drive_letter}:")
+                mount_cmd = [WINCDEMU_EXE, iso_path, f"{drive_letter}:", "/wait"]
+                result = run(mount_cmd, capture_output=True, text=True, creationflags=subprocess.CREATE_NO_WINDOW)
+                
+                if result.returncode != 0:
+                    error_msg = result.stderr.strip() if result.stderr.strip() else f"WinCDEmu trả về mã lỗi {result.returncode}."
+                    raise Exception(f"Không thể mount ISO bằng WinCDEmu: {error_msg}")
+
+                mounted_drive = f"{drive_letter}:"
+                mount_method = 'wincdemu'
+                print(f"Mount ISO thành công bằng WinCDEmu vào ổ {mounted_drive}")
+
+            # Bước tiếp: Phát hiện kiến trúc và phân tích WIM/ESD (giữ nguyên logic cũ)
             if os.path.exists(os.path.join(mounted_drive, "efi", "boot", "bootx64.efi")):
                 detected_arch = "amd64"
                 print("Phát hiện kiến trúc: 64-bit (amd64)")
@@ -2684,16 +2725,15 @@ class PageISOSelect(QWidget):
                 detected_arch = "x86"
                 print("Phát hiện kiến trúc: 32-bit (x86)")
             else:
-                # Nếu không có file EFI, có thể thử dựa vào các thư mục khác (dự phòng)
                 if os.path.exists(os.path.join(mounted_drive, "sources", "x64")):
-                     detected_arch = "amd64"
-                     print("Phát hiện kiến trúc (dự phòng): 64-bit (amd64)")
+                    detected_arch = "amd64"
+                    print("Phát hiện kiến trúc (dự phòng): 64-bit (amd64)")
                 elif os.path.exists(os.path.join(mounted_drive, "sources", "x86")):
-                     detected_arch = "x86"
-                     print("Phát hiện kiến trúc (dự phòng): 32-bit (x86)")
+                    detected_arch = "x86"
+                    print("Phát hiện kiến trúc (dự phòng): 32-bit (x86)")
                 else:
                     print("Cảnh báo: Không thể tự động xác định kiến trúc. Mặc định là amd64.")
-                    detected_arch = "amd64" # Mặc định
+                    detected_arch = "amd64"
 
             iso_info_dict["architecture"] = detected_arch
             
@@ -2705,13 +2745,12 @@ class PageISOSelect(QWidget):
                     break
             
             if not wim_path:
-                # Nếu không thấy, có thể do một số ISO chứa trong thư mục x64/x86
                 for arch_folder in ["x64", "x86"]:
                     for ext in [".wim", ".esd"]:
-                         possible_path = os.path.join(mounted_drive, "sources", arch_folder, f"install{ext}")
-                         if os.path.exists(possible_path):
-                             wim_path = possible_path
-                             break
+                        possible_path = os.path.join(mounted_drive, "sources", arch_folder, f"install{ext}")
+                        if os.path.exists(possible_path):
+                            wim_path = possible_path
+                            break
                     if wim_path: break
             
             if not wim_path:
@@ -2719,28 +2758,23 @@ class PageISOSelect(QWidget):
             
             print(f"Đã tìm thấy file image tại: {wim_path}")
 
-            # Bước 4: Phân tích file WIM/ESD với wimlib-imagex
             info_cmd = [WIMLIB_EXE, "info", wim_path]
-            # Chạy lệnh và nhận output dưới dạng bytes thô để tránh lỗi Unicode
             result = run(info_cmd, capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW)
             
             if result.returncode != 0:
-                # Giải mã stderr một cách an toàn nếu có lỗi
                 error_output = result.stderr.decode(encoding='utf-8', errors='ignore')
                 raise Exception(f"Không thể phân tích file WIM/ESD: {error_output}")
 
             current_index = ""
-            # Giải mã stdout một cách an toàn, bỏ qua các ký tự không hợp lệ
             output_text = result.stdout.decode(encoding='utf-8', errors='ignore')
             for line in output_text.splitlines():
                 if "Index" in line:
                     current_index = line.split(":")[-1].strip()
                 elif "Name" in line and current_index:
                     name = line.split(":")[-1].strip()
-                    # Một số tên có thể chứa ký tự đặc biệt không mong muốn
                     clean_name = ''.join(char for char in name if char.isprintable())
                     editions[current_index] = clean_name
-                    current_index = "" # Reset để chờ index tiếp theo
+                    current_index = ""
 
             if editions:
                 print(f"Các phiên bản Windows được tìm thấy: {editions}")
@@ -2752,11 +2786,20 @@ class PageISOSelect(QWidget):
             self.main_app.show_error(f"Lỗi khi phân tích ISO:\n{e}")
 
         finally:
-            # Bước 5: Luôn luôn unmount ổ đĩa ảo sau khi hoàn tất
-            if drive_letter:
-                print(f"Đang unmount ổ đĩa ảo {drive_letter}:")
-                unmount_cmd = [WINCDEMU_EXE, "/unmount", f"{drive_letter}:"]
-                run(unmount_cmd, capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW)
+            # Unmount dựa trên mount_method
+            if mounted_drive and iso_path:
+                if mount_method == 'powershell':
+                    print(f"Đang unmount ISO bằng PowerShell: {iso_path}")
+                    unmount_cmd = [
+                        'powershell', '-NoProfile', '-Command',
+                        f'Dismount-DiskImage -ImagePath "{iso_path}"'
+                    ]
+                    run(unmount_cmd, capture_output=True, text=True, creationflags=subprocess.CREATE_NO_WINDOW)
+                elif mount_method == 'wincdemu':
+                    drive_letter = mounted_drive[0]  # Ví dụ 'Z:'
+                    print(f"Đang unmount ổ đĩa ảo {drive_letter}: bằng WinCDEmu")
+                    unmount_cmd = [WINCDEMU_EXE, "/unmount", f"{drive_letter}:"]
+                    run(unmount_cmd, capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW)
         
         self.show_edition_selection_dialog(editions, iso_info_dict)
 
@@ -3238,7 +3281,7 @@ class PageISOSelect(QWidget):
             print("[stop_download_process] Đã yêu cầu dừng download_worker (luồng sẽ tự kết thúc).")
         
         # Reset object
-        self.aria2_process = Non
+        self.aria2_process = None
 
         # Xóa cookie tạm
         try:
