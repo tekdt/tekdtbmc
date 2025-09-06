@@ -155,7 +155,6 @@ class Worker(QThread):
         self.target = target
         self.args = args
         self.kwargs = kwargs
-        print(f"Luồng '{self.name}' đã được tạo.")
 
     def run(self):
         """
@@ -592,13 +591,12 @@ class USBBootCreator(QMainWindow):
                 print(f"Không thể xóa file tín hiệu shutdown_signal.txt cho TekDT AIS: {e}")
 
         try:
-            print("Đang khởi chạy TekDT AIS ở chế độ nền...")
+            print("Đang khởi chạy TekDT AIS ở chế độ nền (ẩn hoàn toàn)...")
             startupinfo = subprocess.STARTUPINFO()
             startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
             startupinfo.wShowWindow = 0  # SW_HIDE
 
-            # Kết hợp CREATE_NEW_PROCESS_GROUP và CREATE_NO_WINDOW (tránh console window)
-            flags = subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.CREATE_NO_WINDOW
+            flags = subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.CREATE_NO_WINDOW | subprocess.DETACHED_PROCESS
 
             self.ais_process = subprocess.Popen(
                 [TEKDTAIS_EXE, "--embed-mode"],
@@ -609,10 +607,11 @@ class USBBootCreator(QMainWindow):
                 creationflags=flags
             )
 
-            # Reset bất kỳ trạng thái HWND cũ
+            # Reset trạng thái
             self.ais_hwnds = None
             self.ais_hwnd = None
 
+            # Khởi động timer tìm cửa sổ
             self.find_ais_window_timer = QTimer(self)
             self.find_ais_window_timer.attempts = 0
             self.find_ais_window_timer.timeout.connect(self._find_ais_window_task)
@@ -689,25 +688,17 @@ class USBBootCreator(QMainWindow):
 
         # Thêm vào danh sách theo dõi và khởi chạy
         self.active_workers.append(worker)
-        print(f"Số luồng đang hoạt động: {len(self.active_workers)}")
         worker.start()
         return worker
-
 
     def _on_worker_finished(self, worker_thread):
         """Xóa worker khỏi danh sách theo dõi khi nó kết thúc."""
         if worker_thread in self.active_workers:
             self.active_workers.remove(worker_thread)
-            print(f"Luồng '{worker_thread.name}' đã kết thúc và được xóa. Còn lại: {len(self.active_workers)} luồng.")
-        worker_thread.deleteLater() # Đảm bảo worker được dọn dẹp an toàn
     
     def _get_windows_for_pid(self, pid):
-        """
-        Trả về danh sách HWND (int) của tất cả cửa sổ thuộc process `pid`.
-        Dùng EnumWindows + GetWindowThreadProcessId để tìm mọi cửa sổ (visible hoặc không).
-        """
+        """Enumerate hwnd cho PID, nhưng chỉ thêm nếu title == 'TekDT AIS'."""
         hwnds = []
-
         EnumWindowsProc = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
 
         @EnumWindowsProc
@@ -715,17 +706,22 @@ class USBBootCreator(QMainWindow):
             pid_dw = wintypes.DWORD()
             ctypes.windll.user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid_dw))
             if pid_dw.value == pid:
-                hwnds.append(hwnd)
-            return True  # tiếp tục enumerate
+                title = ctypes.create_unicode_buffer(256)
+                ctypes.windll.user32.GetWindowTextW(hwnd, title, 256)
+                if title.value == "TekDT AIS":  # Chỉ thêm nếu title khớp
+                    hwnds.append(hwnd)
+                    print(f"HWND {hwnd} thuộc PID {pid}, title: {title.value} (đã thêm)")
+                else:
+                    print(f"HWND {hwnd} thuộc PID {pid}, title: {title.value} (bỏ qua vì không khớp title)")
+            return True
 
         ctypes.windll.user32.EnumWindows(_enum, 0)
         return hwnds
     
     def _find_ais_window_task(self):
         """
-        Tìm mọi cửa sổ thuộc tiến trình TekDT AIS (dựa trên PID).
-        Nếu tìm thấy, chuyển tất cả các cửa sổ đó về TOOLWINDOW (ẩn khỏi taskbar),
-        ẩn tạm, rồi nếu đang ở page3 -> nhúng (embed).
+        Tìm mọi cửa sổ thuộc tiến trình TekDT AIS (dựa trên PID chính, các tiến trình con, và title).
+        Nếu tìm thấy, chuyển về TOOLWINDOW, ẩn ngay lập tức, rồi nhúng nếu ở page3.
         """
         self.find_ais_window_timer.attempts += 1
 
@@ -733,7 +729,7 @@ class USBBootCreator(QMainWindow):
         if getattr(self, "ais_hwnds", None):
             return
 
-        # Nếu chưa có process hoặc PID, cố gắng lấy từ self.ais_process
+        # Lấy PID từ self.ais_process
         pid = None
         if getattr(self, "ais_process", None):
             try:
@@ -741,21 +737,26 @@ class USBBootCreator(QMainWindow):
             except Exception:
                 pid = None
 
-        # Nếu có PID -> enumerate windows của PID
+        # Tìm tất cả hwnd từ PID chính và các tiến trình con (đã lọc theo title trong _get_windows_for_pid)
+        hwnds = []
         if pid:
-            hwnds = self._get_windows_for_pid(pid)
-        else:
-            # fallback cũ: tìm theo tiêu đề "TekDT AIS" (vẫn giữ để backward compat)
-            h = ctypes.windll.user32.FindWindowW(None, "TekDT AIS")
-            hwnds = [h] if h else []
+            related_pids = self._get_all_related_pids(pid)
+            print(f"Các PID liên quan của TekDT AIS: {related_pids}")
+            for related_pid in related_pids:
+                hwnds.extend(self._get_windows_for_pid(related_pid))
+
+        # Tìm thêm theo title "TekDT AIS" (bổ sung, nếu không gắn với PID)
+        h = ctypes.windll.user32.FindWindowW(None, "TekDT AIS")
+        if h and h not in hwnds:
+            hwnds.append(h)
+            print(f"Tìm thấy cửa sổ theo title 'TekDT AIS': {h}")
 
         if hwnds:
-            # Lưu lại list các hwnd (dùng cho embed/resize/hide sau này)
             self.ais_hwnds = hwnds
             self.find_ais_window_timer.stop()
-            print(f"Đã tìm thấy {len(hwnds)} cửa sổ TekDT AIS: {hwnds} (PID={pid})")
+            print(f"Đã tìm thấy {len(hwnds)} cửa sổ TekDT AIS hợp lệ: {hwnds}")
 
-            # Thay đổi style cho từng cửa sổ để loại bỏ icon khỏi taskbar, ẩn nhanh
+            # Thay đổi style và ẩn ngay lập tức
             GWL_EXSTYLE = -20
             WS_EX_APPWINDOW = 0x00040000
             WS_EX_TOOLWINDOW = 0x00000080
@@ -764,39 +765,50 @@ class USBBootCreator(QMainWindow):
                     ex_style = ctypes.windll.user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
                     ex_style = (ex_style & ~WS_EX_APPWINDOW) | WS_EX_TOOLWINDOW
                     ctypes.windll.user32.SetWindowLongW(hwnd, GWL_EXSTYLE, ex_style)
-                    ctypes.windll.user32.ShowWindow(hwnd, 0)  # SW_HIDE
+                    ctypes.windll.user32.ShowWindow(hwnd, 0)  # SW_HIDE (ẩn trước khi nhúng)
                 except Exception as e:
                     print(f"Lỗi khi chỉnh style cho HWND {hwnd}: {e}")
 
-            # Nếu ở trang 3 thì nhúng ngay
+            # Nếu ở page3, nhúng ngay
             if self.stacked_widget.currentWidget() == self.page3:
                 self.embed_ais_window()
-        elif self.find_ais_window_timer.attempts > 40:
-            self.find_ais_window_timer.stop()
-            print("Không thể tìm thấy cửa sổ TekDT AIS sau 10 giây.")
-            self._stop_tekdtais()
 
+        elif self.find_ais_window_timer.attempts > 120:  # 30 giây
+            self.find_ais_window_timer.stop()
+            print("Không thể tìm thấy cửa sổ TekDT AIS sau 30 giây. Tiếp tục chạy ẩn, không cleanup.")
+
+    def _get_all_related_pids(self, parent_pid):
+        """
+        Lấy danh sách tất cả PID liên quan, bao gồm PID chính và các tiến trình con.
+        """
+        pids = [parent_pid]
+        try:
+            parent = psutil.Process(parent_pid)
+            for child in parent.children(recursive=True):
+                pids.append(child.pid)
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            pass
+        return pids
+    
     def _check_ais_status(self):
-        """Định kỳ kiểm tra trạng thái của TekDT AIS và khởi động lại nếu cần."""
-        # Chỉ kiểm tra nếu self.ais_process đã được khởi tạo (tức là đã từng chạy)
-        # và hiện tại không còn chạy nữa.
+        """Định kỳ kiểm tra trạng thái của TekDT AIS và chỉ khởi động lại nếu ở page3."""
+        if self.stacked_widget.currentWidget() != self.page3:
+            print("Không ở page3, không kiểm tra trạng thái TekDT AIS.")
+            self.ais_monitor_timer.stop()  # Dừng timer nếu không ở page3
+            return
+
         if self.ais_process and not self.is_tekdtais_running():
             print("Phát hiện TekDT AIS đã tắt. Đang khởi động lại...")
-            # Dừng timer giám sát để tránh xung đột
-            self.ais_monitor_timer.stop() 
-            
-            # Reset lại các biến trạng thái
+            self.ais_monitor_timer.stop()
             self.ais_process = None
-            self.ais_hwnd = None
-            
-            # Gọi lại hàm khởi động. Hàm này sẽ tự động khởi chạy lại
-            # tiến trình, tìm cửa sổ và cả timer giám sát.
+            self.ais_hwnds = None
             self.start_tekdtais()
     
     def embed_ais_window(self):
-        # Nếu chưa có hwnds hoặc page không tồn tại -> thôi
+        """Nhúng các cửa sổ TekDT AIS vào container trên page3."""
         hwnds = getattr(self, "ais_hwnds", None)
         if not hwnds or not self.page3:
+            print("Không nhúng được: Không có hwnd hoặc page3 không tồn tại.")
             return
 
         container = self.page3.embed_container
@@ -814,67 +826,88 @@ class USBBootCreator(QMainWindow):
 
         for hwnd in hwnds:
             try:
-                # Thiết lập style: WS_CHILD, remove caption/thickframe
+                # Thiết lập style: WS_CHILD, xóa caption/thickframe
                 style = ctypes.windll.user32.GetWindowLongW(hwnd, GWL_STYLE)
                 style |= 0x40000000  # WS_CHILD
-                style &= ~0x00C00000  # remove WS_CAPTION
-                style &= ~0x00040000  # remove WS_THICKFRAME
+                style &= ~0x00C00000  # Xóa WS_CAPTION
+                style &= ~0x00040000  # Xóa WS_THICKFRAME
                 ctypes.windll.user32.SetWindowLongW(hwnd, GWL_STYLE, style)
 
-                # Set parent
+                # Set parent để nhúng
                 ctypes.windll.user32.SetParent(hwnd, container_id)
 
-                # Đặt kích thước (dùng SetWindowPos kèm FRAMECHANGED)
+                # Đặt kích thước và vị trí
                 ctypes.windll.user32.SetWindowPos(
                     hwnd, 0, 0, 0, physical_width, physical_height,
                     SWP_FRAMECHANGED | SWP_NOZORDER | SWP_SHOWWINDOW
                 )
 
-                # Hiển thị
+                # Hiển thị cửa sổ nhúng (force show sau nhúng)
                 ctypes.windll.user32.ShowWindow(hwnd, 1)  # SW_SHOW
-
+                ctypes.windll.user32.UpdateWindow(hwnd)  # Force redraw
+                ctypes.windll.user32.BringWindowToTop(hwnd)  # Đưa lên trên để tránh bị đè
             except Exception as e:
                 print(f"Lỗi khi nhúng HWND {hwnd}: {e}")
 
         container.setVisible(True)
+        print(f"Đã nhúng {len(hwnds)} cửa sổ TekDT AIS vào container.")
 
-        # Chỉnh lại kích thước chính xác sau 100ms
+        # Đặt lại kích thước sau 100ms
         QTimer.singleShot(100, self.resize_ais_window)
+    
+    def resize_ais_window(self):
+        """Thay đổi kích thước cửa sổ TekDT AIS nhúng để khớp với container."""
+        if not hasattr(self, "ais_hwnds") or not self.ais_hwnds:
+            print("Không có cửa sổ TekDT AIS để thay đổi kích thước.")
+            return
 
+        container = self.page3.embed_container
+        if not container.isVisible():
+            print("Container không hiển thị, bỏ qua thay đổi kích thước.")
+            return
+
+        pixel_ratio = self.devicePixelRatioF()  # Lấy tỷ lệ DPI
+        container_size = container.size()
+        physical_width = int(container_size.width() * pixel_ratio)
+        physical_height = int(container_size.height() * pixel_ratio)
+
+        # Định nghĩa các cờ SetWindowPos (nếu chưa có ở nơi khác)
+        SWP_FRAMECHANGED = 0x0020
+        SWP_NOZORDER = 0x0004
+        SWP_SHOWWINDOW = 0x0040
+
+        for hwnd in self.ais_hwnds:
+            try:
+                ctypes.windll.user32.SetWindowPos(
+                    hwnd, 0, 0, 0, physical_width, physical_height,
+                    SWP_FRAMECHANGED | SWP_NOZORDER | SWP_SHOWWINDOW
+                )
+                print(f"Đã thay đổi kích thước HWND {hwnd} thành {physical_width}x{physical_height}")
+            except Exception as e:
+                print(f"Lỗi khi thay đổi kích thước HWND {hwnd}: {e}")
     
     def hide_ais_window(self):
+        """Ẩn tất cả cửa sổ TekDT AIS khi không ở page3."""
         hwnds = getattr(self, "ais_hwnds", None)
         if not hwnds:
             return
         for hwnd in hwnds:
             try:
                 ctypes.windll.user32.ShowWindow(hwnd, 0)  # SW_HIDE
-                ctypes.windll.user32.SetParent(hwnd, 0)
             except Exception as e:
-                print(f"Lỗi khi hide HWND {hwnd}: {e}")
-        # Ẩn container UI
-        try:
-            self.page3.embed_container.setVisible(False)
-        except Exception:
-            pass
+                print(f"Lỗi khi ẩn HWND {hwnd}: {e}")
 
-    def resize_ais_window(self):
+    def hide_ais_window(self):
+        """Ẩn tất cả cửa sổ TekDT AIS khi không ở page3."""
         hwnds = getattr(self, "ais_hwnds", None)
-        if not hwnds or not self.page3.embed_container.isVisible():
+        if not hwnds:
             return
-
-        pixel_ratio = self.devicePixelRatioF()
-        width = int(self.page3.embed_container.width() * pixel_ratio)
-        height = int(self.page3.embed_container.height() * pixel_ratio)
-
         for hwnd in hwnds:
             try:
-                ctypes.windll.user32.SetWindowPos(
-                    hwnd, 0, 0, 0, width, height,
-                    0x0004  # SWP_NOZORDER
-                )
+                ctypes.windll.user32.ShowWindow(hwnd, 0)  # SW_HIDE
+                ctypes.windll.user32.SetParent(hwnd, 0)  # Tháo parent nếu cần
             except Exception as e:
-                print(f"Lỗi khi resize HWND {hwnd}: {e}")
+                print(f"Lỗi khi ẩn HWND {hwnd}: {e}")
     
     def is_tekdtais_running(self):
         return self.ais_process and self.ais_process.poll() is None
@@ -886,10 +919,42 @@ class USBBootCreator(QMainWindow):
             with open(os.path.join(TEKDTAIS_DIR, "shutdown_signal.txt"), "w") as f:
                 f.write("shutdown")
             try:
+                self.ais_process.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                print("TekDT AIS không tự thoát, buộc dừng tất cả tiến trình liên quan...")
+                for proc in psutil.process_iter(['pid', 'name', 'exe']):
+                    try:
+                        exe_path = proc.info.get('exe')
+                        name = proc.info.get('name')
+                        if (exe_path and "tekdt_ais.exe" in exe_path) or \
+                           (name == "python.exe" and proc.parent() and proc.parent().exe() and "tekdt_ais.exe" in proc.parent().exe()):
+                            print(f"Dừng tiến trình {proc.info['name']} (PID: {proc.info['pid']})")
+                            proc.kill()
+                    except (psutil.NoSuchProcess, psutil.AccessDenied):
+                        continue
+            signal_file = os.path.join(TEKDTAIS_DIR, "shutdown_signal.txt")
+            if os.path.exists(signal_file):
+                try:
+                    os.remove(signal_file)
+                except OSError as e:
+                    print(f"Không thể xóa file tín hiệu: {e}")
+            self.ais_process = None
+            self.ais_hwnds = None
+    
+    def _cleanup_ais_process_task(self):
+        """
+        Tác vụ này chỉ chạy trong worker thread để dọn dẹp tiến trình TekDT AIS.
+        Nó không tương tác với bất kỳ QTimer nào.
+        """
+        if self.is_tekdtais_running():
+            print(f"Đang dừng tiến trình TekDT AIS (PID: {self.ais_process.pid})...")
+            # Phần code xử lý tiến trình được giữ nguyên từ hàm _stop_tekdtais
+            with open(os.path.join(TEKDTAIS_DIR, "shutdown_signal.txt"), "w") as f:
+                f.write("shutdown")
+            try:
                 self.ais_process.wait(timeout=5)
             except subprocess.TimeoutExpired:
                 print("TekDT AIS không tự thoát, buộc dừng tất cả tiến trình liên quan...")
-                # Sử dụng psutil để tìm và dừng các tiến trình liên quan
                 for proc in psutil.process_iter(['pid', 'name', 'exe']):
                     try:
                         exe_path = proc.info.get('exe')
@@ -903,12 +968,15 @@ class USBBootCreator(QMainWindow):
             signal_file = os.path.join(TEKDTAIS_DIR, "shutdown_signal.txt")
             if os.path.exists(signal_file):
                 os.remove(signal_file)
-            self.ais_process = None
-            self.ais_hwnd = None
+        
+        # Reset các biến trạng thái
+        self.ais_process = None
+        self.ais_hwnd = None
     
     def on_page_changed(self, index):
         if index == 2:
             self.embed_ais_window()
+            self.ais_monitor_timer.start(5000)
         elif self.ais_hwnd:
             self.hide_ais_window()
     
@@ -1111,7 +1179,7 @@ class USBBootCreator(QMainWindow):
             QTimer.singleShot(1500, lambda: self.init_status_label.setVisible(False))
             self.stacked_widget.setEnabled(True)
             self.menu_button.setEnabled(True)
-            self.start_tekdtais() 
+            self.start_tekdtais()
         else:
             self.init_status_label.setText("Lỗi khởi tạo nghiêm trọng!")
             self.show_themed_message("Lỗi nghiêm trọng",
@@ -1132,7 +1200,7 @@ class USBBootCreator(QMainWindow):
             return
             
         self.is_checking_usb = True
-        self._create_and_start_worker(
+        self.usb_presence_worker = self._create_and_start_worker(
             name="USBPresenceCheck",
             target=self._check_usb_presence_task,
             on_result=self._handle_usb_presence_result,
@@ -2039,7 +2107,7 @@ class PageDeviceSelect(QWidget):
             return
 
         self.is_fetching = True
-        self.main_app._create_and_start_worker(
+        self.drive_fetch_worker = self.main_app._create_and_start_worker(
             name="DriveFetcher",
             target=self._fetch_drives_task,
             on_result=self._update_drive_combo,
@@ -2338,7 +2406,7 @@ class PageISOSelect(QWidget):
         """Bắt đầu một luồng để tải danh sách sản phẩm."""
         self.gravesoft_product_combo.clear()
         self.gravesoft_product_combo.addItem("Đang tải danh sách sản phẩm...", None)
-        self.main_app._create_and_start_worker(
+        self.product_fetch_worker = self.main_app._create_and_start_worker(
             name="ProductFetcher",
             target=self._fetch_products_task,
             on_result=self._populate_product_combo,
@@ -2386,7 +2454,7 @@ class PageISOSelect(QWidget):
         self.gravesoft_sku_combo.setVisible(True)
         self.gravesoft_sku_combo.addItem("Đang tải ngôn ngữ/phiên bản...", None)
 
-        self.main_app._create_and_start_worker(
+        self.sku_fetch_worker = self.main_app._create_and_start_worker(
             name="SkuFetcher",
             target=self._fetch_skus_task,
             on_result=self._populate_sku_combo,
@@ -2962,15 +3030,6 @@ class PageISOSelect(QWidget):
                     print(f"[_run_aria2_stream] Lỗi kill aria2: {e}")
 
         finally:
-            # Dọn dẹp: đóng stdout và signal queue
-            try:
-                if getattr(self.aria2_process, "stdout", None):
-                    try:
-                        self.aria2_process.stdout.close()
-                    except Exception:
-                        pass
-            except Exception:
-                pass
 
             try:
                 output_queue.put(None)
@@ -3175,14 +3234,11 @@ class PageISOSelect(QWidget):
         self.aria2_process = None
 
         # Dừng QThread download_worker (nếu có)
-        try:
-            if hasattr(self, 'download_worker') and self.download_worker.isRunning():
-                print("[stop_download_process] Dừng download_worker...")
-                # Sử dụng terminate() + wait short timeout để dọn dẹp
-                self.download_worker.terminate()
-                self.download_worker.wait(2000)
-        except Exception as e:
-            print(f"[stop_download_process] Lỗi dừng download_worker: {e}")
+        if hasattr(self, 'download_worker') and self.download_worker.isRunning():
+            print("[stop_download_process] Đã yêu cầu dừng download_worker (luồng sẽ tự kết thúc).")
+        
+        # Reset object
+        self.aria2_process = Non
 
         # Xóa cookie tạm
         try:
@@ -3298,8 +3354,14 @@ class PageFinalize(QWidget):
     def resizeEvent(self, event):
         """Kích hoạt việc thay đổi kích thước cửa sổ nhúng khi container thay đổi."""
         super().resizeEvent(event)
-        # Gọi hàm resize của cửa sổ chính để nó xử lý
-        self.main_app.resize_ais_window()
+        # Kiểm tra xem phương thức tồn tại trước khi gọi
+        if hasattr(self.main_app, 'resize_ais_window'):
+            self.main_app.resize_ais_window()
+        else:
+            print("Cảnh báo: Phương thức resize_ais_window chưa được định nghĩa trong USBBootCreator.")
+        # Force update container để tránh lỗi hiển thị
+        if hasattr(self, 'embed_container'):
+            self.embed_container.update()
   
     def show_progress_ui(self, show):
         self.progress_bar.setVisible(show)
