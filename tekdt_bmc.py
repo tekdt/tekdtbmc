@@ -88,6 +88,7 @@ if not str(BASE_DIR).startswith(tempfile.gettempdir()):
 # --- Cấu hình và Hằng số ---
 APP_VERSION = "1.0.3"
 CONFIG_FILE = BASE_DIR / "tekdt_bmc.json"
+ICON_PATH = BASE_DIR / "logo.ico"
 
 # Định nghĩa tất cả các đường dẫn dựa trên BASE_DIR
 TOOLS_DIR = BASE_DIR / "Tools"
@@ -191,6 +192,11 @@ class USBBootCreator(QMainWindow):
     new_version_found = Signal(str, str)
     
     def __init__(self):
+        """
+        Hàm khởi tạo của cửa sổ chính.
+        Thiết lập các biến, worker, timer, kiểm tra quyền admin,
+        và khởi tạo giao diện người dùng (UI).
+        """
         super().__init__()
         self.active_workers = []
         self.ais_process = None
@@ -212,7 +218,11 @@ class USBBootCreator(QMainWindow):
                 sys.exit(1)
         
         self.setWindowTitle(f"TekDT BMC v{APP_VERSION}")
-        self.setWindowIcon(QIcon())
+        if ICON_PATH.exists():
+            self.setWindowIcon(QIcon(str(ICON_PATH)))
+        else:
+            print(f"Cảnh báo: Không tìm thấy file icon tại '{ICON_PATH}'")
+            self.setWindowIcon(QIcon())
         
         # Tính toán và thiết lập kích thước cửa sổ dựa trên màn hình
         # Lấy thông tin màn hình chính
@@ -246,6 +256,7 @@ class USBBootCreator(QMainWindow):
             "iso_list": [],
             "windows_edition": None,
             "windows_edition_index": None,
+            "copy_ais_selection_only": True, 
         }
 
         self.config["device_details"] = None
@@ -1034,7 +1045,11 @@ class USBBootCreator(QMainWindow):
         QApplication.processEvents()
     
     def show_main_menu(self):
-        """Hiển thị menu cấu hình chính."""
+        """
+        Hiển thị menu cấu hình chính (menu hamburger).
+        Menu này cho phép người dùng thay đổi các tùy chọn như
+        Partition Scheme, Filesystem, Theme, và các cài đặt khác.
+        """
         menu = QMenu(self)
         
         # --- Partition Scheme ---
@@ -1085,6 +1100,25 @@ class USBBootCreator(QMainWindow):
         fill_group.addAction(no_action)
         fill_menu.addAction(yes_action)
         fill_menu.addAction(no_action)
+        
+        # Tùy chọn sao chép TekDT AIS
+        menu.addSeparator()
+        ais_copy_menu = menu.addMenu("Lọc và chỉ lấy những phần mềm được Thêm")
+        
+        yes_ais_action = QAction("Yes", self, checkable=True)
+        # Mặc định là True nếu chưa có trong config
+        yes_ais_action.setChecked(self.config.get("copy_ais_selection_only", True))
+        yes_ais_action.triggered.connect(lambda: self.set_copy_ais_selection(True))
+
+        no_ais_action = QAction("No", self, checkable=True)
+        no_ais_action.setChecked(not self.config.get("copy_ais_selection_only", True))
+        no_ais_action.triggered.connect(lambda: self.set_copy_ais_selection(False))
+
+        ais_copy_group = QActionGroup(self)
+        ais_copy_group.addAction(yes_ais_action)
+        ais_copy_group.addAction(no_ais_action)
+        ais_copy_menu.addAction(yes_ais_action)
+        ais_copy_menu.addAction(no_ais_action)
         
         menu.addSeparator()
 
@@ -1476,6 +1510,70 @@ class USBBootCreator(QMainWindow):
                 on_finished=self.on_creation_finished
             )
 
+    def set_copy_ais_selection(self, copy_only_selected):
+        """
+        Thiết lập tùy chọn có chỉ sao chép các phần mềm được chọn của TekDT AIS hay không.
+        
+        Args:
+            copy_only_selected (bool): True nếu chỉ sao chép phần mềm có auto_install=True,
+                                       False nếu sao chép toàn bộ.
+        """
+        self.config["copy_ais_selection_only"] = copy_only_selected
+        print(f"Đã chọn Chỉ tạo cùng phần mềm được thêm: {'Yes' if copy_only_selected else 'No'}")
+        self.save_config()
+    
+    # Trong class USBBootCreator(QMainWindow):
+
+    def _copy_tekdtais_selectively(self, source_dir, dest_dir):
+        """
+        Sao chép thư mục TekDT AIS một cách có chọn lọc.
+        Chỉ những ứng dụng trong thư mục 'Apps' có 'auto_install' = True trong
+        app_config.json mới được sao chép.
+        
+        Args:
+            source_dir (Path): Đường dẫn thư mục nguồn (ví dụ: TEKDTAIS_DIR).
+            dest_dir (str): Đường dẫn thư mục đích trên USB.
+        """
+        self.creation_worker.status.emit("Đang sao chép TekDT AIS (chọn lọc)...")
+        
+        config_path = source_dir / "app_config.json"
+        source_apps_dir = source_dir / "Apps"
+        
+        apps_to_copy = []
+        if not config_path.exists():
+            print(f"Cảnh báo: Không tìm thấy {config_path}. Sẽ sao chép toàn bộ TekDT AIS.")
+            shutil.copytree(source_dir, dest_dir)
+            return
+
+        try:
+            with open(config_path, 'r', encoding='utf-8') as f:
+                app_config = json.load(f)
+            
+            for app_name, settings in app_config.items():
+                if settings.get("auto_install") is True:
+                    apps_to_copy.append(app_name)
+            
+            print(f"Các ứng dụng TekDT AIS sẽ được sao chép: {apps_to_copy}")
+
+        except (json.JSONDecodeError, IOError) as e:
+            print(f"Lỗi đọc app_config.json: {e}. Sẽ sao chép toàn bộ TekDT AIS.")
+            shutil.copytree(source_dir, dest_dir)
+            return
+
+        # Hàm ignore cho shutil.copytree
+        def ignore_apps(directory, contents):
+            # Chỉ áp dụng logic ignore khi đang ở trong thư mục 'Apps'
+            if Path(directory).resolve() == source_apps_dir.resolve():
+                # Trả về danh sách các mục cần bỏ qua
+                return [item for item in contents if item not in apps_to_copy]
+            return [] # Không bỏ qua gì ở các thư mục khác
+
+        # Thực hiện sao chép với hàm ignore
+        if os.path.exists(dest_dir):
+            shutil.rmtree(dest_dir)
+        shutil.copytree(source_dir, dest_dir, ignore=ignore_apps)
+        print("Đã sao chép TekDT AIS (chọn lọc) vào USB.")
+    
     def _create_fill_file(self, file_path, size_in_bytes, total_fill_target, space_filled_so_far):
         """
         Tạo một tệp có kích thước cụ thể bằng cách ghi các khối zero.
@@ -1654,10 +1752,17 @@ class USBBootCreator(QMainWindow):
             self.creation_worker.status.emit("Đang sao chép TekDT AIS vào USB...")
             dest_ais_dir = os.path.join(usb_mount_point, "TekDT_AIS")
             if os.path.exists(TEKDTAIS_DIR):
-                if os.path.exists(dest_ais_dir):
-                    shutil.rmtree(dest_ais_dir)
-                shutil.copytree(TEKDTAIS_DIR, dest_ais_dir)
-                print("Đã sao chép TekDT_AIS vào USB.")
+                # Kiểm tra cấu hình để quyết định cách sao chép
+                if self.config.get("copy_ais_selection_only", True):
+                    # Gọi hàm sao chép có chọn lọc
+                    self._copy_tekdtais_selectively(TEKDTAIS_DIR, dest_ais_dir)
+                else:
+                    # Sao chép toàn bộ như cũ
+                    self.creation_worker.status.emit("Đang sao chép toàn bộ TekDT AIS vào USB...")
+                    if os.path.exists(dest_ais_dir):
+                        shutil.rmtree(dest_ais_dir)
+                    shutil.copytree(TEKDTAIS_DIR, dest_ais_dir)
+                    print("Đã sao chép toàn bộ TekDT_AIS vào USB.")
 
             self._process_driver_archive(usb_mount_point)
 
