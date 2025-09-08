@@ -345,7 +345,7 @@ class USBBootCreator(QMainWindow):
                 color: #88C0D0;
                 padding-bottom: 10px;
             }
-            /* [MỚI] CSS cho label thông báo trạng thái */
+            /* CSS cho label thông báo trạng thái */
             QLabel#DownloadStatusLabel {
                 color: #A3BE8C; /* Màu xanh lá cây sáng, dễ đọc */
                 font-weight: bold;
@@ -408,7 +408,7 @@ class USBBootCreator(QMainWindow):
                 border-radius: 5px;
                 background-color: #3B4252;
             }
-            /* [MỚI] CSS cho danh sách ISO để tăng độ tương phản */
+            /* CSS cho danh sách ISO để tăng độ tương phản */
             QListWidget {
                 background-color: #3B4252;
                 border-radius: 5px;
@@ -2356,10 +2356,8 @@ class PageISOSelect(QWidget):
         group1_layout.addLayout(iso_buttons_layout)
         layout.addWidget(self.iso_list_group)
         
-        # <<< THAY ĐỔI BẮT ĐẦU: Thêm "self." để biến source_group thành thuộc tính của lớp
         self.source_group = QGroupBox("Lấy link trực tiếp từ")
         source_layout = QHBoxLayout(self.source_group)
-        # <<< THAY ĐỔI KẾT THÚC
         source_layout.setAlignment(Qt.AlignmentFlag.AlignLeft)
 
         self.microsoft_radio = QRadioButton("Fido Script")
@@ -3017,7 +3015,7 @@ class PageISOSelect(QWidget):
                     'name': f"{product_name} ({sku_name})",
                     'product_id': product_id,
                     'sku_id': sku_data["sku_id"],  # Lấy sku_id từ userdata
-                    'selected_filename': sku_data.get("filename"),  # THÊM: Lưu filename đã chọn để so khớp sau
+                    'selected_filename': sku_data.get("filename"),  # Lưu filename đã chọn để so khớp sau
                     'is_gravesoft': True 
                 })
 
