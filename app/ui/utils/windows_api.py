@@ -104,7 +104,7 @@ def _find_ais_window_task(main_window):
         related_pids = _get_all_related_pids(pid)
         print(f"Các PID liên quan của TekDT AIS: {related_pids}")
         for related_pid in related_pids:
-            hwnds.extend(main_window._get_windows_for_pid(related_pid))
+            hwnds.extend(_get_windows_for_pid(related_pid))
 
     # Tìm thêm theo title "TekDT AIS" (bổ sung, nếu không gắn với PID)
     h = ctypes.windll.user32.FindWindowW(None, "TekDT AIS")
