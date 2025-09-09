@@ -35,7 +35,7 @@ def install_wincdemu_driver():
     try:
         print("Đang cài đặt driver WinCDEmu portable...")
         # Sử dụng CREATE_NO_WINDOW để không hiện cửa sổ console
-        result = run([config.WINCDEMU_EXE, "/install"], capture_output=True, text=True, creationflags=subprocess.CREATE_NO_WINDOW)
+        result = subprocess.run([config.WINCDEMU_EXE, "/install"], capture_output=True, text=True, creationflags=subprocess.CREATE_NO_WINDOW)
         # Kiểm tra lỗi, nhưng bỏ qua lỗi "đã tồn tại"
         if result.returncode != 0 and "already exists" not in result.stderr:
             print(f"Lỗi khi cài đặt driver WinCDEmu: {result.stderr}")
@@ -52,7 +52,7 @@ def uninstall_wincdemu_driver():
     try:
         print("Đang gỡ cài đặt driver WinCDEmu portable...")
         # Sử dụng CREATE_NO_WINDOW để không hiện cửa sổ console
-        run([config.WINCDEMU_EXE, "/uninstall"], capture_output=True, text=True, creationflags=subprocess.CREATE_NO_WINDOW)
+        subprocess.run([config.WINCDEMU_EXE, "/uninstall"], capture_output=True, text=True, creationflags=subprocess.CREATE_NO_WINDOW)
         print("Đã gỡ cài đặt driver WinCDEmu.")
     except Exception as e:
         print(f"Ngoại lệ khi gỡ cài đặt driver WinCDEmu: {e}")
