@@ -3,7 +3,7 @@ import os
 import sys
 import subprocess
 import config
-import workers
+import psutil
 from ctypes import wintypes
 
 def is_admin():
@@ -35,7 +35,7 @@ def install_wincdemu_driver():
     try:
         print("Đang cài đặt driver WinCDEmu portable...")
         # Sử dụng CREATE_NO_WINDOW để không hiện cửa sổ console
-        result = workers.run([config.WINCDEMU_EXE, "/install"], capture_output=True, text=True, creationflags=subprocess.CREATE_NO_WINDOW)
+        result = run([config.WINCDEMU_EXE, "/install"], capture_output=True, text=True, creationflags=subprocess.CREATE_NO_WINDOW)
         # Kiểm tra lỗi, nhưng bỏ qua lỗi "đã tồn tại"
         if result.returncode != 0 and "already exists" not in result.stderr:
             print(f"Lỗi khi cài đặt driver WinCDEmu: {result.stderr}")
@@ -52,7 +52,7 @@ def uninstall_wincdemu_driver():
     try:
         print("Đang gỡ cài đặt driver WinCDEmu portable...")
         # Sử dụng CREATE_NO_WINDOW để không hiện cửa sổ console
-        workers.run([config.WINCDEMU_EXE, "/uninstall"], capture_output=True, text=True, creationflags=subprocess.CREATE_NO_WINDOW)
+        run([config.WINCDEMU_EXE, "/uninstall"], capture_output=True, text=True, creationflags=subprocess.CREATE_NO_WINDOW)
         print("Đã gỡ cài đặt driver WinCDEmu.")
     except Exception as e:
         print(f"Ngoại lệ khi gỡ cài đặt driver WinCDEmu: {e}")
@@ -101,7 +101,7 @@ def _find_ais_window_task(main_window):
     # Tìm tất cả hwnd từ PID chính và các tiến trình con (đã lọc theo title trong _get_windows_for_pid)
     hwnds = []
     if pid:
-        related_pids = main_window._get_all_related_pids(pid)
+        related_pids = _get_all_related_pids(pid)
         print(f"Các PID liên quan của TekDT AIS: {related_pids}")
         for related_pid in related_pids:
             hwnds.extend(main_window._get_windows_for_pid(related_pid))

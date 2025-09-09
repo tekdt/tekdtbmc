@@ -419,7 +419,9 @@ class USBBootCreator(QMainWindow):
             # Khởi động timer tìm cửa sổ
             self.find_ais_window_timer = QTimer(self)
             self.find_ais_window_timer.attempts = 0
-            self.find_ais_window_timer.timeout.connect(_find_ais_window_task)
+            self.find_ais_window_timer.timeout.connect(
+                lambda: windows_api._find_ais_window_task(self)
+            )
             self.find_ais_window_timer.start(250)
             self.ais_monitor_timer.start(5000)
 
