@@ -371,7 +371,7 @@ class PageISOSelect(QWidget):
         self.gravesoft_download_button.setVisible(bool(sku_data and sku_data.get("sku_id")))
     
     def browse_iso(self):
-        file_paths, _ = QFileDialog.getOpenFileNames(self, "Chọn các file ISO", str(ISOS_DIR), "ISO Files (*.iso)")
+        file_paths, _ = QFileDialog.getOpenFileNames(self, "Chọn các file ISO", str(config.ISOS_DIR), "ISO Files (*.iso)")
         for file_path in file_paths:
             self.add_iso_to_list(file_path)
 
@@ -426,9 +426,9 @@ class PageISOSelect(QWidget):
         """Phân tích file ISO bằng cách ưu tiên mount với PowerShell, fallback sang WinCDEmu nếu thất bại."""
         iso_path = iso_info_dict['path']
         cache = {}
-        if os.path.exists(ISO_ANALYSIS_CACHE):
+        if os.path.exists(config.ISO_ANALYSIS_CACHE):
             try:
-                with open(ISO_ANALYSIS_CACHE, 'r') as f: cache = json.load(f)
+                with open(config.ISO_ANALYSIS_CACHE, 'r') as f: cache = json.load(f)
             except (json.JSONDecodeError, IOError): pass
 
         size_key = str(os.path.getsize(iso_path))
@@ -437,7 +437,7 @@ class PageISOSelect(QWidget):
             self.show_edition_selection_dialog(cache[size_key], iso_info_dict)
             return
 
-        if not os.path.exists(WIMLIB_EXE):
+        if not os.path.exists(config.WIMLIB_EXE):
             self.main_app.show_themed_message("Lỗi", 
                                               "Không tìm thấy wimlib-imagex.exe để phân tích ISO",
                                               icon=QMessageBox.Icon.Critical)
@@ -487,7 +487,7 @@ class PageISOSelect(QWidget):
 
             # Nếu PowerShell thất bại hoặc không tồn tại, fallback sang WinCDEmu
             if not mounted_drive:
-                if not os.path.exists(WINCDEMU_EXE):
+                if not os.path.exists(config.WINCDEMU_EXE):
                     raise Exception("Không tìm thấy WinCDEmu.exe để fallback mount ISO.")
 
                 # Mount bằng WinCDEmu
@@ -496,7 +496,7 @@ class PageISOSelect(QWidget):
                     raise Exception("Không tìm thấy ký tự ổ đĩa trống để mount bằng WinCDEmu.")
                 
                 print(f"Sẽ mount ISO bằng WinCDEmu vào ổ đĩa: {drive_letter}:")
-                mount_cmd = [WINCDEMU_EXE, iso_path, f"{drive_letter}:", "/wait"]
+                mount_cmd = [config.WINCDEMU_EXE, iso_path, f"{drive_letter}:", "/wait"]
                 result = run(mount_cmd, capture_output=True, text=True, creationflags=subprocess.CREATE_NO_WINDOW)
                 
                 if result.returncode != 0:
@@ -548,7 +548,7 @@ class PageISOSelect(QWidget):
             
             print(f"Đã tìm thấy file image tại: {wim_path}")
 
-            info_cmd = [WIMLIB_EXE, "info", wim_path]
+            info_cmd = [config.WIMLIB_EXE, "info", wim_path]
             result = run(info_cmd, capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW)
             
             if result.returncode != 0:
@@ -569,7 +569,7 @@ class PageISOSelect(QWidget):
             if editions:
                 print(f"Các phiên bản Windows được tìm thấy: {editions}")
                 cache[size_key] = editions
-                with open(ISO_ANALYSIS_CACHE, 'w') as f:
+                with open(config.ISO_ANALYSIS_CACHE, 'w') as f:
                     json.dump(cache, f, indent=2)
 
         except Exception as e:
@@ -588,7 +588,7 @@ class PageISOSelect(QWidget):
                 elif mount_method == 'wincdemu':
                     drive_letter = mounted_drive[0]  # Ví dụ 'Z:'
                     print(f"Đang unmount ổ đĩa ảo {drive_letter}: bằng WinCDEmu")
-                    unmount_cmd = [WINCDEMU_EXE, "/unmount", f"{drive_letter}:"]
+                    unmount_cmd = [config.WINCDEMU_EXE, "/unmount", f"{drive_letter}:"]
                     run(unmount_cmd, capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW)
         
         self.show_edition_selection_dialog(editions, iso_info_dict)
@@ -878,7 +878,7 @@ class PageISOSelect(QWidget):
     
     def _download_task(self):
         """Tác vụ tải file theo hàng đợi, sử dụng _run_aria2_stream để chạy aria2 an toàn."""
-        if not os.path.exists(ARIA2_EXE):
+        if not os.path.exists(config.ARIA2_EXE):
             raise FileNotFoundError("Chưa tìm thấy aria2c.exe.")
 
         total_downloads = len(self.downloads_queue)
@@ -926,7 +926,7 @@ class PageISOSelect(QWidget):
                 else:
                     data = item['data']
                     if data['type'] == 'fido':
-                        if not os.path.exists(FIDO_SCRIPT_PATH):
+                        if not os.path.exists(config.FIDO_SCRIPT_PATH):
                             raise FileNotFoundError("Chưa tìm thấy Fido.ps1.")
                         fido_version_map = {"Windows 11": "11", "Windows 10": "10"}
                         version_arg = fido_version_map.get(name)
@@ -937,7 +937,7 @@ class PageISOSelect(QWidget):
                                     arch_arg = arch
                                     break
                         self.download_worker.status.emit(f"({i+1}/{total_downloads}) Đang lấy link cho {name}...")
-                        fido_cmd = ['powershell.exe', '-ExecutionPolicy', 'Bypass', '-File', FIDO_SCRIPT_PATH, '-Win', version_arg, '-Arch', arch_arg, '-Lang', 'Eng', '-GetUrl']
+                        fido_cmd = ['powershell.exe', '-ExecutionPolicy', 'Bypass', '-File', config.FIDO_SCRIPT_PATH, '-Win', version_arg, '-Arch', arch_arg, '-Lang', 'Eng', '-GetUrl']
                         process = subprocess.run(fido_cmd, capture_output=True, text=True, check=True, creationflags=subprocess.CREATE_NO_WINDOW)
                         iso_url = process.stdout.strip()
                     elif data['type'] == 'direct':
@@ -949,7 +949,7 @@ class PageISOSelect(QWidget):
                 raise Exception(f"Không lấy được URL hợp lệ cho {name}.")
 
             iso_filename = selected_filename if item.get('is_gravesoft') else os.path.basename(iso_url.split('?')[0])
-            iso_filepath = os.path.join(ISOS_DIR, iso_filename)
+            iso_filepath = os.path.join(config.ISOS_DIR, iso_filename)
 
             # Nếu có file .aria2 (dang dở) -> xóa
             aria2_control_file = iso_filepath + ".aria2"
@@ -971,7 +971,7 @@ class PageISOSelect(QWidget):
 
             # Chuẩn bị command aria2
             self.download_worker.status.emit(f"({i+1}/{total_downloads}) Đang tải {iso_filename}...")
-            aria2_cmd = [str(ARIA2_EXE), '--console-log-level=warn', '--summary-interval=1', '-c', '-x16', '-s16', '-d', str(ISOS_DIR), '-o', iso_filename]
+            aria2_cmd = [str(config.ARIA2_EXE), '--console-log-level=warn', '--summary-interval=1', '-c', '-x16', '-s16', '-d', str(config.ISOS_DIR), '-o', iso_filename]
             for header in header_list:
                 aria2_cmd.extend(['--header', header])
             if cookie_file:
