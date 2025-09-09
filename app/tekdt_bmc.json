@@ -1,0 +1,13 @@
+{
+    "device": null,
+    "device_name": null,
+    "partition_scheme": "GPT",
+    "filesystem": "ExFAT",
+    "theme": null,
+    "fill_space": true,
+    "iso_list": [],
+    "windows_edition": null,
+    "windows_edition_index": null,
+    "copy_ais_selection_only": true,
+    "device_details": null
+}
