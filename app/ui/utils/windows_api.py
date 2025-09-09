@@ -200,7 +200,7 @@ def embed_ais_window(main_window):
     print(f"Đã nhúng {len(hwnds)} cửa sổ TekDT AIS vào container.")
 
     # Đặt lại kích thước sau 100ms
-    QTimer.singleShot(100, main_window.resize_ais_window)
+    QTimer.singleShot(100, resize_ais_window(main_window))
 
 def resize_ais_window(main_window):
     """Thay đổi kích thước cửa sổ TekDT AIS nhúng để khớp với container."""
