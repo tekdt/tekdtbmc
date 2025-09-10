@@ -1,9 +1,9 @@
-from PySide6.QtWidgets import (QWidget, QVBoxLayout, QLabel, QComboBox, QFileDialog,
-                             QCheckBox, QPushButton, QListWidget, QGroupBox, 
-                             QHBoxLayout, QProgressBar, QFrame, QSizePolicy,
-                             QRadioButton, QButtonGroup, QGridLayout)
+from PySide6.QtWidgets import (QWidget, QVBoxLayout, QLabel, QComboBox, QFileDialog, QDialog,
+                             QCheckBox, QPushButton, QListWidget, QGroupBox, QListWidgetItem,
+                             QHBoxLayout, QDialogButtonBox, QRadioButton, QButtonGroup, QGridLayout)
 from PySide6.QtCore import Qt, QTimer
-import config
+import config, os, shutil, psutil, subprocess, string, json
+from ui.utils import helpers
 
 class PageISOSelect(QWidget):
     def __init__(self, parent=None):
@@ -458,7 +458,7 @@ class PageISOSelect(QWidget):
                         'powershell', '-NoProfile', '-Command',
                         f'Mount-DiskImage -ImagePath "{iso_path}" -StorageType ISO'
                     ]
-                    result = run(mount_cmd, capture_output=True, text=True, creationflags=subprocess.CREATE_NO_WINDOW)
+                    result = subprocess.run(mount_cmd, capture_output=True, text=True, creationflags=subprocess.CREATE_NO_WINDOW)
                     if result.returncode != 0:
                         error_msg = result.stderr.strip() or f"PowerShell trả về mã lỗi {result.returncode}."
                         raise Exception(f"Không thể mount ISO bằng PowerShell: {error_msg}")
@@ -468,7 +468,7 @@ class PageISOSelect(QWidget):
                         'powershell', '-NoProfile', '-Command',
                         f'(Get-DiskImage -ImagePath "{iso_path}" | Get-Volume).DriveLetter'
                     ]
-                    result = run(query_cmd, capture_output=True, text=True, creationflags=subprocess.CREATE_NO_WINDOW)
+                    result = subprocess.run(query_cmd, capture_output=True, text=True, creationflags=subprocess.CREATE_NO_WINDOW)
                     if result.returncode != 0:
                         raise Exception(f"Không thể lấy drive letter từ PowerShell: {result.stderr.strip()}")
                     
@@ -497,7 +497,7 @@ class PageISOSelect(QWidget):
                 
                 print(f"Sẽ mount ISO bằng WinCDEmu vào ổ đĩa: {drive_letter}:")
                 mount_cmd = [config.WINCDEMU_EXE, iso_path, f"{drive_letter}:", "/wait"]
-                result = run(mount_cmd, capture_output=True, text=True, creationflags=subprocess.CREATE_NO_WINDOW)
+                result = subprocess.run(mount_cmd, capture_output=True, text=True, creationflags=subprocess.CREATE_NO_WINDOW)
                 
                 if result.returncode != 0:
                     error_msg = result.stderr.strip() if result.stderr.strip() else f"WinCDEmu trả về mã lỗi {result.returncode}."
@@ -549,7 +549,7 @@ class PageISOSelect(QWidget):
             print(f"Đã tìm thấy file image tại: {wim_path}")
 
             info_cmd = [config.WIMLIB_EXE, "info", wim_path]
-            result = run(info_cmd, capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW)
+            result = subprocess.run(info_cmd, capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW)
             
             if result.returncode != 0:
                 error_output = result.stderr.decode(encoding='utf-8', errors='ignore')
@@ -584,12 +584,12 @@ class PageISOSelect(QWidget):
                         'powershell', '-NoProfile', '-Command',
                         f'Dismount-DiskImage -ImagePath "{iso_path}"'
                     ]
-                    run(unmount_cmd, capture_output=True, text=True, creationflags=subprocess.CREATE_NO_WINDOW)
+                    subprocess.run(unmount_cmd, capture_output=True, text=True, creationflags=subprocess.CREATE_NO_WINDOW)
                 elif mount_method == 'wincdemu':
                     drive_letter = mounted_drive[0]  # Ví dụ 'Z:'
                     print(f"Đang unmount ổ đĩa ảo {drive_letter}: bằng WinCDEmu")
                     unmount_cmd = [config.WINCDEMU_EXE, "/unmount", f"{drive_letter}:"]
-                    run(unmount_cmd, capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW)
+                    subprocess.run(unmount_cmd, capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW)
         
         self.show_edition_selection_dialog(editions, iso_info_dict)
 
@@ -639,7 +639,7 @@ class PageISOSelect(QWidget):
             print(f"Đã chọn cho {iso_info_dict['filename']}: {selected_data[1]} (Index: {selected_data[0]})")
             
             # --- LOGIC HỎI KEY ĐƯỢC DI CHUYỂN VÀO ĐÂY ---
-            key = USBBootCreator.get_generic_key(selected_data[1])
+            key = helpers.get_generic_key(selected_data[1])
             if not key:
                 key = self.main_app.ask_for_product_key(selected_data[1])
             iso_info_dict["product_key"] = key # Lưu key vào dict

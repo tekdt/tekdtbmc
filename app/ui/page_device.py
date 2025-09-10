@@ -1,9 +1,6 @@
 import subprocess
 import json
-from PySide6.QtWidgets import (QWidget, QVBoxLayout, QLabel, QComboBox, 
-                             QCheckBox, QPushButton, QListWidget, QGroupBox, 
-                             QHBoxLayout, QProgressBar, QFrame, QSizePolicy,
-                             QRadioButton)
+from PySide6.QtWidgets import (QWidget, QVBoxLayout, QLabel, QComboBox, QCheckBox, QPushButton)
 from PySide6.QtCore import Qt, QTimer
 
 class PageDeviceSelect(QWidget):

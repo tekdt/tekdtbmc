@@ -1,8 +1,6 @@
-import ui.utils.windows_api
-from PySide6.QtWidgets import (QWidget, QVBoxLayout, QLabel, QComboBox, 
-                             QCheckBox, QPushButton, QListWidget, QGroupBox, 
-                             QHBoxLayout, QProgressBar, QFrame, QSizePolicy,
-                             QRadioButton)
+import ui.utils.windows_api as windows_api
+from PySide6.QtWidgets import (QWidget, QVBoxLayout, QLabel, QPushButton, QGroupBox, 
+                             QHBoxLayout, QProgressBar, QFrame, QSizePolicy)
 from PySide6.QtCore import Qt, QTimer
 
 class PageFinalize(QWidget):
@@ -94,7 +92,7 @@ class PageFinalize(QWidget):
         """Kích hoạt việc thay đổi kích thước cửa sổ nhúng khi container thay đổi."""
         super().resizeEvent(event)
         # Kiểm tra xem phương thức tồn tại trước khi gọi
-        windows_api.resize_ais_window()
+        windows_api.resize_ais_window(self.main_app)
         # Force update container để tránh lỗi hiển thị
         if hasattr(self, 'embed_container'):
             self.embed_container.update()

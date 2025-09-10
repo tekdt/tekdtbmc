@@ -11,8 +11,8 @@ from ui.page_finalize import PageFinalize
 from ui.utils import windows_api, tool_manager, helpers
 
 # --- Import thư viện PySide6 ---
-from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-                             QStackedWidget, QLabel, QMessageBox, QMenu, QGraphicsOpacityEffect, QPushButton)
+from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QDialog, QComboBox, QDialogButtonBox,
+                             QStackedWidget, QLabel, QMessageBox, QMenu, QGraphicsOpacityEffect, QPushButton, QLineEdit)
 from PySide6.QtGui import QIcon, QAction, QActionGroup
 from PySide6.QtCore import Qt, QPropertyAnimation, QEasingCurve, QThread, Signal, QTimer, qInstallMessageHandler
 
@@ -583,7 +583,7 @@ class USBBootCreator(QMainWindow):
     
     def on_page_changed(self, index):
         if index == 2:
-            self.embed_ais_window()
+            windows_api.embed_ais_window(self)
             self.ais_monitor_timer.start(5000)
         elif self.ais_hwnd:
             self.hide_ais_window()
@@ -729,10 +729,10 @@ class USBBootCreator(QMainWindow):
         theme_group.addAction(no_theme_action)
         
         try:
-            if not THEMES_DIR.exists():
+            if not config.THEMES_DIR.exists():
                 print("Thư mục Themes không tồn tại, bỏ qua việc tải theme.")
             else:
-                for theme_file in os.listdir(THEMES_DIR):
+                for theme_file in os.listdir(config.THEMES_DIR):
                     if theme_file.endswith(".zip"):
                         theme_name = os.path.splitext(theme_file)[0]
                         action = QAction(theme_name, self, checkable=True)
@@ -903,7 +903,7 @@ class USBBootCreator(QMainWindow):
 
     def ask_for_product_key(self, edition_name=None):
         # Đọc danh sách key
-        generic_key_path = os.path.join(BASE_DIR, "generic_keys.json")
+        generic_key_path = os.path.join(config.BASE_DIR, "generic_keys.json")
         keys = {}
         if os.path.exists(generic_key_path):
             with open(generic_key_path, "r", encoding="utf-8") as f:
@@ -933,14 +933,6 @@ class USBBootCreator(QMainWindow):
         if dialog.exec() == QDialog.DialogCode.Accepted:
             return key_edit.text().strip()
         return ""
-
-    def get_generic_key(edition_name):
-        generic_key_path = os.path.join(BASE_DIR, "generic_keys.json")
-        if not os.path.exists(generic_key_path):
-            return None
-        with open(generic_key_path, "r", encoding="utf-8") as f:
-            keys = json.load(f)
-        return keys.get(edition_name)
 
     def on_creation_finished(self, success, message):
         """Xử lý khi quá trình tạo USB kết thúc."""

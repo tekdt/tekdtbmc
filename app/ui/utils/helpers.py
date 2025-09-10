@@ -15,14 +15,14 @@ def _process_driver_archive(self, usb_mount_point):
     self.creation_worker.status.emit("Đang xử lý kho driver...")
     
     # Đường dẫn tới các file driver nguồn và thư mục đích trên USB
-    # drivers_part1 = os.path.join(BASE_DIR, "Drivers", "Drivers.7z.001")
-    # drivers_part2 = os.path.join(BASE_DIR, "Drivers", "Drivers.7z.002")
-    drivers_part1 = DRIVERS_DIR / "Drivers.7z.001"
-    drivers_part2 = DRIVERS_DIR / "Drivers.7z.002"
+    # drivers_part1 = os.path.join(config.BASE_DIR, "Drivers", "Drivers.7z.001")
+    # drivers_part2 = os.path.join(config.BASE_DIR, "Drivers", "Drivers.7z.002")
+    drivers_part1 = config.DRIVERS_DIR / "Drivers.7z.001"
+    drivers_part2 = config.DRIVERS_DIR / "Drivers.7z.002"
     usb_ventoy_dir = os.path.join(usb_mount_point, "ventoy")
     final_archive_path = os.path.join(usb_ventoy_dir, "Drivers.7z")
     
-    if not DRIVERS_DIR.exists():
+    if not config.DRIVERS_DIR.exists():
         self.creation_worker.status.emit("Thư mục Drivers không tồn tại. Bỏ qua.")
         print("Thư mục Drivers không tồn tại cạnh ứng dụng.")
         return
@@ -248,7 +248,7 @@ def _copy_tekdtais_selectively(self, source_dir, dest_dir):
     app_config.json mới được sao chép.
     
     Args:
-        source_dir (Path): Đường dẫn thư mục nguồn (ví dụ: TEKDTAIS_DIR).
+        source_dir (Path): Đường dẫn thư mục nguồn (ví dụ: config.TEKDTAIS_DIR).
         dest_dir (str): Đường dẫn thư mục đích trên USB.
     """
     self.creation_worker.status.emit("Đang sao chép TekDT AIS (chọn lọc)...")
@@ -354,7 +354,7 @@ def create_usb_task(self):
         self.creation_worker.status.emit(f"Bắt đầu tạo USB trên {self.config['device']}...")
         self.creation_worker.progress.emit(50)
         
-        ventoy_exe = os.path.join(VENTOY_DIR, "Ventoy2Disk.exe")
+        ventoy_exe = os.path.join(config.VENTOY_DIR, "Ventoy2Disk.exe")
         if not os.path.exists(ventoy_exe):
             raise FileNotFoundError("Không tìm thấy Ventoy2Disk.exe. Vui lòng kiểm tra lại thư mục Tools.")
 
@@ -422,7 +422,7 @@ def create_usb_task(self):
         # 2. Xử lý theme và gộp cấu hình
         if self.config["theme"]:
             self.creation_worker.status.emit("Đang cài đặt theme và gộp cấu hình...")
-            theme_zip_path = os.path.join(THEMES_DIR, self.config["theme"])
+            theme_zip_path = os.path.join(config.THEMES_DIR, self.config["theme"])
             
             with zipfile.ZipFile(theme_zip_path, 'r') as theme_zip:
                 # Đọc ventoy.json từ trong file zip nếu có
@@ -468,17 +468,17 @@ def create_usb_task(self):
         
         self.creation_worker.status.emit("Đang sao chép TekDT AIS vào USB...")
         dest_ais_dir = os.path.join(usb_mount_point, "TekDT_AIS")
-        if os.path.exists(TEKDTAIS_DIR):
+        if os.path.exists(config.TEKDTAIS_DIR):
             # Kiểm tra cấu hình để quyết định cách sao chép
             if self.config.get("copy_ais_selection_only", True):
                 # Gọi hàm sao chép có chọn lọc
-                self._copy_tekdtais_selectively(TEKDTAIS_DIR, dest_ais_dir)
+                self._copy_tekdtais_selectively(config.TEKDTAIS_DIR, dest_ais_dir)
             else:
                 # Sao chép toàn bộ như cũ
                 self.creation_worker.status.emit("Đang sao chép toàn bộ TekDT AIS vào USB...")
                 if os.path.exists(dest_ais_dir):
                     shutil.rmtree(dest_ais_dir)
-                shutil.copytree(TEKDTAIS_DIR, dest_ais_dir)
+                shutil.copytree(config.TEKDTAIS_DIR, dest_ais_dir)
                 print("Đã sao chép toàn bộ TekDT_AIS vào USB.")
 
         self._process_driver_archive(usb_mount_point)
@@ -590,3 +590,11 @@ def _get_drive_mount_point(self, device_path):
 
     print(f"Không thể tìm thấy mount point cho {device_path} sau nhiều lần thử.")
     return None
+
+def get_generic_key(edition_name):
+    generic_key_path = os.path.join(config.BASE_DIR, "generic_keys.json")
+    if not os.path.exists(generic_key_path):
+        return None
+    with open(generic_key_path, "r", encoding="utf-8") as f:
+        keys = json.load(f)
+    return keys.get(edition_name)

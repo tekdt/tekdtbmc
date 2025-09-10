@@ -1,10 +1,6 @@
-import ctypes
-import os
-import sys
-import subprocess
-import config
-import psutil
+import ctypes, os, sys, subprocess, config, psutil
 from ctypes import wintypes
+from PySide6.QtCore import QTimer
 
 def is_admin():
     """Kiểm tra xem ứng dụng có đang chạy với quyền admin không."""
@@ -132,7 +128,7 @@ def _find_ais_window_task(main_window):
 
         # Nếu ở page3, nhúng ngay
         if main_window.stacked_widget.currentWidget() == main_window.page3:
-            main_window.embed_ais_window()
+            embed_ais_window(main_window)
 
     elif main_window.find_ais_window_timer.attempts > 120:  # 30 giây
         main_window.find_ais_window_timer.stop()
