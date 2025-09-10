@@ -4,6 +4,7 @@ import sys
 import subprocess
 import json
 import psutil
+import webbrowser
 from workers import Worker
 from ui.page_device import PageDeviceSelect
 from ui.page_iso import PageISOSelect
@@ -14,7 +15,7 @@ from ui.utils import windows_api, tool_manager, helpers
 from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QDialog, QComboBox, QDialogButtonBox,
                              QStackedWidget, QLabel, QMessageBox, QMenu, QGraphicsOpacityEffect, QPushButton, QLineEdit)
 from PySide6.QtGui import QIcon, QAction, QActionGroup
-from PySide6.QtCore import Qt, QPropertyAnimation, QEasingCurve, QThread, Signal, QTimer, qInstallMessageHandler
+from PySide6.QtCore import Qt, QPropertyAnimation, QEasingCurve, QThread, Signal, QTimer, qInstallMessageHandler, QFileSystemWatcher
 
 def qt_message_handler(mode, context, message):
     """
@@ -51,6 +52,12 @@ class USBBootCreator(QMainWindow):
         self.usb_monitor_timer = QTimer(self)
         self.usb_monitor_timer.timeout.connect(self._check_selected_usb_presence)
         self.is_checking_usb = False
+        
+        # Khởi tạo File System Watcher để theo dõi app_config.json
+        self.ais_config_path = str(config.TEKDTAIS_DIR / "app_config.json")
+        self.file_watcher = QFileSystemWatcher(self)
+        self.file_watcher.fileChanged.connect(self._on_ais_config_changed)
+        
         # --- Kiểm tra quyền admin và nâng quyền nếu cần ---
         if not windows_api.is_admin():
             print("Không có quyền admin, đang thử nâng quyền...")
@@ -74,12 +81,8 @@ class USBBootCreator(QMainWindow):
         screen = QApplication.primaryScreen()
         if screen:
             available_geometry = screen.availableGeometry()
-            screen_width = available_geometry.width()
-            screen_height = available_geometry.height()
-
-            # Tính toán kích thước mong muốn (60% chiều rộng, 90% chiều cao)
-            desired_width = int(screen_width * 0.6)
-            desired_height = int(screen_height * 0.9)
+            desired_width = int(available_geometry.width() * 0.6)
+            desired_height = int(available_geometry.height() * 0.9)
             
             # Thiết lập kích thước ban đầu cho cửa sổ
             self.resize(desired_width, desired_height)
@@ -582,12 +585,30 @@ class USBBootCreator(QMainWindow):
         self.ais_hwnd = None
     
     def on_page_changed(self, index):
-        if index == 2:
+        # Quản lý việc theo dõi file config của AIS
+        # Dừng theo dõi khi rời khỏi trang 3
+        if self.file_watcher.files():
+            self.file_watcher.removePaths(self.file_watcher.files())
+            print(f"Đã dừng theo dõi file: {self.ais_config_path}")
+
+        if index == 2: # Khi chuyển đến trang Finalize
             windows_api.embed_ais_window(self)
             self.ais_monitor_timer.start(5000)
-            self._update_capacity_check() # << GỌI HÀM KIỂM TRA DUNG LƯỢNG
+            self._update_capacity_check()
+            # Bắt đầu theo dõi file khi vào trang 3
+            if os.path.exists(self.ais_config_path):
+                self.file_watcher.addPath(self.ais_config_path)
+                print(f"Đang theo dõi thay đổi trên file: {self.ais_config_path}")
         elif self.ais_hwnd:
-            self.hide_ais_window()
+            windows_api.hide_ais_window(self)
+    
+    # Hàm xử lý khi file app_config.json thay đổi
+    def _on_ais_config_changed(self, path):
+        print(f"Phát hiện thay đổi trong '{path}'. Đang tính toán lại dung lượng...")
+        # Một số trình soạn thảo xóa và tạo lại file, vì vậy chúng ta cần thêm lại đường dẫn
+        # để đảm bảo tiếp tục theo dõi.
+        QTimer.singleShot(100, lambda: self.file_watcher.addPath(path))
+        self._update_capacity_check()
 
     def _get_dir_size(self, start_path, ignore_func=None):
         """Tính tổng dung lượng của một thư mục, có hỗ trợ hàm ignore."""
