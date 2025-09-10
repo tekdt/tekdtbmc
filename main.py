@@ -692,7 +692,7 @@ class USBBootCreator(QMainWindow):
             label.setStyleSheet("font-weight: bold; padding: 10px; color: #BF616A;") # Đỏ
             start_button.setEnabled(False)
         else:
-            message = (f"Đủ dung lượng<br>"
+            message = (f"Dung lượng hợp lệ<br>"
                        f"Yêu cầu: <b>{required_gb:.2f} GB</b> / Sẵn có: <b>{usb_gb:.2f} GB</b>")
             label.setText(message)
             label.setStyleSheet("font-weight: bold; padding: 10px; color: #A3BE8C;") # Xanh
