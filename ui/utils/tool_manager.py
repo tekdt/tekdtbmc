@@ -11,22 +11,31 @@ def _check_internet_connection():
         return False
 
 def _check_self_update(main_window):
-    """Kiểm tra phiên bản của chính chương trình trên GitHub."""
-    API_URL = "https://api.github.com/repos/tekdt/tekdtbmc/releases/latest"
+    """Kiểm tra phiên bản của chính chương trình trên GitHub và lấy đúng link tải file ZIP."""
+    API_URL = config.SELF_UPDATE_API_URL 
     try:
         response = requests.get(API_URL, timeout=5)
         response.raise_for_status()
         latest_release = response.json()
         
-        remote_version_tag = latest_release.get("tag_name", "").lstrip('v') # Lấy tag và xóa chữ 'v' ở đầu
+        remote_version_tag = latest_release.get("tag_name", "").lstrip('v')
         local_version = config.APP_VERSION
 
-        # So sánh phiên bản (cách này hoạt động tốt với chuỗi dạng X.Y.Z)
         if remote_version_tag > local_version:
-            download_url = latest_release.get("html_url")
+            # SỬA: Tìm đúng URL tải về trong 'assets'
+            download_url = None
+            for asset in latest_release.get("assets", []):
+                # Giả định file phát hành là file .zip
+                if asset.get("name", "").endswith(".zip"):
+                    download_url = asset.get("browser_download_url")
+                    break
+            
             if download_url:
-                # Gửi tín hiệu về luồng chính để hiển thị thông báo
+                # Gửi tín hiệu về luồng chính với URL tải về chính xác
                 main_window.new_version_found.emit(remote_version_tag, download_url)
+            else:
+                print("Cảnh báo: Tìm thấy phiên bản mới nhưng không tìm thấy file .zip trong assets.")
+
     except requests.exceptions.RequestException as e:
         print(f"Không thể kiểm tra phiên bản mới: {e}")
     except Exception as e:

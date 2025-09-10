@@ -1,4 +1,4 @@
-import config, os, sys, subprocess, json, psutil, webbrowser, zipfile
+import config, os, sys, subprocess, json, psutil, webbrowser, zipfile, requests
 from pathlib import Path
 from workers import Worker
 from ui.page_device import PageDeviceSelect

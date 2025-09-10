@@ -1,0 +1,16 @@
+tekdt_bmc/
+├── main.py              # File chạy chính, chứa lớp USBBootCreator
+├── config.py            # Chứa các hằng số, đường dẫn, URL
+├── workers.py           # Lớp Worker QThread
+|
+├── ui/
+│   ├── __init__.py      # File trống để Python nhận diện đây là một package
+│   ├── page_device.py   # Lớp PageDeviceSelect
+│   ├── page_iso.py      # Lớp PageISOSelect
+│   └── page_finalize.py # Lớp PageFinalize
+|
+└── utils/
+    ├── __init__.py      # File trống
+    ├── windows_api.py   # Các hàm liên quan đến ctypes, quyền admin, nhúng cửa sổ
+    ├── tool_manager.py  # Các hàm tải và cập nhật công cụ (Ventoy, Fido,...)
+    └── helpers.py       # Các hàm tiện ích chung khác (tạo USB, xử lý ISO,...)
