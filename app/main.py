@@ -585,9 +585,119 @@ class USBBootCreator(QMainWindow):
         if index == 2:
             windows_api.embed_ais_window(self)
             self.ais_monitor_timer.start(5000)
+            self._update_capacity_check() # << GỌI HÀM KIỂM TRA DUNG LƯỢNG
         elif self.ais_hwnd:
             self.hide_ais_window()
-    
+
+    def _get_dir_size(self, start_path, ignore_func=None):
+        """Tính tổng dung lượng của một thư mục, có hỗ trợ hàm ignore."""
+        total_size = 0
+        for dirpath, dirnames, filenames in os.walk(start_path):
+            if ignore_func:
+                # Lọc danh sách thư mục con để không duyệt vào
+                ignored_dirs = ignore_func(dirpath, dirnames)
+                dirnames[:] = [d for d in dirnames if d not in ignored_dirs]
+                
+                # Lọc danh sách file
+                ignored_files = ignore_func(dirpath, filenames)
+                filenames[:] = [f for f in filenames if f not in ignored_files]
+
+            for f in filenames:
+                fp = os.path.join(dirpath, f)
+                if not os.path.islink(fp):
+                    total_size += os.path.getsize(fp)
+        return total_size
+
+    def _update_capacity_check(self):
+        """Tính toán tổng dung lượng cần thiết và cập nhật UI."""
+        label = self.page3.capacity_status_label
+        start_button = self.page3.start_button
+        
+        label.setText("Đang tính toán dung lượng yêu cầu...")
+        label.setStyleSheet("font-weight: bold; padding: 10px; color: #D8DEE9;")
+        label.setVisible(True)
+        QApplication.processEvents() # Force update UI
+
+        # --- Bắt đầu tính toán ---
+        total_required_size = 0
+
+        # 1. Dung lượng ISOs
+        for iso in self.config.get('iso_list', []):
+            try:
+                total_required_size += os.path.getsize(iso['path'])
+            except FileNotFoundError:
+                self.show_error(f"Không tìm thấy file ISO: {iso['path']}. Vui lòng xóa khỏi danh sách.")
+                return
+
+        # 2. Dung lượng Drivers
+        drivers_part1 = config.DRIVERS_DIR / "Drivers.7z.001"
+        drivers_part2 = config.DRIVERS_DIR / "Drivers.7z.002"
+        if drivers_part1.exists() and drivers_part2.exists():
+            total_required_size += os.path.getsize(drivers_part1)
+            total_required_size += os.path.getsize(drivers_part2)
+
+        # 3. Dung lượng Theme
+        if self.config.get('theme'):
+            theme_path = config.THEMES_DIR / self.config['theme']
+            if theme_path.exists():
+                total_required_size += os.path.getsize(theme_path)
+
+        # 4. Dung lượng TekDT AIS (phức tạp hơn)
+        if config.TEKDTAIS_DIR.exists():
+            if not self.config.get("copy_ais_selection_only", True):
+                # Sao chép toàn bộ
+                total_required_size += self._get_dir_size(config.TEKDTAIS_DIR)
+            else:
+                # Sao chép chọn lọc
+                config_path = config.TEKDTAIS_DIR / "app_config.json"
+                source_apps_dir = config.TEKDTAIS_DIR / "Apps"
+                apps_to_copy = []
+                if config_path.exists():
+                    try:
+                        with open(config_path, 'r', encoding='utf-8') as f:
+                            app_config = json.load(f)
+                        apps_to_copy = [name for name, settings in app_config.items() if settings.get("auto_install")]
+                    except Exception as e:
+                        print(f"Lỗi đọc app_config.json, sẽ tính toàn bộ size: {e}")
+                        total_required_size += self._get_dir_size(config.TEKDTAIS_DIR)
+                
+                def ignore_apps(directory, contents):
+                    if config.Path(directory).resolve() == source_apps_dir.resolve():
+                        return [item for item in contents if item not in apps_to_copy]
+                    return []
+                total_required_size += self._get_dir_size(config.TEKDTAIS_DIR, ignore_func=ignore_apps)
+
+        # 5. Dung lượng dự phòng (Ventoy, file config, metadata...) - ~500MB
+        overhead = 500 * 1024 * 1024
+        total_required_size += overhead
+
+        # --- So sánh và cập nhật UI ---
+        device_details = self.config.get('device_details')
+        if not device_details:
+            label.setText("Vui lòng chọn một USB ở Bước 1.")
+            label.setStyleSheet("font-weight: bold; padding: 10px; color: #EBCB8B;") # Vàng
+            start_button.setEnabled(False)
+            return
+
+        usb_size = device_details.get('Size', 0)
+        
+        # Chuyển đổi sang GB để hiển thị
+        required_gb = total_required_size / (1024**3)
+        usb_gb = usb_size / (1024**3)
+
+        if total_required_size > usb_size:
+            message = (f"DUNG LƯỢNG KHÔNG ĐỦ!<br>"
+                       f"Yêu cầu: <b>{required_gb:.2f} GB</b> / Sẵn có: <b>{usb_gb:.2f} GB</b>")
+            label.setText(message)
+            label.setStyleSheet("font-weight: bold; padding: 10px; color: #BF616A;") # Đỏ
+            start_button.setEnabled(False)
+        else:
+            message = (f"Dung lượng hợp lệ<br>"
+                       f"Yêu cầu: <b>{required_gb:.2f} GB</b> / Sẵn có: <b>{usb_gb:.2f} GB</b>")
+            label.setText(message)
+            label.setStyleSheet("font-weight: bold; padding: 10px; color: #A3BE8C;") # Xanh
+            start_button.setEnabled(True)
+
     def lock_ui_for_updates(self):
         """Vô hiệu hóa các thành phần UI chính trong khi kiểm tra cập nhật."""
         self.stacked_widget.setEnabled(False)
@@ -749,21 +859,25 @@ class USBBootCreator(QMainWindow):
         self.config["partition_scheme"] = scheme
         print(f"Đã chọn cấu trúc: {scheme}")
         self.save_config()
+        self._update_capacity_check()
 
     def set_filesystem(self, fs):
         self.config["filesystem"] = fs
         print(f"Đã chọn định dạng: {fs}")
         self.save_config()
+        self._update_capacity_check()
 
     def set_theme(self, theme_file):
         self.config["theme"] = theme_file
         print(f"Đã chọn theme: {theme_file}")
         self.save_config()
+        self._update_capacity_check()
 
     def set_fill_space(self, fill):
         self.config["fill_space"] = fill
         print(f"Đã chọn Lấp đầy dung lượng: {'Có' if fill else 'Không'}")
         self.save_config()
+        self._update_capacity_check()
 
     def check_for_updates(self):
         self.update_worker = self._create_and_start_worker(
@@ -838,7 +952,12 @@ class USBBootCreator(QMainWindow):
         # Cập nhật trạng thái các nút bấm
         self.page1.next_button.setEnabled(is_present)
         self.page2.next_button.setEnabled(is_present and len(self.config["iso_list"]) > 0)
-        self.page3.start_button.setEnabled(is_present)
+
+        # Cập nhật lại trạng thái nút Start ở trang 3
+        if self.stacked_widget.currentWidget() == self.page3:
+            self._update_capacity_check()
+        else:
+            self.page3.start_button.setEnabled(is_present)
 
         if not is_present:
             self.usb_monitor_timer.stop() # Dừng kiểm tra
@@ -883,10 +1002,11 @@ class USBBootCreator(QMainWindow):
             self.page3.show_progress_ui(True)
             self.creation_worker = self._create_and_start_worker(
                 name="USBCreator",
-                target=self.create_usb_task,
+                target=helpers.create_usb_task,
                 on_status=self.page3.update_status,
                 on_progress=self.page3.update_progress,
-                on_finished=self.on_creation_finished
+                on_finished=self.on_creation_finished,
+                args=[self]
             )
 
     def set_copy_ais_selection(self, copy_only_selected):
@@ -900,6 +1020,7 @@ class USBBootCreator(QMainWindow):
         self.config["copy_ais_selection_only"] = copy_only_selected
         print(f"Đã chọn Chỉ tạo cùng phần mềm được thêm: {'Yes' if copy_only_selected else 'No'}")
         self.save_config()
+        self._update_capacity_check()
 
     def ask_for_product_key(self, edition_name=None):
         # Đọc danh sách key
@@ -941,7 +1062,8 @@ class USBBootCreator(QMainWindow):
             self.show_themed_message("Thành Công", "Tạo USB Boot thành công!", icon=QMessageBox.Icon.Information)
         else:
             self.show_themed_message("Lỗi", f"Đã xảy ra lỗi:\n{message}", icon=QMessageBox.Icon.Critical)
-        self.page3.start_button.setEnabled(True)
+        # Sau khi hoàn tất, cập nhật lại trạng thái nút bấm
+        self._update_capacity_check()
 
     def show_error(self, message):
         """Hiển thị hộp thoại lỗi."""

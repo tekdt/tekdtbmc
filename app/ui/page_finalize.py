@@ -33,6 +33,13 @@ class PageFinalize(QWidget):
         summary_layout.addWidget(self.embed_container, 1)
         layout.addWidget(self.summary_group, 1)
 
+        # Kiểm tra dung lượng
+        self.capacity_status_label = QLabel("Đang tính toán dung lượng...")
+        self.capacity_status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.capacity_status_label.setStyleSheet("font-weight: bold; padding: 10px;")
+        self.capacity_status_label.setVisible(False) # Ban đầu ẩn đi
+        layout.addWidget(self.capacity_status_label)
+        
         self.progress_bar = QProgressBar()
         self.status_label = QLabel("Sẵn sàng")
         self.status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
