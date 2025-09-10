@@ -1,4 +1,4 @@
-import config, os, sys, subprocess, json, psutil, webbrowser
+import config, os, sys, subprocess, json, psutil, webbrowser, zipfile
 from pathlib import Path
 from workers import Worker
 from ui.page_device import PageDeviceSelect
@@ -290,10 +290,10 @@ class USBBootCreator(QMainWindow):
         """)
 
     def prompt_for_update(self, new_version, download_url):
-        """Hiển thị hộp thoại hỏi người dùng có muốn cập nhật không."""
+        """Hiển thị hộp thoại hỏi người dùng và bắt đầu cập nhật nền nếu đồng ý."""
         message = (f"Đã có phiên bản mới <b>{new_version}</b>!\n"
-                   f"Phiên bản hiện tại của bạn là {APP_VERSION}.\n\n"
-                   "Bạn có muốn truy cập trang tải về không?")
+                   f"Phiên bản hiện tại của bạn là {config.APP_VERSION}.\n\n"
+                   "Bạn có muốn tự động tải về và cài đặt bản cập nhật không?")
         
         reply = self.show_themed_message("Có phiên bản mới!", message,
                                        icon=QMessageBox.Icon.Information,
@@ -301,9 +301,79 @@ class USBBootCreator(QMainWindow):
                                        defaultButton=QMessageBox.StandardButton.Yes)
         
         if reply == QMessageBox.StandardButton.Yes:
-            webbrowser.open(download_url)
+            self.start_background_update(download_url)
 
- 
+    def start_background_update(self, zip_url):
+        """Khởi tạo worker để thực hiện tác vụ cập nhật trong nền."""
+        self.stacked_widget.setEnabled(False)
+        self.menu_button.setEnabled(False)
+        self.show_themed_message("Bắt đầu cập nhật", 
+                                 "Quá trình tải và cài đặt bản cập nhật sẽ bắt đầu.\n"
+                                 "Vui lòng không tắt ứng dụng.",
+                                 icon=QMessageBox.Icon.Information)
+
+        self.update_worker = self._create_and_start_worker(
+            name="BackgroundUpdater",
+            target=self._background_update_task,
+            on_finished=self._on_update_finished,
+            on_status=self.init_status_label.setText, # Tái sử dụng status label
+            args=[zip_url]
+        )
+        self.init_status_label.setVisible(True)
+
+    def _background_update_task(self, zip_url):
+        """
+        Tác vụ chạy trong nền: Tải file, giải nén, dọn dẹp.
+        Trả về (success, message).
+        """
+        try:
+            # --- 1. Tải file ZIP ---
+            self.update_worker.status.emit("Đang tải bản cập nhật...")
+            update_zip_path = os.path.join(config.BASE_DIR, "update.zip")
+            
+            with requests.get(zip_url, stream=True) as r:
+                r.raise_for_status()
+                with open(update_zip_path, 'wb') as f:
+                    for chunk in r.iter_content(chunk_size=8192):
+                        f.write(chunk)
+            
+            # --- 2. Giải nén và ghi đè ---
+            self.update_worker.status.emit("Đang giải nén và cài đặt...")
+            app_dir = config.BASE_DIR # Thư mục chứa file EXE
+            with zipfile.ZipFile(update_zip_path, 'r') as zip_ref:
+                zip_ref.extractall(app_dir)
+                
+            # --- 3. Dọn dẹp file ZIP ---
+            self.update_worker.status.emit("Đang dọn dẹp...")
+            os.remove(update_zip_path)
+            
+            return (True, "Cập nhật thành công!")
+
+        except requests.exceptions.RequestException as e:
+            return (False, f"Lỗi tải về: {e}")
+        except zipfile.BadZipFile:
+            return (False, "Lỗi file cập nhật: File ZIP không hợp lệ.")
+        except Exception as e:
+            return (False, f"Đã xảy ra lỗi không xác định: {e}")
+
+    def _on_update_finished(self, success, message):
+        """Xử lý sau khi tác vụ cập nhật nền hoàn tất."""
+        if success:
+            self.show_themed_message("Hoàn tất", 
+                                     "Cập nhật thành công! Ứng dụng sẽ khởi động lại ngay bây giờ.",
+                                     icon=QMessageBox.Icon.Information)
+            # --- 4. Khởi động lại ứng dụng ---
+            # sys.executable là đường dẫn đến file .exe đang chạy
+            subprocess.Popen([sys.executable])
+            self.close() # Đóng tiến trình hiện tại
+        else:
+            self.show_themed_message("Cập nhật thất bại", 
+                                     f"Không thể hoàn tất cập nhật:\n{message}",
+                                     icon=QMessageBox.Icon.Critical)
+            self.stacked_widget.setEnabled(True)
+            self.menu_button.setEnabled(True)
+            self.init_status_label.setVisible(False)
+    
     def closeEvent(self, event):
         """Sự kiện đóng ứng dụng, hiển thị xác nhận và đảm bảo dừng tất cả các tác vụ nền."""
         

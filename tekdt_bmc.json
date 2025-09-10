@@ -1,21 +1,58 @@
 {
     "device": "\\\\.\\PHYSICALDRIVE1",
-    "device_name": "JetFlash Transcend 8GB (7.35 GB) - USB",
+    "device_name": "USB SanDisk 3.2Gen1 (28.65 GB) - USB",
     "partition_scheme": "GPT",
     "filesystem": "ExFAT",
     "theme": "Purple.zip",
     "fill_space": true,
-    "iso_list": [],
+    "iso_list": [
+        {
+            "path": "D:\\tekdtbmc\\ISOs\\Win11_24H2_English_x64.iso",
+            "filename": "Win11_24H2_English_x64.iso",
+            "edition_index": null,
+            "edition_name": null,
+            "windows_edition_index": "6",
+            "windows_edition_name": "Windows 11 Pro",
+            "alias": "Windows 11 Pro (Win11_24H2_English_x64.iso)",
+            "product_key": "W269N-WFGWX-YVC9B-4J6C9-T83GX",
+            "unattend_file": "unattend_0_Win11_24H2_English_x64.xml"
+        },
+        {
+            "path": "D:\\tekdtbmc\\ISOs\\Win10_22H2_English_x64v1.iso",
+            "filename": "Win10_22H2_English_x64v1.iso",
+            "edition_index": null,
+            "edition_name": null,
+            "architecture": "amd64",
+            "windows_edition_index": "6",
+            "windows_edition_name": "Windows 10 Pro",
+            "alias": "Windows 10 Pro (Win10_22H2_English_x64v1.iso)",
+            "product_key": "VK7JG-NPHTM-C97JM-9MPGT-3V66T",
+            "unattend_file": "unattend_1_Win10_22H2_English_x64v1.xml"
+        },
+        {
+            "path": "D:/tekdtbmc/ISOs/Win10_22H2_English_x32v1.iso",
+            "filename": "Win10_22H2_English_x32v1.iso",
+            "edition_index": null,
+            "edition_name": null,
+            "windows_edition_index": "6",
+            "windows_edition_name": "Windows 10 Pro",
+            "alias": "Windows 10 Pro (Win10_22H2_English_x32v1.iso)",
+            "product_key": "VK7JG-NPHTM-C97JM-9MPGT-3V66T",
+            "unattend_file": "unattend_2_Win10_22H2_English_x32v1.xml"
+        }
+    ],
     "windows_edition": null,
     "windows_edition_index": null,
+    "copy_ais_selection_only": true,
     "device_details": {
         "BusType": "USB",
         "DeviceID": "1",
-        "FriendlyName": "JetFlash Transcend 8GB",
+        "FriendlyName": "USB SanDisk 3.2Gen1",
         "MediaType": "Unspecified",
         "ProductID": null,
-        "SerialNumber": "AA00000000000489",
-        "Size": 7893680128,
+        "SerialNumber": "09019c108982a3949137",
+        "Size": 30765219840,
         "VendorID": null
-    }
+    },
+    "iso_path": "D:\\tekdtbmc\\ISOs\\Win10_22H2_English_x64v1.iso"
 }
