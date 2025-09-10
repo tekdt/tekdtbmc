@@ -1,16 +1,7 @@
-import json
-import os
-import shutil
-import time
-import subprocess
-import ctypes
-import zipfile
+import json, os, shutil, time, subprocess, ctypes, zipfile, config
 from ctypes import wintypes
 from pathlib import Path
 
-import config
-
-# --- HÀM TIỆN ÍCH MỚI ĐỂ SAO CHÉP VÀ BÁO CÁO TIẾN TRÌNH ---
 def _copy_with_progress(worker, src, dst, total_copy_size, copied_so_far, base_progress, progress_range):
     """
     Sao chép một file và cập nhật tiến trình dựa trên tổng dung lượng cần sao chép.

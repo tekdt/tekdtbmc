@@ -1,11 +1,5 @@
-import requests
-import os
-import re
-import time
-import shutil
-import zipfile
-import subprocess
-import config
+import requests, os, re, time, shutil, zipfile, subprocess, config
+from pathlib import Path
 
 def _check_internet_connection():
     """Kiểm tra kết nối Internet một cách nhanh chóng."""

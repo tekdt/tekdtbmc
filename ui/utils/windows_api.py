@@ -1,6 +1,7 @@
 import ctypes, os, sys, subprocess, config, psutil
 from ctypes import wintypes
 from PySide6.QtCore import QTimer
+from pathlib import Path
 
 def is_admin():
     """Kiểm tra xem ứng dụng có đang chạy với quyền admin không."""

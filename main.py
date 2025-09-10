@@ -1,10 +1,5 @@
-import config
-import os
-import sys
-import subprocess
-import json
-import psutil
-import webbrowser
+import config, os, sys, subprocess, json, psutil, webbrowser,
+from pathlib import Path
 from workers import Worker
 from ui.page_device import PageDeviceSelect
 from ui.page_iso import PageISOSelect

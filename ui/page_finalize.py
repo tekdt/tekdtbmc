@@ -1,3 +1,4 @@
+import ctypes
 import ui.utils.windows_api as windows_api
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QLabel, QPushButton, QGroupBox, 
                              QHBoxLayout, QProgressBar, QFrame, QSizePolicy)
