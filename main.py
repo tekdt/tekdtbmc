@@ -581,6 +581,11 @@ class USBBootCreator(QMainWindow):
     
     def on_page_changed(self, index):
         # Quản lý việc theo dõi file config của AIS
+        if not hasattr(self, '_update_capacity_timer'):
+            self._update_capacity_timer = QTimer(self)
+            self._update_capacity_timer.setSingleShot(True)
+            self._update_capacity_timer.timeout.connect(self._update_capacity_check)
+        
         # Dừng theo dõi khi rời khỏi trang 3
         if self.file_watcher.files():
             self.file_watcher.removePaths(self.file_watcher.files())
@@ -599,11 +604,21 @@ class USBBootCreator(QMainWindow):
     
     # Hàm xử lý khi file app_config.json thay đổi
     def _on_ais_config_changed(self, path):
-        print(f"Phát hiện thay đổi trong '{path}'. Đang tính toán lại dung lượng...")
-        # Một số trình soạn thảo xóa và tạo lại file, vì vậy chúng ta cần thêm lại đường dẫn
-        # để đảm bảo tiếp tục theo dõi.
-        QTimer.singleShot(100, lambda: self.file_watcher.addPath(path))
-        self._update_capacity_check()
+        """
+        Xử lý khi file app_config.json thay đổi với cơ chế debounce (trì hoãn)
+        để tránh race condition.
+        """
+        print(f"Phát hiện thay đổi trong '{path}'. Lên lịch tính toán lại dung lượng...")
+        
+        # Hủy timer cũ nếu nó đang chạy để tránh tính toán nhiều lần liên tiếp.
+        if self._update_capacity_timer.isActive():
+            self._update_capacity_timer.stop()
+        
+        # Bắt đầu một timer mới, sẽ gọi _update_capacity_check sau 300ms.
+        self._update_capacity_timer.start(300)
+        
+        # Vẫn giữ logic thêm lại đường dẫn vào watcher vì một số editor xóa và tạo lại file
+        QTimer.singleShot(100, lambda: self.file_watcher.addPath(path) if not self.file_watcher.files() else None)
 
     def _get_dir_size(self, start_path, ignore_func=None):
         """Tính tổng dung lượng của một thư mục, có hỗ trợ hàm ignore."""
