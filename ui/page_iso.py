@@ -2,8 +2,9 @@ from PySide6.QtWidgets import (QWidget, QVBoxLayout, QLabel, QComboBox, QFileDia
                              QCheckBox, QPushButton, QListWidget, QGroupBox, QListWidgetItem,
                              QHBoxLayout, QDialogButtonBox, QRadioButton, QButtonGroup, QGridLayout)
 from PySide6.QtCore import Qt, QTimer
-import config, os, shutil, psutil, subprocess, string, json
+import config, os, shutil, psutil, subprocess, string, json, requests
 from ui.utils import helpers
+from urllib.parse import urlparse
 
 class PageISOSelect(QWidget):
     def __init__(self, parent=None):
