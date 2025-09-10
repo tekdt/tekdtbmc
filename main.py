@@ -687,7 +687,7 @@ class USBBootCreator(QMainWindow):
                     try:
                         with open(config_path, 'r', encoding='utf-8') as f:
                             app_config = json.load(f)
-                        apps_to_copy = [name for name, settings in app_config.items() if settings.get("auto_install")]
+                        apps_to_copy = [name for name, settings in app_config.get("app_items", {}).items() if settings.get("auto_install")]
                     except Exception as e:
                         print(f"Lỗi đọc app_config.json, sẽ tính toàn bộ size: {e}")
                         total_required_size += self._get_dir_size(config.TEKDTAIS_DIR)
