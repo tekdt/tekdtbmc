@@ -10,3 +10,4 @@ build.bat
 tekdt_bmc.exe
 TekDT.BMC_v1.0.3.zip
 Cert
+__pycache__
