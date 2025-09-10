@@ -1,7 +1,7 @@
 import ui.utils.windows_api as windows_api
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QLabel, QPushButton, QGroupBox, 
                              QHBoxLayout, QProgressBar, QFrame, QSizePolicy)
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import Qt
 
 class PageFinalize(QWidget):
     def __init__(self, parent=None):
