@@ -364,16 +364,25 @@ def create_usb_task(main_app):
         worker.progress.emit(0)
         
         # --- GIAI ĐOẠN 1: ĐỊNH DẠNG USB VỚI VENTOY (0% -> 15%) ---
-        worker.status.emit(f"Đang định dạng USB {main_app.config['device']} với Ventoy...")
+        install_mode = main_app.config.get("install_mode", "DESTRUCTIVE")
+        worker.status.emit(f"Đang cài đặt Ventoy lên {main_app.config['device']}...")
         ventoy_exe = config.VENTOY_DIR / "Ventoy2Disk.exe"
         if not ventoy_exe.exists():
             raise FileNotFoundError("Không tìm thấy Ventoy2Disk.exe.")
 
         phy_drive_num = main_app.config["device"].replace("\\\\.\\PHYSICALDRIVE", "")
-        cmd = [str(ventoy_exe), "VTOYCLI", "/I", f"/PhyDrive:{phy_drive_num}"]
-        if main_app.config["partition_scheme"] == "GPT": cmd.append("/GPT")
-        cmd.append(f"/FS:{main_app.config['filesystem'].upper()}")
+        if install_mode == "NON_DESTRUCTIVE":
+            worker.status.emit("Chế độ không phá hủy: Cài đặt vào vùng dung lượng trống...")
+            # Command for non-destructive install. It creates an exFAT partition by default.
+            cmd = [str(ventoy_exe), "VTOYCLI", "/n", "/I", f"/PhyDrive:{phy_drive_num}"]
+        else: # DESTRUCTIVE (Default)
+            worker.status.emit("Chế độ phá hủy: Định dạng lại toàn bộ ổ đĩa...")
+            # Original command for destructive install
+            cmd = [str(ventoy_exe), "VTOYCLI", "/I", f"/PhyDrive:{phy_drive_num}"]
+            if main_app.config["partition_scheme"] == "GPT": cmd.append("/GPT")
+            cmd.append(f"/FS:{main_app.config['filesystem'].upper()}")
 
+        print(f"Executing Ventoy command: {' '.join(cmd)}")
         process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, creationflags=subprocess.CREATE_NO_WINDOW)
         for line in iter(process.stdout.readline, ''): print(line.strip())
         process.wait()
@@ -382,7 +391,7 @@ def create_usb_task(main_app):
             raise Exception(f"Ventoy2Disk.exe thất bại với mã lỗi {process.returncode}")
 
         worker.progress.emit(15)
-        worker.status.emit("Định dạng USB thành công. Bắt đầu sao chép file...")
+        worker.status.emit("Cài đặt Ventoy thành công. Bắt đầu sao chép file...")
         
         # --- GIAI ĐOẠN 2: SAO CHÉP TẤT CẢ CÁC FILE (15% -> 80%) ---
         time.sleep(5)

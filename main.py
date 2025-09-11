@@ -150,7 +150,8 @@ class USBBootCreator(QMainWindow):
         self.init_status_label.setStyleSheet("font-size: 11pt; color: #ECEFF4;")
         main_layout.addWidget(self.init_status_label)
         
-        self.page1.next_button.clicked.connect(lambda: self.go_to_page(1))
+        # self.page1.next_button.clicked.connect(lambda: self.go_to_page(1))
+        self.page1.next_button.clicked.connect(self.confirm_and_proceed_to_page2)
         self.page2.next_button.clicked.connect(lambda: self.go_to_page(2))
         self.page2.back_button.clicked.connect(lambda: self.go_to_page(0))
         self.page3.back_button.clicked.connect(lambda: self.go_to_page(1))
@@ -1170,6 +1171,36 @@ class USBBootCreator(QMainWindow):
     def show_error(self, message):
         """Hiển thị hộp thoại lỗi."""
         self.show_themed_message("Lỗi", message, icon=QMessageBox.Icon.Critical)
+
+    def confirm_and_proceed_to_page2(self):
+        """
+        Hiển thị hộp thoại cảnh báo trước khi chuyển sang trang chọn ISO.
+        """
+        device_name = self.config.get("device_name", "thiết bị đã chọn")
+        install_mode = self.config.get("install_mode", "DESTRUCTIVE")
+
+        if install_mode == "DESTRUCTIVE":
+            warning_text = (f"<b>CẢNH BÁO QUAN TRỌNG!</b><br><br>"
+                            f"Toàn bộ dữ liệu trên thiết bị <b>{device_name}</b> sẽ bị <b>XÓA SẠCH</b> "
+                            f"để tạo ổ đĩa boot mới.<br><br>"
+                            "Bạn nên sao lưu tất cả dữ liệu quan trọng trước khi tiếp tục.<br>"
+                            "Bạn có chắc chắn muốn tiếp tục không?")
+            title = "XÁC NHẬN XÓA DỮ LIỆU"
+        else: # NON_DESTRUCTIVE
+            warning_text = (f"<b>THÔNG BÁO!</b><br><br>"
+                            f"Chương trình sẽ tiến hành cài đặt Ventoy vào vùng dung lượng trống trên ổ đĩa "
+                            f"<b>{device_name}</b> mà không xóa các phân vùng hiện có.<br><br>"
+                            "Tuy nhiên, để đảm bảo an toàn, bạn vẫn nên sao lưu các dữ liệu quan trọng.<br>"
+                            "Bạn có muốn tiếp tục không?")
+            title = "XÁC NHẬN CÀI ĐẶT"
+
+        reply = self.show_themed_message(title, warning_text,
+                                       icon=QMessageBox.Icon.Warning,
+                                       buttons=QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                                       defaultButton=QMessageBox.StandardButton.No)
+
+        if reply == QMessageBox.StandardButton.Yes:
+            self.go_to_page(1)
 
 def main():
     # Cài đặt bộ lọc thông điệp để ẩn các cảnh báo QPainter không cần thiết

@@ -711,6 +711,10 @@ class PageISOSelect(QWidget):
                 else:
                     item.setText(f"{iso_info_dict['filename']} (Cài đặt thủ công)")
                 break
+        
+        # Luôn lưu lại cấu hình sau khi dialog đóng để đảm bảo các thay đổi được ghi vào file.
+        self.main_app.save_config()
+        print("Đã lưu cấu hình sau khi chọn phiên bản.")
 
     def toggle_arch_options(self, checked, win_version):
         options_data = self.win_options[win_version]

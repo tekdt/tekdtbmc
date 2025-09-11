@@ -3,12 +3,15 @@ import json
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QLabel, QComboBox, QCheckBox, QPushButton)
 from PySide6.QtCore import Qt, QTimer
 
+MIN_UNALLOCATED_SPACE_BYTES = 1 * 1024 * 1024 * 1024 
+
 class PageDeviceSelect(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.main_app = parent
         self.drive_worker = None
         self.is_fetching = False
+        self.eligibility_worker = None
         self.init_ui()
         self.start_drive_monitor()
 
@@ -17,15 +20,20 @@ class PageDeviceSelect(QWidget):
         layout.setContentsMargins(50, 20, 50, 50)
         layout.setAlignment(Qt.AlignmentFlag.AlignTop)
 
-        title = QLabel("Bước 1: Chọn thiết bị USB")
+        title = QLabel("Bước 1: Chọn thiết bị")
         title.setObjectName("TitleLabel")
         layout.addWidget(title)
 
-        layout.addWidget(QLabel("Chọn ổ đĩa USB bạn muốn sử dụng:"))
+        layout.addWidget(QLabel("Chọn ổ đĩa bạn muốn sử dụng:"))
 
         self.drive_combo = QComboBox()
         self.drive_combo.currentIndexChanged.connect(self.on_drive_selected)
         layout.addWidget(self.drive_combo)
+        
+        self.eligibility_status_label = QLabel("")
+        self.eligibility_status_label.setStyleSheet("font-style: italic; color: #EBCB8B;")
+        self.eligibility_status_label.setWordWrap(True)
+        layout.addWidget(self.eligibility_status_label)
 
         self.show_hdd_check = QCheckBox("Hiển thị tất cả các ổ đĩa (Bao gồm ổ cứng)")
         self.show_hdd_check.stateChanged.connect(self.refresh_drives)
@@ -132,6 +140,13 @@ class PageDeviceSelect(QWidget):
         if not found_drives:
             self.drive_combo.addItem("Không tìm thấy USB nào" if not show_all else "Không tìm thấy ổ đĩa nào", None)
 
+        if current_selection:
+            for i in range(self.drive_combo.count()):
+                item_data = self.drive_combo.itemData(i)
+                if item_data and item_data.get('DeviceID') == current_selection.get('DeviceID'):
+                    self.drive_combo.setCurrentIndex(i)
+                    return
+        
         index = self.drive_combo.findData(current_selection)
         if index != -1:
             self.drive_combo.setCurrentIndex(index)
@@ -139,10 +154,12 @@ class PageDeviceSelect(QWidget):
             self.on_drive_selected(self.drive_combo.currentIndex())
 
     def on_drive_selected(self, index):
+        self.eligibility_status_label.setText("") # Clear previous status
         if index == -1 or self.drive_combo.itemData(index) is None:
             self.main_app.config["device"] = None
             self.main_app.config["device_name"] = None
             self.main_app.config["device_details"] = None
+            self.main_app.config["install_mode"] = "DESTRUCTIVE"
             self.next_button.setEnabled(False)
             self.main_app.usb_monitor_timer.stop()
             return
@@ -154,6 +171,70 @@ class PageDeviceSelect(QWidget):
         self.main_app.config["device"] = device_path
         self.main_app.config["device_name"] = device_name
         self.main_app.config["device_details"] = disk_details
-        self.next_button.setEnabled(True)
+        
+        bus_type = disk_details.get('BusType', 'Unknown')
+        media_type = disk_details.get('MediaType', 'Unspecified')
+        is_usb = (bus_type == 'USB' or media_type == 'Removable')
 
-        self.main_app.usb_monitor_timer.start(2000)
+        # If it's a USB or removable drive, proceed as normal (destructive mode)
+        if is_usb:
+            self.main_app.config["install_mode"] = "DESTRUCTIVE"
+            self.eligibility_status_label.setText("Chế độ: Xóa toàn bộ dữ liệu trên USB và cài mới.")
+            self.eligibility_status_label.setStyleSheet("font-style: italic; color: #D8DEE9;")
+            self.next_button.setEnabled(True)
+            self.main_app.usb_monitor_timer.start(2000)
+        else:
+            # If it's a regular HDD/SSD, check for non-destructive eligibility
+            self.main_app.usb_monitor_timer.stop() # Stop USB check for HDD
+            self.next_button.setEnabled(False) # Disable until check is complete
+            self.eligibility_status_label.setText("Đang kiểm tra ổ cứng để cài đặt không phá hủy...")
+            self.eligibility_status_label.setStyleSheet("font-style: italic; color: #EBCB8B;")
+            
+            self.eligibility_worker = self.main_app._create_and_start_worker(
+                name="HddEligibilityCheck",
+                target=self._check_hdd_eligibility_task,
+                on_result=self._handle_hdd_eligibility_result,
+                args=[disk_details['DeviceID']]
+            )
+
+    def _check_hdd_eligibility_task(self, disk_id):
+        """
+        Checks a disk for sufficient unallocated space for non-destructive install.
+        Returns a tuple: (is_eligible, message)
+        """
+        try:
+            # 1. Get total disk size
+            cmd_disk_size = f"(Get-Disk -Number {disk_id}).Size"
+            proc_disk_size = subprocess.run(['powershell', '-Command', cmd_disk_size], capture_output=True, text=True, check=True, creationflags=subprocess.CREATE_NO_WINDOW)
+            total_size = int(proc_disk_size.stdout.strip())
+
+            # 2. Get sum of all partitions' sizes
+            cmd_partitions_size = f"Get-Partition -DiskNumber {disk_id} | Measure-Object -Property Size -Sum | Select-Object -ExpandProperty Sum"
+            proc_partitions_size = subprocess.run(['powershell', '-Command', cmd_partitions_size], capture_output=True, text=True, check=True, creationflags=subprocess.CREATE_NO_WINDOW)
+            partitions_total_size = int(proc_partitions_size.stdout.strip())
+            
+            unallocated_space = total_size - partitions_total_size
+            
+            if unallocated_space >= MIN_UNALLOCATED_SPACE_BYTES:
+                gb_space = unallocated_space / (1024**3)
+                return (True, f"Phát hiện {gb_space:.2f} GB dung lượng trống. Sẵn sàng cho cài đặt không phá hủy.")
+            else:
+                gb_required = MIN_UNALLOCATED_SPACE_BYTES / (1024**3)
+                return (False, f"Không đủ dung lượng chưa phân bổ ở cuối ổ đĩa. Yêu cầu ít nhất {gb_required:.2f} GB.")
+
+        except Exception as e:
+            print(f"Error checking HDD eligibility: {e}")
+            return (False, "Lỗi khi kiểm tra ổ đĩa. Không thể tiếp tục.")
+
+    def _handle_hdd_eligibility_result(self, result):
+        is_eligible, message = result
+        if is_eligible:
+            self.main_app.config["install_mode"] = "NON_DESTRUCTIVE"
+            self.eligibility_status_label.setText(f"✅ {message}")
+            self.eligibility_status_label.setStyleSheet("font-style: italic; color: #A3BE8C;") # Green
+            self.next_button.setEnabled(True)
+        else:
+            self.main_app.config["install_mode"] = "DESTRUCTIVE" # Fallback
+            self.eligibility_status_label.setText(f"❌ {message}")
+            self.eligibility_status_label.setStyleSheet("font-style: italic; color: #BF616A;") # Red
+            self.next_button.setEnabled(False)
