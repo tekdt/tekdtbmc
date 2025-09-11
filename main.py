@@ -491,12 +491,21 @@ class USBBootCreator(QMainWindow):
             self.find_ais_window_timer.timeout.connect(
                 lambda: windows_api._find_ais_window_task(self)
             )
-            self.find_ais_window_timer.start(250)
+            self.find_ais_window_timer.start(500)
             self.ais_monitor_timer.start(5000)
 
         except Exception as e:
             self.show_themed_message("Lỗi", f"Không thể khởi chạy TekDT_AIS.exe:\n{e}", icon=QMessageBox.Icon.Warning)
 
+    def _find_ais_window_with_limit(self):
+        """Hàm phụ trợ: Tìm window AIS với giới hạn attempts để tránh loop."""
+        if self.find_ais_window_timer.attempts >= 20:
+            self.find_ais_window_timer.stop()
+            print("Đã đạt giới hạn attempts tìm window AIS, dừng timer.")
+            return
+        self.find_ais_window_timer.attempts += 1
+        windows_api._find_ais_window_task(self)
+    
     def save_config(self):
         """Lưu cấu hình hiện tại vào file JSON."""
         try:
@@ -782,13 +791,23 @@ class USBBootCreator(QMainWindow):
             start_button.setEnabled(False)
             return
 
-        usb_size = device_details.get('Size', 0)
+        install_mode = self.config.get("install_mode", "DESTRUCTIVE")
+        disk_number = device_details.get('DeviceID')  # Giả sử DeviceID là số Disk Number từ Get-PhysicalDisk
+
+        if install_mode == "DESTRUCTIVE":
+            # Chế độ phá hủy: Sử dụng toàn bộ dung lượng thiết bị (thường là USB)
+            available_size = device_details.get('Size', 0)
+            available_label = "Tổng dung lượng thiết bị"
+        else:
+            # Chế độ không phá hủy: Tính dung lượng trống ở cuối đĩa (tổng size đĩa - tổng size phân vùng hiện có)
+            available_size = self._get_free_space_at_end(disk_number)
+            available_label = "Dung lượng trống cuối đĩa"
         
         # Chuyển đổi sang GB để hiển thị
         required_gb = total_required_size / (1024**3)
-        usb_gb = usb_size / (1024**3)
+        available_gb = available_size / (1024**3)
 
-        if total_required_size > usb_size:
+        if total_required_size > available_size:
             message = (f"DUNG LƯỢNG KHÔNG ĐỦ!<br>"
                        f"Yêu cầu: <b>{required_gb:.2f} GB</b> / Sẵn có: <b>{usb_gb:.2f} GB</b>")
             label.setText(message)
@@ -801,6 +820,43 @@ class USBBootCreator(QMainWindow):
             label.setStyleSheet("font-weight: bold; padding: 10px; color: #A3BE8C;") # Xanh
             start_button.setEnabled(True)
 
+    def _get_free_space_at_end(self, disk_number):
+        """
+        Tính dung lượng trống ở cuối đĩa bằng cách lấy tổng size đĩa trừ tổng size các phân vùng hiện có.
+        Chỉ dùng cho chế độ NON_DESTRUCTIVE.
+        """
+        try:
+            # Lấy tổng size đĩa
+            cmd_total = f'Get-Disk -Number {disk_number} | Select-Object -ExpandProperty Size'
+            total_size_str = subprocess.check_output(
+                ['powershell', '-NoProfile', '-Command', cmd_total],
+                capture_output=True, text=True, check=True,
+                creationflags=subprocess.CREATE_NO_WINDOW
+            ).strip()
+            total_size = int(total_size_str)
+
+            # Lấy tổng size các phân vùng
+            cmd_used = f'(Get-Partition -DiskNumber {disk_number} | Measure-Object -Property Size -Sum).Sum'
+            used_size_str = subprocess.check_output(
+                ['powershell', '-NoProfile', '-Command', cmd_used],
+                capture_output=True, text=True, check=True,
+                creationflags=subprocess.CREATE_NO_WINDOW
+            ).strip()
+            used_size = int(used_size_str) if used_size_str and used_size_str != '0' else 0
+
+            free_space = total_size - used_size
+            print(f"Tính dung lượng trống cuối đĩa {disk_number}: {free_space} bytes ({free_space / (1024**3):.2f} GB)")
+            return free_space
+        except subprocess.CalledProcessError as e:
+            print(f"Lỗi PowerShell khi tính dung lượng đĩa {disk_number}: {e}")
+            return 0
+        except ValueError as e:
+            print(f"Lỗi parse size cho đĩa {disk_number}: {e}")
+            return 0
+        except Exception as e:
+            print(f"Lỗi không xác định khi tính dung lượng trống cuối đĩa {disk_number}: {e}")
+            return 0
+    
     def lock_ui_for_updates(self):
         """Vô hiệu hóa các thành phần UI chính trong khi kiểm tra cập nhật."""
         self.stacked_widget.setEnabled(False)
@@ -997,7 +1053,7 @@ class USBBootCreator(QMainWindow):
             QTimer.singleShot(1500, lambda: self.init_status_label.setVisible(False))
             self.stacked_widget.setEnabled(True)
             self.menu_button.setEnabled(True)
-            self.start_tekdtais()
+            QTimer.singleShot(2000, self.start_tekdtais)
         else:
             self.init_status_label.setText("Lỗi khởi tạo nghiêm trọng!")
             self.show_themed_message("Lỗi nghiêm trọng",

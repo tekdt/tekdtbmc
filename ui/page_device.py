@@ -12,6 +12,7 @@ class PageDeviceSelect(QWidget):
         self.drive_worker = None
         self.is_fetching = False
         self.eligibility_worker = None
+        self.is_checking_eligibility = False
         self.init_ui()
         self.start_drive_monitor()
 
@@ -50,7 +51,7 @@ class PageDeviceSelect(QWidget):
         self.refresh_drives()
         self.drive_timer = QTimer(self)
         self.drive_timer.timeout.connect(self.refresh_drives)
-        self.drive_timer.start(3000)
+        self.drive_timer.start(5000)
 
     def refresh_drives(self):
         """
@@ -158,14 +159,14 @@ class PageDeviceSelect(QWidget):
         current_id = current_data.get('DeviceID') if current_data else None
         config_id = config_data.get('DeviceID') if config_data else None
 
-        if current_data is not None:
-            QTimer.singleShot(0, lambda idx=self.drive_combo.currentIndex(): self.on_drive_selected(idx))
+        if current_id != config_id and current_data is not None:
+            QTimer.singleShot(100, lambda: self.on_drive_selected(self.drive_combo.currentIndex()))
 
     def on_drive_selected(self, index):
         #! Hủy bỏ worker kiểm tra cũ nếu nó đang chạy để tránh xung đột
         if self.eligibility_worker and self.eligibility_worker.isRunning():
             self.eligibility_worker.terminate()
-            self.eligibility_worker.wait() # Đợi worker dừng hẳn
+            self.eligibility_worker.wait(1000) # Đợi worker dừng hẳn
 
         self.eligibility_status_label.setText("") # Clear previous status
         if index == -1 or self.drive_combo.itemData(index) is None:
@@ -175,6 +176,7 @@ class PageDeviceSelect(QWidget):
             self.main_app.config["install_mode"] = "DESTRUCTIVE"
             self.next_button.setEnabled(False)
             self.main_app.usb_monitor_timer.stop()
+            self.is_checking_eligibility = False
             return
 
         disk_details = self.drive_combo.itemData(index)
@@ -196,8 +198,13 @@ class PageDeviceSelect(QWidget):
             self.eligibility_status_label.setStyleSheet("font-style: italic; color: #D8DEE9;")
             self.next_button.setEnabled(True)
             self.main_app.usb_monitor_timer.start(2000)
+            self.is_checking_eligibility = False
         else:
             # If it's a regular HDD/SSD, check for non-destructive eligibility
+            # Chỉ check nếu chưa đang check (tránh lặp)
+            if self.is_checking_eligibility:
+                return
+            self.is_checking_eligibility = True
             self.main_app.usb_monitor_timer.stop() # Stop USB check for HDD
             self.next_button.setEnabled(False) # Disable until check is complete
             self.eligibility_status_label.setText("Đang kiểm tra ổ cứng để cài đặt không phá hủy...")
@@ -207,9 +214,14 @@ class PageDeviceSelect(QWidget):
                 name="HddEligibilityCheck",
                 target=self._check_hdd_eligibility_task,
                 on_result=self._handle_hdd_eligibility_result,
+                on_finished=self._on_eligibility_finished,
                 args=[disk_details['DeviceID']]
             )
 
+    def _on_eligibility_finished(self, success, message):
+        """Callback mới để reset flag sau khi eligibility check xong."""
+        self.is_checking_eligibility = False
+    
     def _check_hdd_eligibility_task(self, disk_id):
         """
         Checks a disk for sufficient unallocated space for non-destructive install.
