@@ -427,18 +427,36 @@ class PageISOSelect(QWidget):
         if not selected_items:
             return
 
+        items_were_removed = False
         for item in selected_items:
-            iso_path_to_remove = item.data(Qt.ItemDataRole.UserRole)
-            # Xóa khỏi config
+            # Lấy đường dẫn từ item dữ liệu, đảm bảo xử lý cả / và \
+            iso_path_to_remove = os.path.normpath(item.data(Qt.ItemDataRole.UserRole))
+
+            # Xóa khỏi config, so sánh đường dẫn đã được chuẩn hóa
+            initial_count = len(self.main_app.config['iso_list'])
             self.main_app.config['iso_list'] = [
                 iso for iso in self.main_app.config['iso_list']
-                if iso['path'] != iso_path_to_remove
+                if os.path.normpath(iso['path']) != iso_path_to_remove
             ]
+            
+            # Nếu có sự thay đổi về số lượng, tức là đã xóa thành công
+            if len(self.main_app.config['iso_list']) < initial_count:
+                items_were_removed = True
+            
             # Xóa khỏi UI
             self.iso_list_widget.takeItem(self.iso_list_widget.row(item))
         
+        # Chỉ lưu lại file nếu thực sự có ISO bị xóa
+        if items_were_removed:
+            print("Đã cập nhật danh sách ISO, đang lưu vào file...")
+            # --- DÒNG QUAN TRỌNG ĐƯỢC THÊM VÀO ---
+            # Gọi hàm lưu cấu hình của ứng dụng chính
+            if hasattr(self.main_app, 'save_config'):
+                self.main_app.save_config()
+            else:
+                print("Cảnh báo: self.main_app không có phương thức save_config().")
+        
         self.update_next_button_state()
-        print("Đã cập nhật danh sách ISO:", self.main_app.config['iso_list'])
 
     def _get_available_drive_letter(self):
         """Tìm một ký tự ổ đĩa chưa được sử dụng."""

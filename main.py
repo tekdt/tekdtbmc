@@ -500,7 +500,8 @@ class USBBootCreator(QMainWindow):
         """Lưu cấu hình hiện tại vào file JSON."""
         try:
             with open(config.CONFIG_FILE, 'w', encoding='utf-8') as f:
-                json.dump(self.config, f, indent=4)
+                json.dump(self.config, f, indent=4, ensure_ascii=False)
+            print(f"Cấu hình đã được lưu thành công vào file: {config.CONFIG_FILE}")
         except Exception as e:
             print(f"Không thể lưu cấu hình vào {config.CONFIG_FILE}: {e}")
 
