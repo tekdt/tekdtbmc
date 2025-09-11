@@ -109,51 +109,64 @@ class PageDeviceSelect(QWidget):
         """
         if disks is None: disks = []
         current_selection = self.drive_combo.currentData()
+        
+        self.drive_combo.blockSignals(True)
         self.drive_combo.clear()
         
         show_all = self.show_hdd_check.isChecked()
         found_drives = False
+        new_index_to_select = -1
 
         if not disks:
             self.drive_combo.addItem("Không thể lấy danh sách ổ đĩa", None)
-            self.on_drive_selected(-1)
-            return
-
-        for disk in disks:
-            bus_type = disk.get('BusType', 'Unknown')
-            media_type = disk.get('MediaType', 'Unspecified')
-            # Phân loại USB chính xác hơn
-            is_usb = (bus_type == 'USB' or media_type == 'Removable')
-            
-            if show_all or is_usb:
-                found_drives = True
-                device_id_num = disk['DeviceID']
-                device_path = f"\\\\.\\PHYSICALDRIVE{device_id_num}"
-                
-                model = disk.get('FriendlyName', 'Unknown Disk')
-                size = int(disk.get('Size', 0))
-                
-                gb_size = size / (1024**3)
-                display_text = f"{model} ({gb_size:.2f} GB) - {bus_type}"
-                self.drive_combo.addItem(display_text, disk)
-
-        if not found_drives:
-            self.drive_combo.addItem("Không tìm thấy USB nào" if not show_all else "Không tìm thấy ổ đĩa nào", None)
-
-        if current_selection:
-            for i in range(self.drive_combo.count()):
-                item_data = self.drive_combo.itemData(i)
-                if item_data and item_data.get('DeviceID') == current_selection.get('DeviceID'):
-                    self.drive_combo.setCurrentIndex(i)
-                    return
-        
-        index = self.drive_combo.findData(current_selection)
-        if index != -1:
-            self.drive_combo.setCurrentIndex(index)
         else:
+            for disk in disks:
+                bus_type = disk.get('BusType', 'Unknown')
+                media_type = disk.get('MediaType', 'Unspecified')
+                is_usb = (bus_type == 'USB' or media_type == 'Removable')
+                
+                if show_all or is_usb:
+                    found_drives = True
+                    model = disk.get('FriendlyName', 'Unknown Disk')
+                    size = int(disk.get('Size', 0))
+                    
+                    gb_size = size / (1024**3)
+                    display_text = f"{model} ({gb_size:.2f} GB) - {bus_type}"
+                    self.drive_combo.addItem(display_text, disk)
+
+                    # Kiểm tra xem mục này có phải là mục đã chọn trước đó không
+                    if current_selection and disk.get('DeviceID') == current_selection.get('DeviceID'):
+                        new_index_to_select = self.drive_combo.count() - 1
+
+            if not found_drives:
+                self.drive_combo.addItem("Không tìm thấy USB nào" if not show_all else "Không tìm thấy ổ đĩa nào", None)
+
+        # Chọn lại mục đã chọn trước đó nếu nó vẫn tồn tại
+        if new_index_to_select != -1:
+            self.drive_combo.setCurrentIndex(new_index_to_select)
+        elif self.drive_combo.count() > 0:
+            self.drive_combo.setCurrentIndex(0)
+
+        #! Mở lại tín hiệu
+        self.drive_combo.blockSignals(False)
+        
+        # Vì đã chặn tín hiệu, chúng ta cần kiểm tra xem lựa chọn hiện tại có khác với lựa chọn trong config không
+        # Nếu khác (ví dụ: USB bị rút ra), hãy kích hoạt on_drive_selected để cập nhật trạng thái
+        current_data = self.drive_combo.currentData()
+        config_data = self.main_app.config.get("device_details")
+        
+        current_id = current_data.get('DeviceID') if current_data else None
+        config_id = config_data.get('DeviceID') if config_data else None
+
+        if current_id != config_id:
             self.on_drive_selected(self.drive_combo.currentIndex())
 
     def on_drive_selected(self, index):
+        #! Hủy bỏ worker kiểm tra cũ nếu nó đang chạy để tránh xung đột
+        if self.eligibility_worker and self.eligibility_worker.isRunning():
+            self.eligibility_worker.terminate()
+            self.eligibility_worker.wait() # Đợi worker dừng hẳn
+
         self.eligibility_status_label.setText("") # Clear previous status
         if index == -1 or self.drive_combo.itemData(index) is None:
             self.main_app.config["device"] = None
@@ -211,7 +224,10 @@ class PageDeviceSelect(QWidget):
             # 2. Get sum of all partitions' sizes
             cmd_partitions_size = f"Get-Partition -DiskNumber {disk_id} | Measure-Object -Property Size -Sum | Select-Object -ExpandProperty Sum"
             proc_partitions_size = subprocess.run(['powershell', '-Command', cmd_partitions_size], capture_output=True, text=True, check=True, creationflags=subprocess.CREATE_NO_WINDOW)
-            partitions_total_size = int(proc_partitions_size.stdout.strip())
+            
+            # Xử lý trường hợp không có phân vùng nào
+            partitions_output = proc_partitions_size.stdout.strip()
+            partitions_total_size = int(partitions_output) if partitions_output else 0
             
             unallocated_space = total_size - partitions_total_size
             
