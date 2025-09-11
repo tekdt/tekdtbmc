@@ -149,12 +149,7 @@ class PageDeviceSelect(QWidget):
 
         #! Mở lại tín hiệu
         self.drive_combo.blockSignals(False)
-        
-        is_initial_load = self.main_app.config.get("device_details") is None and self.drive_combo.count() > 0
-        
-        if is_initial_load:
-            self.on_drive_selected(self.drive_combo.currentIndex()
-        
+                
         # Vì đã chặn tín hiệu, chúng ta cần kiểm tra xem lựa chọn hiện tại có khác với lựa chọn trong config không
         # Nếu khác (ví dụ: USB bị rút ra), hãy kích hoạt on_drive_selected để cập nhật trạng thái
         current_data = self.drive_combo.currentData()
