@@ -171,8 +171,9 @@ class PageISOSelect(QWidget):
         nav_layout.addWidget(self.next_button)
         layout.addLayout(nav_layout)
 
-        self.cancel_button.clicked.connect(self.cancel_download_clicked)
+        self.sync_ui_with_config()
         
+        self.cancel_button.clicked.connect(self.cancel_download_clicked)
         self.gravesoft_product_combo.currentIndexChanged.connect(self._on_product_selected)
         self.gravesoft_sku_combo.currentIndexChanged.connect(self._on_sku_selected)
 
@@ -372,6 +373,27 @@ class PageISOSelect(QWidget):
         """Kích hoạt khi người dùng chọn SKU, hiển thị nút tải."""
         sku_data = self.gravesoft_sku_combo.itemData(index)  # Đây là dict với "sku_id", "language", "filename", "arch"
         self.gravesoft_download_button.setVisible(bool(sku_data and sku_data.get("sku_id")))
+    
+    def sync_ui_with_config(self):
+        """Đọc danh sách ISO từ config và hiển thị lên UI."""
+        self.iso_list_widget.clear() # Xóa list cũ trên UI để tránh trùng lặp
+        
+        # Lấy danh sách iso_list từ config, nếu không có thì dùng list rỗng
+        iso_list_data = self.main_app.config.get('iso_list', [])
+        
+        for iso_info in iso_list_data:
+            # Xác định văn bản hiển thị dựa trên việc đã chọn edition hay chưa
+            display_text = iso_info['filename']
+            if iso_info.get("windows_edition_name"):
+                display_text += f" (Tự động cài đặt: {iso_info['windows_edition_name']})"
+            else:
+                display_text += " (Cài đặt thủ công)"
+
+            list_item = QListWidgetItem(display_text)
+            list_item.setData(Qt.ItemDataRole.UserRole, iso_info['path']) # Lưu đường dẫn
+            self.iso_list_widget.addItem(list_item)
+            
+        self.update_next_button_state()
     
     def browse_iso(self):
         file_paths, _ = QFileDialog.getOpenFileNames(self, "Chọn các file ISO", str(config.ISOS_DIR), "ISO Files (*.iso)")

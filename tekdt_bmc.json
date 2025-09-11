@@ -39,6 +39,26 @@
             "alias": "Windows 10 Pro (Win10_22H2_English_x32v1.iso)",
             "product_key": "VK7JG-NPHTM-C97JM-9MPGT-3V66T",
             "unattend_file": "unattend_2_Win10_22H2_English_x32v1.xml"
+        },
+        {
+            "path": "D:/tekdtbmc/ISOs/Win10_22H2_English_x64v1.iso",
+            "filename": "Win10_22H2_English_x64v1.iso",
+            "edition_index": null,
+            "edition_name": null,
+            "windows_edition_index": "6",
+            "windows_edition_name": "Windows 10 Pro",
+            "alias": "Windows 10 Pro (Win10_22H2_English_x64v1.iso)",
+            "product_key": "VK7JG-NPHTM-C97JM-9MPGT-3V66T"
+        },
+        {
+            "path": "D:/tekdtbmc/ISOs/Win11_24H2_English_x64.iso",
+            "filename": "Win11_24H2_English_x64.iso",
+            "edition_index": null,
+            "edition_name": null,
+            "windows_edition_index": "6",
+            "windows_edition_name": "Windows 11 Pro",
+            "alias": "Windows 11 Pro (Win11_24H2_English_x64.iso)",
+            "product_key": "W269N-WFGWX-YVC9B-4J6C9-T83GX"
         }
     ],
     "windows_edition": null,

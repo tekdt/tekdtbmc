@@ -141,62 +141,128 @@ def _generate_ventoy_json(main_app):
         }
     return config_data # Trả về dict thay vì string
 
-
 def _generate_unattend_xml(main_app, index, product_key=None, architecture="amd64"):
-    """
-    Tạo file unattend.xml với một product key đã được cung cấp.
-    Hàm này được giữ nguyên logic từ file gốc của bạn.
-    """
+    """Tạo file unattend.xml với một product key đã được cung cấp."""
+    # Nếu vẫn không có key, để trống (cài đặt sẽ hỏi lại)
     if product_key:
         product_key_xml = f"""<ProductKey>
                 <Key>{product_key}</Key>
                 <WillShowUI>OnError</WillShowUI>
-            </ProductKey>"""
+            </ProductKey>
+        """
     else:
         product_key_xml = r"<ProductKey />"
 
     return f"""<?xml version="1.0" encoding="utf-8"?>
-<unattend xmlns="urn:schemas-microsoft-com:unattend">
+<unattend xmlns="urn:schemas-microsoft-com:unattend" xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State">
+
 <settings pass="windowsPE">
-    <component name="Microsoft-Windows-International-Core-WinPE" processorArchitecture="{architecture}" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">
-        <SetupUILanguage><UILanguage>en-US</UILanguage></SetupUILanguage>
-        <InputLocale>en-US</InputLocale><SystemLocale>en-US</SystemLocale><UILanguage>en-US</UILanguage><UserLocale>en-US</UserLocale>
+    <component name="Microsoft-Windows-International-Core-WinPE" processorArchitecture="{architecture}" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS" xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+        <SetupUILanguage>
+            <UILanguage>en-US</UILanguage>
+        </SetupUILanguage>
+        <UILanguageFallback>en-US</UILanguageFallback>
+        <InputLocale>en-US</InputLocale>
+        <SystemLocale>en-US</SystemLocale>
+        <UILanguage>en-US</UILanguage>
+        <UserLocale>en-US</UserLocale>
     </component>
-    <component name="Microsoft-Windows-Setup" processorArchitecture="{architecture}" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">
-        <ImageInstall><OSImage><InstallFrom><MetaData wcm:action="add"><Key>/IMAGE/INDEX</Key><Value>{index}</Value></MetaData></InstallFrom></OSImage></ImageInstall>
-        <UserData>{product_key_xml}<AcceptEula>true</AcceptEula><FullName>Admin</FullName><Organization>TekDT BMC</Organization></UserData>
+
+    <component name="Microsoft-Windows-Setup" processorArchitecture="{architecture}" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS" xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+        <ImageInstall>
+            <OSImage>
+                <InstallFrom>
+                    <MetaData wcm:action="add">
+                        <Key>/IMAGE/INDEX</Key>
+                        <Value>{index}</Value>
+                    </MetaData>
+                </InstallFrom>
+            </OSImage>
+        </ImageInstall>
+
+        <UserData>
+            {product_key_xml}
+            <AcceptEula>true</AcceptEula>
+            <FullName>Admin</FullName>
+            <Organization>TekDT BMC</Organization>
+        </UserData>
     </component>
 </settings>
+
 <settings pass="offlineServicing">
-    <component name="Microsoft-Windows-PnpCustomizationsNonWinPE" processorArchitecture="{architecture}" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">
-        <DriverPaths><PathAndCredentials wcm:action="add" wcm:keyValue="1"><Path>X:\\Drivers</Path></PathAndCredentials></DriverPaths>
+    <component name="Microsoft-Windows-PnpCustomizationsNonWinPE" processorArchitecture="{architecture}" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS" xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+        <DriverPaths>
+            <PathAndCredentials wcm:action="add" wcm:keyValue="1">
+                <Path>X:\\Drivers</Path>
+            </PathAndCredentials>
+        </DriverPaths>
     </component>
 </settings>
+
 <settings pass="specialize">    
-    <component name="Microsoft-Windows-Shell-Setup" processorArchitecture="{architecture}" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">
-        <ComputerName>*</ComputerName><TimeZone>SE Asia Standard Time</TimeZone>
+    <component name="Microsoft-Windows-Shell-Setup" processorArchitecture="{architecture}" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS" xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+        <ComputerName>*</ComputerName>
+        <TimeZone>SE Asia Standard Time</TimeZone>
     </component>
 </settings>
+
 <settings pass="oobeSystem">
-    <component name="Microsoft-Windows-International-Core" processorArchitecture="{architecture}" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">
-        <InputLocale>en-US</InputLocale><SystemLocale>en-US</SystemLocale><UILanguage>en-US</UILanguage><UserLocale>en-US</UserLocale>
+    <component name="Microsoft-Windows-International-Core" processorArchitecture="{architecture}" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS" xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+        <InputLocale>en-US</InputLocale>
+        <SystemLocale>en-US</SystemLocale>
+        <UILanguage>en-US</UILanguage>
+        <UserLocale>en-US</UserLocale>
     </component>
-    <component name="Microsoft-Windows-SecureStartup-FilterDriver" processorArchitecture="{architecture}" publicKeyToken="31bf3856ad364e35" versionScope="nonSxS"><PreventDeviceEncryption>true</PreventDeviceEncryption></component>
-    <component name="Microsoft-Windows-EnhancedStorage-Adm" processorArchitecture="{architecture}" publicKeyToken="31bf3856ad364e35" versionScope="nonSxS"><TCGSecurityActivationDisabled>1</TCGSecurityActivationDisabled></component>
-    <component name="Microsoft-Windows-Shell-Setup" processorArchitecture="{architecture}" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">
-        <AutoLogon><Enabled>true</Enabled><Username>Administrator</Username><LogonCount>1</LogonCount><Password><Value/><PlainText>true</PlainText></Password></AutoLogon>
-        <UserAccounts><LocalAccounts><LocalAccount wcm:action="add"><Password><Value/><PlainText>true</PlainText></Password><Group>Administrators</Group><Name>Administrator</Name></LocalAccount></LocalAccounts></UserAccounts>
-        <OOBE><ProtectYourPC>3</ProtectYourPC><HideEULAPage>true</HideEULAPage><HideWirelessSetupInOOBE>true</HideWirelessSetupInOOBE><HideOnlineAccountScreens>true</HideOnlineAccountScreens></OOBE>
+    
+    <component name="Microsoft-Windows-SecureStartup-FilterDriver" processorArchitecture="{architecture}" language="neutral" xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" publicKeyToken="31bf3856ad364e35" versionScope="nonSxS">
+        <PreventDeviceEncryption>true</PreventDeviceEncryption>
+    </component>
+    
+    <component name="Microsoft-Windows-EnhancedStorage-Adm" processorArchitecture="{architecture}" language="neutral" xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" publicKeyToken="31bf3856ad364e35" versionScope="nonSxS">
+        <TCGSecurityActivationDisabled>1</TCGSecurityActivationDisabled>
+    </component>
+
+    <component name="Microsoft-Windows-Shell-Setup" processorArchitecture="{architecture}" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS" xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+        <AutoLogon>
+            <Enabled>true</Enabled>
+            <Username>Administrator</Username>
+            <LogonCount>1</LogonCount>
+            <Password>
+                <Value/>
+                <PlainText>true</PlainText>
+            </Password>
+        </AutoLogon>
+        <UserAccounts>
+            <LocalAccounts>
+                <LocalAccount wcm:action="add">
+                    <Password>
+                        <Value/>
+                        <PlainText>true</PlainText>
+                    </Password>
+                    <Group>Administrators</Group>
+                    <Name>Administrator</Name>
+                    <DisplayName/>
+                </LocalAccount>
+            </LocalAccounts>
+        </UserAccounts>
+        <OOBE>
+            <ProtectYourPC>3</ProtectYourPC>
+            <HideEULAPage>true</HideEULAPage>
+            <HideWirelessSetupInOOBE>true</HideWirelessSetupInOOBE>
+            <HideOnlineAccountScreens>true</HideOnlineAccountScreens>
+        </OOBE>
         <FirstLogonCommands>
             <SynchronousCommand wcm:action="add">
-                <CommandLine>powershell -Command "Get-Volume | Where-Object {{ ($_.DriveType -eq 'Removable') -and (Test-Path ($_.DriveLetter + ':\\TekDT_AIS\\tekdt_ais.exe')) }} | ForEach-Object {{ Start-Process ($_.DriveLetter + ':\\TekDT_AIS\\tekdt_ais.exe') -ArgumentList '/install' }}"</CommandLine>
-                <Description>Find and run TekDT AIS Installer</Description><Order>1</Order>
+                <CommandLine>powershell -Command "Get-Volume | Where-Object {{ $_.DriveType -eq 'Removable' -and (Test-Path ($_.DriveLetter + ':\\TekDT_AIS\\tekdt_ais.exe')) }} | ForEach-Object {{ Start-Process ($_.DriveLetter + ':\\TekDT_AIS\\tekdt_ais.exe') -ArgumentList '/install' }}"</CommandLine>
+                <Description>Find and run TekDT AIS Installer</Description>
+                <Order>1</Order>
             </SynchronousCommand>
         </FirstLogonCommands>
     </component>
 </settings>
-</unattend>"""
 
+</unattend>
+"""
 
 def _copy_tekdtais_selectively(main_app, source_dir, dest_dir, total_copy_size, copied_so_far, base_progress, progress_range):
     """
@@ -290,7 +356,6 @@ def _create_fill_file(main_app, file_path, size_in_bytes, total_fill_target, spa
             try: os.remove(file_path)
             except OSError: pass
         raise IOError(f"Không thể ghi vào file '{file_path}'. Đĩa có thể đã đầy. Lỗi: {e}")
-
 
 def create_usb_task(main_app):
     """Tác vụ tạo USB Boot chạy trong luồng nền với tiến trình được thiết kế lại."""
@@ -402,37 +467,100 @@ def create_usb_task(main_app):
         worker.progress.emit(80) # Hoàn tất sao chép file
         
         # --- GIAI ĐOẠN 3: LẤP ĐẦY DUNG LƯỢNG TRỐNG (80% -> 100%) ---
+        # if main_app.config.get("fill_space", True):
+            # worker.status.emit("Đang tính toán dung lượng trống...")
+            # time.sleep(2)
+            # try:
+                # usage = shutil.disk_usage(usb_mount_point)
+                # total_free_space = usage.free
+                # RESERVE_SPACE = 64 * 1024 * 1024 # 64MB
+                # fill_space_target = total_free_space - RESERVE_SPACE
+
+                # if fill_space_target <= 0:
+                    # print("Không đủ dung lượng trống để lấp đầy.")
+                # else:
+                    # fill_file_dir = os.path.join(usb_mount_point, "TekDT_Fill")
+                    # os.makedirs(fill_file_dir, exist_ok=True)
+                    # if main_app.config["filesystem"].upper() == "FAT32":
+                        # max_chunk = 2 * 1024 * 1024 * 1024
+                        # filled = 0
+                        # idx = 1
+                        # while filled < fill_space_target:
+                            # size = min(max_chunk, fill_space_target - filled)
+                            # path = os.path.join(fill_file_dir, f"fill_{idx:03d}.dat")
+                            # written = _create_fill_file(main_app, path, size, fill_space_target, filled)
+                            # filled += written
+                            # if written < size: break
+                            # idx += 1
+                    # else:
+                        # path = os.path.join(fill_file_dir, "fill_final.dat")
+                        # _create_fill_file(main_app, path, fill_space_target, fill_space_target, 0)
+            # except Exception as e:
+                # worker.status.emit(f"Cảnh báo: Không thể lấp đầy dung lượng. Lỗi: {e}")
+
         if main_app.config.get("fill_space", True):
-            worker.status.emit("Đang tính toán dung lượng trống...")
+            worker.creation_worker.status.emit("Đang tính toán dung lượng trống...")
             time.sleep(2)
+
             try:
+                # Lấy kích thước cluster để dự trữ không gian tối thiểu cho metadata
+                try:
+                    sectors_per_cluster = wintypes.DWORD()
+                    bytes_per_sector = wintypes.DWORD()
+                    ctypes.windll.kernel32.GetDiskFreeSpaceW(
+                        ctypes.c_wchar_p(usb_mount_point),
+                        ctypes.byref(sectors_per_cluster),
+                        ctypes.byref(bytes_per_sector),
+                        None, None
+                    )
+                    cluster_size = sectors_per_cluster.value * bytes_per_sector.value
+                    RESERVE_SPACE = cluster_size if cluster_size > 0 else 64 * 1024
+                except Exception as e:
+                    print(f"Không thể lấy kích thước cluster, sử dụng giá trị dự phòng 64KB. Lỗi: {e}")
+                    RESERVE_SPACE = 64 * 1024 # Giá trị dự phòng
+
                 usage = shutil.disk_usage(usb_mount_point)
                 total_free_space = usage.free
-                RESERVE_SPACE = 64 * 1024 * 1024 # 64MB
                 fill_space_target = total_free_space - RESERVE_SPACE
-
+                
                 if fill_space_target <= 0:
-                    print("Không đủ dung lượng trống để lấp đầy.")
+                    print("Không đủ dung lượng trống để thực hiện lấp đầy.")
                 else:
+                    fs_type = main_app.config["filesystem"].upper()
+                    print(f"Dung lượng trống: {total_free_space / (1024**3):.2f} GB. Sẽ lấp đầy: {fill_space_target / (1024**3):.2f} GB. Định dạng: {fs_type}")
+
                     fill_file_dir = os.path.join(usb_mount_point, "TekDT_Fill")
                     os.makedirs(fill_file_dir, exist_ok=True)
-                    if main_app.config["filesystem"].upper() == "FAT32":
-                        max_chunk = 2 * 1024 * 1024 * 1024
-                        filled = 0
-                        idx = 1
-                        while filled < fill_space_target:
-                            size = min(max_chunk, fill_space_target - filled)
-                            path = os.path.join(fill_file_dir, f"fill_{idx:03d}.dat")
-                            written = _create_fill_file(main_app, path, size, fill_space_target, filled)
-                            filled += written
-                            if written < size: break
-                            idx += 1
-                    else:
-                        path = os.path.join(fill_file_dir, "fill_final.dat")
-                        _create_fill_file(main_app, path, fill_space_target, fill_space_target, 0)
-            except Exception as e:
-                worker.status.emit(f"Cảnh báo: Không thể lấp đầy dung lượng. Lỗi: {e}")
+                    
+                    space_to_fill = fill_space_target
+                    space_filled_so_far = 0
 
+                    if fs_type == "FAT32":
+                        max_chunk_size = 2 * 1024 * 1024 * 1024
+                        file_index = 1
+                        while space_to_fill > 0:
+                            file_size = min(space_to_fill, max_chunk_size)
+                            file_path = os.path.join(fill_file_dir, f"fill_{file_index:03d}.dat")
+                            
+                            written = _create_fill_file(main_app, file_path, file_size, fill_space_target, space_filled_so_far)
+                            space_filled_so_far += written
+                            space_to_fill -= written
+                            if written < file_size:
+                                print("Cảnh báo: Không thể ghi thêm dữ liệu. Đĩa có thể đã đầy.")
+                                break
+                            file_index += 1
+                    else:
+                        if space_to_fill > 0:
+                            final_fill_path = os.path.join(fill_file_dir, "fill_final.dat")
+                            _create_fill_file(main_app, final_fill_path, space_to_fill, fill_space_target, space_filled_so_far)
+                    
+                    worker.creation_worker.status.emit("Đã lấp đầy dung lượng trống.")
+                    print("Hoàn tất việc lấp đầy dung lượng trống.")
+
+            except Exception as fill_error:
+                print(f"Lỗi trong quá trình lấp đầy dung lượng: {fill_error}")
+                worker.creation_worker.status.emit(f"Cảnh báo: Không thể lấp đầy dung lượng trống. Lỗi: {fill_error}")
+        
         worker.progress.emit(100)
         worker.status.emit("Hoàn tất! USB đã sẵn sàng.")
 
