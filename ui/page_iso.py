@@ -414,6 +414,7 @@ class PageISOSelect(QWidget):
             "edition_name": None
         }
         self.main_app.config['iso_list'].append(iso_info)
+        self.main_app.save_config()
         
         list_item = QListWidgetItem(f"{iso_info['filename']}")
         list_item.setData(Qt.ItemDataRole.UserRole, iso_path) # Lưu đường dẫn để nhận dạng
@@ -449,7 +450,6 @@ class PageISOSelect(QWidget):
         # Chỉ lưu lại file nếu thực sự có ISO bị xóa
         if items_were_removed:
             print("Đã cập nhật danh sách ISO, đang lưu vào file...")
-            # --- DÒNG QUAN TRỌNG ĐƯỢC THÊM VÀO ---
             # Gọi hàm lưu cấu hình của ứng dụng chính
             if hasattr(self.main_app, 'save_config'):
                 self.main_app.save_config()
