@@ -158,8 +158,8 @@ class PageDeviceSelect(QWidget):
         current_id = current_data.get('DeviceID') if current_data else None
         config_id = config_data.get('DeviceID') if config_data else None
 
-        if current_id != config_id:
-            self.on_drive_selected(self.drive_combo.currentIndex())
+        if current_data is not None:
+            QTimer.singleShot(0, lambda idx=self.drive_combo.currentIndex(): self.on_drive_selected(idx))
 
     def on_drive_selected(self, index):
         #! Hủy bỏ worker kiểm tra cũ nếu nó đang chạy để tránh xung đột
