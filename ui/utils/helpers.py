@@ -197,6 +197,12 @@ def _generate_unattend_xml(main_app, index, product_key=None, architecture="amd6
             </PathAndCredentials>
         </DriverPaths>
     </component>
+    <component name="Microsoft-Windows-Foundation-Package" processorArchitecture="{architecture}" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS" xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+        <WindowsOptionalFeature>
+            <Name>NetFx3</Name>
+            <State>Enabled</State>
+        </WindowsOptionalFeature>
+    </component>
 </settings>
 
 <settings pass="specialize">    
