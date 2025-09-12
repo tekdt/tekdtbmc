@@ -809,13 +809,13 @@ class USBBootCreator(QMainWindow):
 
         if total_required_size > available_size:
             message = (f"DUNG LƯỢNG KHÔNG ĐỦ!<br>"
-                       f"Yêu cầu: <b>{required_gb:.2f} GB</b> / Sẵn có: <b>{usb_gb:.2f} GB</b>")
+                       f"Yêu cầu: <b>{required_gb:.2f} GB</b> / Sẵn có: <b>{available_gb:.2f} GB</b>")
             label.setText(message)
             label.setStyleSheet("font-weight: bold; padding: 10px; color: #BF616A;") # Đỏ
             start_button.setEnabled(False)
         else:
             message = (f"Đủ dung lượng<br>"
-                       f"Yêu cầu: <b>{required_gb:.2f} GB</b> / Sẵn có: <b>{usb_gb:.2f} GB</b>")
+                       f"Yêu cầu: <b>{required_gb:.2f} GB</b> / Sẵn có: <b>{available_gb:.2f} GB</b>")
             label.setText(message)
             label.setStyleSheet("font-weight: bold; padding: 10px; color: #A3BE8C;") # Xanh
             start_button.setEnabled(True)
