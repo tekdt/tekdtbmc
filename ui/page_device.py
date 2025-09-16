@@ -13,6 +13,7 @@ class PageDeviceSelect(QWidget):
         self.is_fetching = False
         self.eligibility_worker = None
         self.is_checking_eligibility = False
+        self.is_initial_load = True
         self.init_ui()
         self.start_drive_monitor()
 
@@ -135,14 +136,12 @@ class PageDeviceSelect(QWidget):
                     display_text = f"{model} ({gb_size:.2f} GB) - {bus_type}"
                     self.drive_combo.addItem(display_text, disk)
 
-                    # Kiểm tra xem mục này có phải là mục đã chọn trước đó không
                     if current_selection and disk.get('DeviceID') == current_selection.get('DeviceID'):
                         new_index_to_select = self.drive_combo.count() - 1
 
             if not found_drives:
                 self.drive_combo.addItem("Không tìm thấy USB nào" if not show_all else "Không tìm thấy ổ đĩa nào", None)
 
-        # Chọn lại mục đã chọn trước đó nếu nó vẫn tồn tại
         if new_index_to_select != -1:
             self.drive_combo.setCurrentIndex(new_index_to_select)
         elif self.drive_combo.count() > 0:
@@ -150,23 +149,28 @@ class PageDeviceSelect(QWidget):
 
         #! Mở lại tín hiệu
         self.drive_combo.blockSignals(False)
-                
-        # Vì đã chặn tín hiệu, chúng ta cần kiểm tra xem lựa chọn hiện tại có khác với lựa chọn trong config không
-        # Nếu khác (ví dụ: USB bị rút ra), hãy kích hoạt on_drive_selected để cập nhật trạng thái
-        current_data = self.drive_combo.currentData()
-        config_data = self.main_app.config.get("device_details")
+            
+        post_refresh_data = self.drive_combo.currentData()
         
-        current_id = current_data.get('DeviceID') if current_data else None
-        config_id = config_data.get('DeviceID') if config_data else None
+        previous_id = current_selection.get('DeviceID') if current_selection else None
+        current_id = post_refresh_data.get('DeviceID') if post_refresh_data else None
 
-        if current_id != config_id and current_data is not None:
-            QTimer.singleShot(100, lambda: self.on_drive_selected(self.drive_combo.currentIndex()))
+        if self.is_initial_load or current_id != previous_id:
+            if post_refresh_data:
+                QTimer.singleShot(10, lambda: self.on_drive_selected(self.drive_combo.currentIndex()))
+                self.is_initial_load = False
 
     def on_drive_selected(self, index):
-        #! Hủy bỏ worker kiểm tra cũ nếu nó đang chạy để tránh xung đột
         if self.eligibility_worker and self.eligibility_worker.isRunning():
-            self.eligibility_worker.terminate()
-            self.eligibility_worker.wait(1000) # Đợi worker dừng hẳn
+            print("Lựa chọn ổ đĩa đã thay đổi. Hủy bỏ tác vụ kiểm tra trước đó.")
+            try:
+                # Ngắt kết nối để kết quả từ luồng cũ không được xử lý
+                self.eligibility_worker.result.disconnect()
+                self.eligibility_worker.finished.disconnect()
+            except (RuntimeError, TypeError):
+                # Bỏ qua lỗi nếu tín hiệu đã được ngắt kết nối từ trước
+                pass
+            # Worker cũ sẽ tự hủy khi chạy xong, không cần can thiệp thêm.
 
         self.eligibility_status_label.setText("") # Clear previous status
         if index == -1 or self.drive_combo.itemData(index) is None:
@@ -251,7 +255,7 @@ class PageDeviceSelect(QWidget):
                 return (False, f"Không đủ dung lượng chưa phân bổ ở cuối ổ đĩa. Yêu cầu ít nhất {gb_required:.2f} GB.")
 
         except Exception as e:
-            print(f"Error checking HDD eligibility: {e}")
+            print(f"Lỗi khi kiểm tra ổ cứng: {e}")
             return (False, "Lỗi khi kiểm tra ổ đĩa. Không thể tiếp tục.")
 
     def _handle_hdd_eligibility_result(self, result):
