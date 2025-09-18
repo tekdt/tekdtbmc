@@ -141,8 +141,11 @@ def _generate_ventoy_json(main_app):
         }
     return config_data # Trả về dict thay vì string
 
-def _generate_unattend_xml(main_app, index, product_key=None, architecture="amd64"):
-    """Tạo file unattend.xml với một product key đã được cung cấp."""
+def _generate_unattend_xml(main_app, index, product_key=None, architecture="amd64", language="en-US"):
+    """Tạo file unattend.xml với các thông tin chi tiết về phiên bản, kiến trúc và ngôn ngữ."""
+    # Nếu đang ở chế độ lược bỏ ISO, index luôn là 1 vì file WIM mới chỉ có một phiên bản.
+    final_index = 1 if main_app.config.get("prune_iso", True) else index
+    
     # Nếu vẫn không có key, để trống (cài đặt sẽ hỏi lại)
     if product_key:
         product_key_xml = f"""<ProductKey>
@@ -159,13 +162,13 @@ def _generate_unattend_xml(main_app, index, product_key=None, architecture="amd6
 <settings pass="windowsPE">
     <component name="Microsoft-Windows-International-Core-WinPE" processorArchitecture="{architecture}" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS" xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
         <SetupUILanguage>
-            <UILanguage>en-US</UILanguage>
+            <UILanguage>{language}</UILanguage>
         </SetupUILanguage>
-        <UILanguageFallback>en-US</UILanguageFallback>
-        <InputLocale>en-US</InputLocale>
-        <SystemLocale>en-US</SystemLocale>
-        <UILanguage>en-US</UILanguage>
-        <UserLocale>en-US</UserLocale>
+        <UILanguageFallback>{language}</UILanguageFallback>
+        <InputLocale>{language}</InputLocale>
+        <SystemLocale>{language}</SystemLocale>
+        <UILanguage>{language}</UILanguage>
+        <UserLocale>{language}</UserLocale>
     </component>
 
     <component name="Microsoft-Windows-Setup" processorArchitecture="{architecture}" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS" xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
@@ -214,10 +217,10 @@ def _generate_unattend_xml(main_app, index, product_key=None, architecture="amd6
 
 <settings pass="oobeSystem">
     <component name="Microsoft-Windows-International-Core" processorArchitecture="{architecture}" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS" xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
-        <InputLocale>en-US</InputLocale>
-        <SystemLocale>en-US</SystemLocale>
-        <UILanguage>en-US</UILanguage>
-        <UserLocale>en-US</UserLocale>
+        <InputLocale>{language}</InputLocale>
+        <SystemLocale>{language}</SystemLocale>
+        <UILanguage>{language}</UILanguage>
+        <UserLocale>{language}</UserLocale>
     </component>
     
     <component name="Microsoft-Windows-SecureStartup-FilterDriver" processorArchitecture="{architecture}" language="neutral" xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" publicKeyToken="31bf3856ad364e35" versionScope="nonSxS">
@@ -363,6 +366,104 @@ def _create_fill_file(main_app, file_path, size_in_bytes, total_fill_target, spa
             except OSError: pass
         raise IOError(f"Không thể ghi vào file '{file_path}'. Đĩa có thể đã đầy. Lỗi: {e}")
 
+def _process_and_copy_iso(worker, main_app, iso_info, usb_mount_point, total_copy_size, copied_so_far, base_progress, progress_range):
+    """
+    Xử lý và sao chép một file ISO.
+    Nếu prune_iso=True, sẽ tối ưu hóa ISO trước khi sao chép.
+    Ngược lại, chỉ sao chép file gốc.
+    """
+    dest_iso_path = os.path.join(usb_mount_point, iso_info['filename'])
+
+    # Điều kiện để lược bỏ: tùy chọn bật VÀ người dùng đã chọn một phiên bản cụ thể
+    should_prune = main_app.config.get("prune_iso", True) and iso_info.get("windows_edition_index")
+
+    if not should_prune:
+        # Sao chép như cũ
+        return _copy_with_progress(worker, iso_info['path'], dest_iso_path, total_copy_size, copied_so_far, base_progress, progress_range)
+
+    # --- Logic lược bỏ ISO ---
+    worker.status.emit(f"Đang tối ưu hóa ISO: {iso_info['filename']}...")
+    print(f"Bắt đầu quá trình tối ưu hóa cho {iso_info['filename']}")
+    
+    mounted_drive = None
+    temp_iso_content_dir = tempfile.mkdtemp(prefix="iso_content_")
+    
+    try:
+        # 1. Mount ISO
+        worker.status.emit(f"Mounting {iso_info['filename']}...")
+        mount_cmd = ['powershell', '-NoProfile', '-Command', f'Mount-DiskImage -ImagePath "{iso_info["path"]}" -PassThru | Get-Volume | Select-Object -ExpandProperty DriveLetter']
+        proc = subprocess.run(mount_cmd, capture_output=True, text=True, check=True, creationflags=subprocess.CREATE_NO_WINDOW)
+        drive_letter = proc.stdout.strip()
+        if not drive_letter: raise Exception("Không thể lấy ký tự ổ đĩa sau khi mount.")
+        mounted_drive = f"{drive_letter}:\\"
+        print(f"ISO được mount tới: {mounted_drive}")
+
+        # 2. Sao chép toàn bộ nội dung ISO vào thư mục tạm
+        worker.status.emit("Sao chép nội dung ISO gốc...")
+        shutil.copytree(mounted_drive, temp_iso_content_dir, dirs_exist_ok=True)
+
+        # 3. Tìm file install.wim/esd
+        wim_path_original = None
+        wim_path_temp = None
+        for ext in [".wim", ".esd"]:
+            p = Path(temp_iso_content_dir) / "sources" / f"install{ext}"
+            if p.exists():
+                wim_path_original = str(p)
+                wim_path_temp = str(Path(tempfile.gettempdir()) / f"slim_install{ext}")
+                break
+        
+        if not wim_path_original: raise Exception("Không tìm thấy install.wim/esd trong ISO.")
+
+        # 4. Sử dụng wimlib để trích xuất chỉ index cần thiết
+        worker.status.emit(f"Trích xuất phiên bản: {iso_info['windows_edition_name']}...")
+        export_cmd = [
+            str(config.WIMLIB_EXE), "export", wim_path_original, iso_info["windows_edition_index"],
+            wim_path_temp, "--compress=LZMS" # Sử dụng nén tốt
+        ]
+        print(f"Đang chạy lệnh wimlib: {' '.join(export_cmd)}")
+        subprocess.run(export_cmd, check=True, capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW)
+
+        # 5. Thay thế file WIM/ESD cũ bằng file đã được tối ưu
+        os.remove(wim_path_original)
+        shutil.move(wim_path_temp, wim_path_original)
+        print("Đã thay thế file WIM/ESD thành công.")
+
+        # 6. Tạo lại file ISO mới
+        worker.status.emit(f"Đang tạo lại file ISO tối ưu...")
+        if not config.OSCDIMG_EXE.exists():
+            raise FileNotFoundError(f"Không tìm thấy công cụ tạo ISO tại: {config.OSCDIMG_EXE}")
+        
+        temp_new_iso_path = os.path.join(tempfile.gettempdir(), iso_info['filename'])
+        rebuild_cmd = [
+            str(config.OSCDIMG_EXE),
+            "-m", # Bỏ qua giới hạn kích thước
+            "-o", # Tối ưu hóa file trùng lặp
+            "-u2", # UDF Filesystem
+            "-bootdata:2#p0,e,b" + os.path.join(temp_iso_content_dir, "boot", "etfsboot.com") + "#pEF,e,b" + os.path.join(temp_iso_content_dir, "efi", "microsoft", "boot", "efisys.bin"),
+            temp_iso_content_dir,
+            temp_new_iso_path
+        ]
+        print(f"Đang chạy lệnh oscdimg: {' '.join(rebuild_cmd)}")
+        subprocess.run(rebuild_cmd, check=True, capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW)
+        
+        # 7. Sao chép ISO đã tối ưu vào USB
+        worker.status.emit(f"Sao chép ISO đã tối ưu vào USB...")
+        copied_bytes = _copy_with_progress(worker, temp_new_iso_path, dest_iso_path, total_copy_size, copied_so_far, base_progress, progress_range)
+        
+        # 8. Dọn dẹp file ISO tạm
+        os.remove(temp_new_iso_path)
+        
+        return copied_bytes
+
+    finally:
+        # Dọn dẹp
+        if mounted_drive:
+            unmount_cmd = ['powershell', '-NoProfile', '-Command', f'Dismount-DiskImage -ImagePath "{iso_info["path"]}"']
+            subprocess.run(unmount_cmd, capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW)
+        if os.path.exists(temp_iso_content_dir):
+            shutil.rmtree(temp_iso_content_dir, ignore_errors=True)
+        print("Đã hoàn tất dọn dẹp cho quá trình tối ưu ISO.")
+
 def create_usb_task(main_app):
     """Tác vụ tạo USB Boot chạy trong luồng nền với tiến trình được thiết kế lại."""
     worker = main_app.creation_worker
@@ -411,7 +512,17 @@ def create_usb_task(main_app):
         # Tạo các file unattend trước
         for i, iso_info in enumerate(main_app.config['iso_list']):
             if iso_info.get("windows_edition_index"):
-                unattend_content = _generate_unattend_xml(main_app, iso_info["windows_edition_index"], iso_info.get("product_key"), iso_info.get("architecture", "amd64"))
+                # Lấy kiến trúc và ngôn ngữ từ iso_info, có giá trị dự phòng để tránh lỗi
+                edition_arch = iso_info.get("windows_edition_arch", "amd64")
+                edition_lang = iso_info.get("windows_edition_lang", "en-US")
+                
+                unattend_content = _generate_unattend_xml(
+                    main_app, 
+                    iso_info["windows_edition_index"], 
+                    iso_info.get("product_key"), 
+                    architecture=edition_arch,
+                    language=edition_lang
+                )
                 unattend_filename = f"unattend_{i}_{Path(iso_info['filename']).stem}.xml"
                 iso_info['unattend_file'] = unattend_filename
                 with open(os.path.join(usb_ventoy_dir, unattend_filename), "w", encoding='utf-8') as f:
@@ -459,8 +570,7 @@ def create_usb_task(main_app):
 
         # Sao chép ISOs
         for iso_info in main_app.config['iso_list']:
-            dest_iso_path = os.path.join(usb_mount_point, iso_info['filename'])
-            copied_so_far = _copy_with_progress(worker, iso_info['path'], dest_iso_path, total_copy_size, copied_so_far, base_progress, progress_range)
+            copied_so_far = _process_and_copy_iso(worker, main_app, iso_info, usb_mount_point, total_copy_size, copied_so_far, base_progress, progress_range)
 
         # Sao chép TekDT AIS
         dest_ais_dir = os.path.join(usb_mount_point, "TekDT_AIS")
@@ -482,39 +592,8 @@ def create_usb_task(main_app):
         worker.progress.emit(80) # Hoàn tất sao chép file
         
         # --- GIAI ĐOẠN 3: LẤP ĐẦY DUNG LƯỢNG TRỐNG (80% -> 100%) ---
-        # if main_app.config.get("fill_space", True):
-            # worker.status.emit("Đang tính toán dung lượng trống...")
-            # time.sleep(2)
-            # try:
-                # usage = shutil.disk_usage(usb_mount_point)
-                # total_free_space = usage.free
-                # RESERVE_SPACE = 64 * 1024 * 1024 # 64MB
-                # fill_space_target = total_free_space - RESERVE_SPACE
-
-                # if fill_space_target <= 0:
-                    # print("Không đủ dung lượng trống để lấp đầy.")
-                # else:
-                    # fill_file_dir = os.path.join(usb_mount_point, "TekDT_Fill")
-                    # os.makedirs(fill_file_dir, exist_ok=True)
-                    # if main_app.config["filesystem"].upper() == "FAT32":
-                        # max_chunk = 2 * 1024 * 1024 * 1024
-                        # filled = 0
-                        # idx = 1
-                        # while filled < fill_space_target:
-                            # size = min(max_chunk, fill_space_target - filled)
-                            # path = os.path.join(fill_file_dir, f"fill_{idx:03d}.dat")
-                            # written = _create_fill_file(main_app, path, size, fill_space_target, filled)
-                            # filled += written
-                            # if written < size: break
-                            # idx += 1
-                    # else:
-                        # path = os.path.join(fill_file_dir, "fill_final.dat")
-                        # _create_fill_file(main_app, path, fill_space_target, fill_space_target, 0)
-            # except Exception as e:
-                # worker.status.emit(f"Cảnh báo: Không thể lấp đầy dung lượng. Lỗi: {e}")
-
         if main_app.config.get("fill_space", True):
-            worker.creation_worker.status.emit("Đang tính toán dung lượng trống...")
+            worker.status.emit("Đang tính toán dung lượng trống...")
             time.sleep(2)
 
             try:
@@ -569,12 +648,24 @@ def create_usb_task(main_app):
                             final_fill_path = os.path.join(fill_file_dir, "fill_final.dat")
                             _create_fill_file(main_app, final_fill_path, space_to_fill, fill_space_target, space_filled_so_far)
                     
-                    worker.creation_worker.status.emit("Đã lấp đầy dung lượng trống.")
+                    worker.status.emit("Đã lấp đầy dung lượng trống.")
                     print("Hoàn tất việc lấp đầy dung lượng trống.")
 
             except Exception as fill_error:
                 print(f"Lỗi trong quá trình lấp đầy dung lượng: {fill_error}")
-                worker.creation_worker.status.emit(f"Cảnh báo: Không thể lấp đầy dung lượng trống. Lỗi: {fill_error}")
+                worker.status.emit(f"Cảnh báo: Không thể lấp đầy dung lượng trống. Lỗi: {fill_error}")
+        
+        # --- GIAI ĐOẠN 4: GHI DẤU BẢN QUYỀN (ANTI-CLONING) ---
+        worker.status.emit("Đang ghi dấu bản quyền lên USB...")
+        try:
+            _write_usb_signature(main_app.config['device_details'])
+            worker.status.emit("Ghi dấu bản quyền thành công.")
+            print("Đã ghi chữ ký (signature) chống sao chép vào USB.")
+        except Exception as sig_error:
+            # Đây không phải lỗi nghiêm trọng, chỉ cảnh báo
+            print(f"Cảnh báo: Không thể ghi dấu bản quyền. Lỗi: {sig_error}")
+            worker.status.emit("Cảnh báo: Không thể ghi dấu bản quyền.")
+            time.sleep(2) # Cho người dùng thấy cảnh báo
         
         worker.progress.emit(100)
         worker.status.emit("Hoàn tất! USB đã sẵn sàng.")
@@ -617,3 +708,62 @@ def get_generic_key(edition_name):
     with open(generic_key_path, "r", encoding="utf-8") as f:
         keys = json.load(f)
     return keys.get(edition_name)
+
+def _get_disk_signature_data(device_details):
+    """
+    Tạo một chuỗi dữ liệu duy nhất từ thông tin phần cứng của ổ đĩa.
+    Thứ tự các thuộc tính là rất quan trọng và phải giống với bên AutoIt.
+    """
+    if not device_details:
+        raise ValueError("Không có thông tin chi tiết về thiết bị (device_details).")
+
+    # Lấy các giá trị, thay thế bằng chuỗi rỗng nếu không có
+    serial = device_details.get('SerialNumber', '').strip()
+    model = device_details.get('Model', '').strip()
+    # Các giá trị này thường có trong kết quả Get-PhysicalDisk
+    vendor_id = device_details.get('VendorId', '').strip()
+    product_id = device_details.get('ProductId', '').strip()
+
+    # Tạo chuỗi định danh, các thuộc tính được nối với nhau bằng dấu gạch nối
+    # để đảm bảo tính nhất quán.
+    identifier_string = f"SERIAL:{serial}-MODEL:{model}-VENDOR:{vendor_id}-PRODUCT:{product_id}"
+    print(f"Chuỗi định danh USB để tạo hash: {identifier_string}")
+    return identifier_string
+
+def _write_usb_signature(device_details):
+    """
+    Tạo và ghi chữ ký SHA256 vào một sector gần cuối của ổ đĩa vật lý.
+    """
+    # 1. Tạo hash
+    signature_data = _get_disk_signature_data(device_details)
+    # Mã hóa chuỗi sang bytes trước khi băm
+    hashed_signature = hashlib.sha256(signature_data.encode('utf-8')).hexdigest()
+    
+    # 2. Chuẩn bị dữ liệu để ghi (đảm bảo nó dài đúng 512 bytes)
+    # Chữ ký (64 bytes) + padding bằng ký tự null
+    sector_data = (hashed_signature + "::TEKDT_BMC_SIGNATURE").encode('utf-8')
+    padded_data = sector_data.ljust(512, b'\0')
+
+    # 3. Ghi vào sector
+    drive_path = device_details.get('DeviceIDPath') # Ví dụ: \\.\PHYSICALDRIVE1
+    disk_size = device_details.get('Size', 0)
+    if not drive_path or disk_size == 0:
+        raise IOError("Không thể xác định đường dẫn hoặc kích thước ổ đĩa vật lý.")
+
+    # Chọn sector thứ 10 từ cuối để ghi
+    SECTOR_SIZE = 512
+    target_offset = disk_size - (10 * SECTOR_SIZE)
+    
+    if target_offset < 0:
+        raise IOError("Kích thước ổ đĩa quá nhỏ để ghi chữ ký.")
+
+    try:
+        # Mở ổ đĩa vật lý ở chế độ ghi nhị phân
+        with open(drive_path, 'rb+') as f:
+            f.seek(target_offset)
+            f.write(padded_data)
+        print(f"Đã ghi thành công chữ ký '{hashed_signature}' vào sector tại offset {target_offset} của {drive_path}")
+    except PermissionError:
+        raise PermissionError("Không có quyền ghi trực tiếp vào ổ đĩa vật lý. Cần chạy với quyền Admin.")
+    except Exception as e:
+        raise IOError(f"Lỗi khi ghi vào sector của ổ đĩa {drive_path}: {e}")

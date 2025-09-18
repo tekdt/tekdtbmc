@@ -99,7 +99,8 @@ class USBBootCreator(QMainWindow):
             "iso_list": [],
             "windows_edition": None,
             "windows_edition_index": None,
-            "copy_ais_selection_only": True, 
+            "copy_ais_selection_only": True,
+            "prune_iso": True,
         }
 
         self.config["device_details"] = None
@@ -966,9 +967,27 @@ class USBBootCreator(QMainWindow):
         fill_group.addAction(no_action)
         fill_menu.addAction(yes_action)
         fill_menu.addAction(no_action)
+
+        menu.addSeparator()
+        
+        # Tùy chọn lược bỏ phiên bản ISO
+        prune_iso_menu = menu.addMenu("Lược bỏ phiên bản không được chọn trong ISO")
+        
+        yes_prune_action = QAction("Yes", self, checkable=True)
+        yes_prune_action.setChecked(self.config.get("prune_iso", True))
+        yes_prune_action.triggered.connect(lambda: self.set_prune_iso(True))
+
+        no_prune_action = QAction("No", self, checkable=True)
+        no_prune_action.setChecked(not self.config.get("prune_iso", True))
+        no_prune_action.triggered.connect(lambda: self.set_prune_iso(False))
+        
+        prune_iso_group = QActionGroup(self)
+        prune_iso_group.addAction(yes_prune_action)
+        prune_iso_group.addAction(no_prune_action)
+        prune_iso_menu.addAction(yes_prune_action)
+        prune_iso_menu.addAction(no_prune_action)
         
         # Tùy chọn sao chép TekDT AIS
-        menu.addSeparator()
         ais_copy_menu = menu.addMenu("Lọc và chỉ lấy những phần mềm được Thêm")
         
         yes_ais_action = QAction("Yes", self, checkable=True)
@@ -1038,6 +1057,13 @@ class USBBootCreator(QMainWindow):
         self.save_config()
         self._update_capacity_check()
 
+    def set_prune_iso(self, prune):
+        self.config["prune_iso"] = prune
+        print(f"Đã chọn Lược bỏ phiên bản ISO: {'Yes' if prune else 'No'}")
+        self.save_config()
+        # Tính toán lại dung lượng vì nó sẽ thay đổi
+        self._update_capacity_check()
+    
     def check_for_updates(self):
         self.update_worker = self._create_and_start_worker(
             name="ToolUpdater",

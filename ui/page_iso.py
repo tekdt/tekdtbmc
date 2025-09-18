@@ -556,7 +556,7 @@ class PageISOSelect(QWidget):
                     mount_method = 'wincdemu'
                     print(f"Mount ISO thành công bằng WinCDEmu vào ổ {mounted_drive}")
 
-                # Bước tiếp: Phát hiện kiến trúc và phân tích WIM/ESD (giữ nguyên logic cũ)
+                # Bước tiếp: Phát hiện kiến trúc và phân tích WIM/ESD
                 if os.path.exists(os.path.join(mounted_drive, "efi", "boot", "bootx64.efi")):
                     detected_arch = "amd64"
                     print("Phát hiện kiến trúc: 64-bit (amd64)")
@@ -604,16 +604,40 @@ class PageISOSelect(QWidget):
                     error_output = result.stderr.decode(encoding='utf-8', errors='ignore')
                     raise Exception(f"Không thể phân tích file WIM/ESD: {error_output}")
 
-                current_index = ""
                 output_text = result.stdout.decode(encoding='utf-8', errors='ignore')
+                
+                current_edition_details = {}
                 for line in output_text.splitlines():
-                    if "Index" in line:
-                        current_index = line.split(":")[-1].strip()
-                    elif "Name" in line and current_index:
-                        name = line.split(":")[-1].strip()
-                        clean_name = ''.join(char for char in name if char.isprintable())
-                        editions[current_index] = clean_name
-                        current_index = ""
+                    line = line.strip()
+                    if not line:
+                        continue
+                    
+                    # Khi gặp dòng "Index:", lưu trữ thông tin của phiên bản trước đó (nếu có) và bắt đầu một bản ghi mới
+                    if line.startswith("Index:"):
+                        if current_edition_details and 'index' in current_edition_details:
+                            editions[current_edition_details['index']] = current_edition_details
+                        
+                        index_val = line.split(":")[-1].strip()
+                        current_edition_details = {'index': index_val}
+                    
+                    elif ":" in line:
+                        key, value = [x.strip() for x in line.split(":", 1)]
+                        
+                        if key == "Name":
+                            current_edition_details['name'] = ''.join(char for char in value if char.isprintable())
+                        elif key == "Architecture":
+                            # Chuẩn hóa kiến trúc: XML cần 'amd64' thay vì 'x86_64'
+                            arch_val = value.lower()
+                            if arch_val == 'x86_64':
+                                current_edition_details['architecture'] = 'amd64'
+                            else: # Giả định 'x86' là đúng định dạng
+                                current_edition_details['architecture'] = arch_val
+                        elif key == "Default Language":
+                            current_edition_details['language'] = value
+                
+                # Lưu lại phiên bản cuối cùng được phân tích
+                if current_edition_details and 'index' in current_edition_details and 'name' in current_edition_details:
+                    editions[current_edition_details['index']] = current_edition_details
 
                 if editions:
                     print(f"Các phiên bản Windows được tìm thấy: {editions}")
@@ -663,9 +687,15 @@ class PageISOSelect(QWidget):
         # Sắp xếp các phiên bản theo index để đảm bảo thứ tự
         sorted_editions = sorted(editions.items(), key=lambda item: int(item[0]))
 
-        for index, name in sorted_editions:
-            list_widget.addItem(f"{name} (Index: {index})")
-            list_widget.item(list_widget.count() - 1).setData(Qt.ItemDataRole.UserRole, (index, name))
+        for index, details in sorted_editions:
+            name = details.get('name', f"Unknown Edition {index}")
+            arch = details.get('architecture', 'N/A').upper()
+            lang = details.get('language', 'N/A')
+            # Hiển thị thêm thông tin Kiến trúc và Ngôn ngữ cho người dùng
+            display_text = f"{name} (Kiến trúc: {arch}, Ngôn ngữ: {lang}, Index: {index})"
+            list_widget.addItem(display_text)
+            # Lưu toàn bộ dict 'details' vào item data
+            list_widget.item(list_widget.count() - 1).setData(Qt.ItemDataRole.UserRole, details)
             if "Pro" in name and pro_index is None:
                 pro_index = list_widget.count() - 1
 
@@ -682,22 +712,25 @@ class PageISOSelect(QWidget):
         layout.addWidget(buttons)
         
         if dialog.exec() == QDialog.DialogCode.Accepted and list_widget.currentItem():
-            selected_data = list_widget.currentItem().data(Qt.ItemDataRole.UserRole)
-            iso_info_dict["windows_edition_index"] = selected_data[0]
-            iso_info_dict["windows_edition_name"] = selected_data[1]
-            iso_info_dict["alias"] = f"{iso_info_dict['windows_edition_name']} ({iso_info_dict['filename']})"
-            print(f"Đã chọn cho {iso_info_dict['filename']}: {selected_data[1]} (Index: {selected_data[0]})")
+            selected_details = list_widget.currentItem().data(Qt.ItemDataRole.UserRole)
+            iso_info_dict["windows_edition_index"] = selected_details.get("index")
+            iso_info_dict["windows_edition_name"] = selected_details.get("name")
+            iso_info_dict["windows_edition_arch"] = selected_details.get("architecture")
+            iso_info_dict["windows_edition_lang"] = selected_details.get("language")
+            iso_info_dict["alias"] = f"{selected_details.get('name')} ({iso_info_dict['filename']})"
+            print(f"Đã chọn cho {iso_info_dict['filename']}: {selected_details.get('name')} (Index: {selected_details.get('index')}, Arch: {selected_details.get('architecture')}, Lang: {selected_details.get('language')})")
             
-            # --- LOGIC HỎI KEY ĐƯỢC DI CHUYỂN VÀO ĐÂY ---
-            key = helpers.get_generic_key(selected_data[1])
+            key = helpers.get_generic_key(selected_details.get("name"))
             if not key:
-                key = self.main_app.ask_for_product_key(selected_data[1])
-            iso_info_dict["product_key"] = key # Lưu key vào dict
+                key = self.main_app.ask_for_product_key(selected_details.get("name"))
+            iso_info_dict["product_key"] = key
             print(f"Đã lấy Product Key: {'Có' if key else 'Không'}")
             
         else:
             iso_info_dict["windows_edition_index"] = None
             iso_info_dict["windows_edition_name"] = None
+            iso_info_dict["windows_edition_arch"] = None
+            iso_info_dict["windows_edition_lang"] = None
             iso_info_dict["alias"] = None
             iso_info_dict["product_key"] = None
             print(f"Không chọn tự động cài đặt cho {iso_info_dict['filename']}.")

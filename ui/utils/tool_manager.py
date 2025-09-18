@@ -57,6 +57,7 @@ def _update_task(main_window):
 
     tools = [
         ("Fido", config.FIDO_SCRIPT_PATH, _update_fido_script(main_window)),
+        ("oscdimg", config.OSCDIMG_EXE, _update_oscdimg_exe(main_window)),
         ("Ventoy", os.path.join(config.VENTOY_DIR, "Ventoy2Disk.exe"), lambda: _update_tool(main_window, "Ventoy", config.VENTOY_API_URL, r"ventoy-.*-windows\.zip", lambda zip_path, dest_dir: _unzip_and_move(main_window, zip_path, dest_dir))),
         ("aria2", config.ARIA2_EXE, lambda: _update_tool(main_window, "aria2", config.ARIA2_API_URL, r"aria2-.*-win-32bit-build.*\.zip", lambda zip_path, dest_dir: _unzip_and_move(main_window, zip_path, dest_dir))),
         ("wimlib", config.WIMLIB_EXE, lambda: _update_tool(main_window, "wimlib", config.WIMLIB_URL, r"wimlib-.*-windows.*\.zip", lambda zip_path, dest_dir: _unzip_and_move(main_window, zip_path, dest_dir), ssl_verify=False)),
@@ -102,6 +103,20 @@ def _update_fido_script(main_window):
         main_window.update_worker.status.emit("Cập nhật Fido thành công!")
     except Exception as e:
         error_message = f"Lỗi khi tải Fido.ps1: {e}"
+        main_window.update_worker.status.emit(error_message)
+        raise Exception(error_message)
+        
+def _update_oscdimg_exe(main_window):
+    """Tải trực tiếp file OSCDIMG từ Microsoft."""
+    try:
+        main_window.update_worker.status.emit("Đang tải OSCDIMG...")
+        response = requests.get(config.OSCDIMG_EXE_URL)
+        response.raise_for_status() # Báo lỗi nếu tải thất bại
+        with open(config.OSCDIMG_EXE, 'wb') as f:
+            f.write(response.content)
+        main_window.update_worker.status.emit("Cập nhật OSCDIMG thành công!")
+    except Exception as e:
+        error_message = f"Lỗi khi tải OSCDIMG: {e}"
         main_window.update_worker.status.emit(error_message)
         raise Exception(error_message)
 
