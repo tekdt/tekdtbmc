@@ -1,4 +1,4 @@
-import json, os, shutil, time, subprocess, ctypes, zipfile, config
+import json, os, shutil, time, subprocess, ctypes, zipfile, config, tempfile
 from ctypes import wintypes
 from pathlib import Path
 
@@ -366,6 +366,8 @@ def _create_fill_file(main_app, file_path, size_in_bytes, total_fill_target, spa
             except OSError: pass
         raise IOError(f"Không thể ghi vào file '{file_path}'. Đĩa có thể đã đầy. Lỗi: {e}")
 
+# helpers.py
+
 def _process_and_copy_iso(worker, main_app, iso_info, usb_mount_point, total_copy_size, copied_so_far, base_progress, progress_range):
     """
     Xử lý và sao chép một file ISO.
@@ -374,22 +376,28 @@ def _process_and_copy_iso(worker, main_app, iso_info, usb_mount_point, total_cop
     """
     dest_iso_path = os.path.join(usb_mount_point, iso_info['filename'])
 
-    # Điều kiện để lược bỏ: tùy chọn bật VÀ người dùng đã chọn một phiên bản cụ thể
     should_prune = main_app.config.get("prune_iso", True) and iso_info.get("windows_edition_index")
 
     if not should_prune:
-        # Sao chép như cũ
         return _copy_with_progress(worker, iso_info['path'], dest_iso_path, total_copy_size, copied_so_far, base_progress, progress_range)
 
-    # --- Logic lược bỏ ISO ---
     worker.status.emit(f"Đang tối ưu hóa ISO: {iso_info['filename']}...")
     print(f"Bắt đầu quá trình tối ưu hóa cho {iso_info['filename']}")
     
     mounted_drive = None
     temp_iso_content_dir = tempfile.mkdtemp(prefix="iso_content_")
-    
+
+    def _remove_readonly_attribute(path):
+        # Đi bộ qua tất cả các file và thư mục để gỡ bỏ thuộc tính read-only
+        for root, dirs, files in os.walk(path):
+            for name in files:
+                filepath = os.path.join(root, name)
+                os.chmod(filepath, 0o777) # stat.S_IWRITE
+            for name in dirs:
+                dirpath = os.path.join(root, name)
+                os.chmod(dirpath, 0o777)
+
     try:
-        # 1. Mount ISO
         worker.status.emit(f"Mounting {iso_info['filename']}...")
         mount_cmd = ['powershell', '-NoProfile', '-Command', f'Mount-DiskImage -ImagePath "{iso_info["path"]}" -PassThru | Get-Volume | Select-Object -ExpandProperty DriveLetter']
         proc = subprocess.run(mount_cmd, capture_output=True, text=True, check=True, creationflags=subprocess.CREATE_NO_WINDOW)
@@ -398,11 +406,20 @@ def _process_and_copy_iso(worker, main_app, iso_info, usb_mount_point, total_cop
         mounted_drive = f"{drive_letter}:\\"
         print(f"ISO được mount tới: {mounted_drive}")
 
-        # 2. Sao chép toàn bộ nội dung ISO vào thư mục tạm
         worker.status.emit("Sao chép nội dung ISO gốc...")
         shutil.copytree(mounted_drive, temp_iso_content_dir, dirs_exist_ok=True)
+        
+        # Gỡ bỏ thuộc tính read-only sau khi sao chép
+        worker.status.emit("Cập nhật quyền truy cập file tạm...")
+        _remove_readonly_attribute(temp_iso_content_dir)
+        print(f"Đã gỡ bỏ thuộc tính read-only cho các file trong: {temp_iso_content_dir}")
+        
+        # Unmount ISO ngay sau khi đã sao chép xong để giải phóng tài nguyên
+        unmount_cmd = ['powershell', '-NoProfile', '-Command', f'Dismount-DiskImage -ImagePath "{iso_info["path"]}"']
+        subprocess.run(unmount_cmd, capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW)
+        mounted_drive = None # Đánh dấu là đã unmount
+        print("Đã unmount ISO gốc để tiếp tục xử lý.")
 
-        # 3. Tìm file install.wim/esd
         wim_path_original = None
         wim_path_temp = None
         for ext in [".wim", ".esd"]:
@@ -414,50 +431,50 @@ def _process_and_copy_iso(worker, main_app, iso_info, usb_mount_point, total_cop
         
         if not wim_path_original: raise Exception("Không tìm thấy install.wim/esd trong ISO.")
 
-        # 4. Sử dụng wimlib để trích xuất chỉ index cần thiết
         worker.status.emit(f"Trích xuất phiên bản: {iso_info['windows_edition_name']}...")
         export_cmd = [
             str(config.WIMLIB_EXE), "export", wim_path_original, iso_info["windows_edition_index"],
-            wim_path_temp, "--compress=LZMS" # Sử dụng nén tốt
+            wim_path_temp, "--compress=LZMS"
         ]
         print(f"Đang chạy lệnh wimlib: {' '.join(export_cmd)}")
         subprocess.run(export_cmd, check=True, capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW)
 
-        # 5. Thay thế file WIM/ESD cũ bằng file đã được tối ưu
         os.remove(wim_path_original)
         shutil.move(wim_path_temp, wim_path_original)
         print("Đã thay thế file WIM/ESD thành công.")
 
-        # 6. Tạo lại file ISO mới
         worker.status.emit(f"Đang tạo lại file ISO tối ưu...")
         if not config.OSCDIMG_EXE.exists():
             raise FileNotFoundError(f"Không tìm thấy công cụ tạo ISO tại: {config.OSCDIMG_EXE}")
         
         temp_new_iso_path = os.path.join(tempfile.gettempdir(), iso_info['filename'])
+        # Xác định đường dẫn bootloader
+        bootloader_path = os.path.join(temp_iso_content_dir, "boot", "etfsboot.com")
+        efi_boot_path = os.path.join(temp_iso_content_dir, "efi", "microsoft", "boot", "efisys.bin")
+        if not os.path.exists(bootloader_path):
+             raise FileNotFoundError(f"Không tìm thấy bootloader tại: {bootloader_path}")
+        if not os.path.exists(efi_boot_path):
+            raise FileNotFoundError(f"Không tìm thấy EFI boot file tại: {efi_boot_path}")
+
         rebuild_cmd = [
             str(config.OSCDIMG_EXE),
-            "-m", # Bỏ qua giới hạn kích thước
-            "-o", # Tối ưu hóa file trùng lặp
-            "-u2", # UDF Filesystem
-            "-bootdata:2#p0,e,b" + os.path.join(temp_iso_content_dir, "boot", "etfsboot.com") + "#pEF,e,b" + os.path.join(temp_iso_content_dir, "efi", "microsoft", "boot", "efisys.bin"),
+            "-m", "-o", "-u2",
+            f"-bootdata:2#p0,e,b{bootloader_path}#pEF,e,b{efi_boot_path}",
             temp_iso_content_dir,
             temp_new_iso_path
         ]
         print(f"Đang chạy lệnh oscdimg: {' '.join(rebuild_cmd)}")
         subprocess.run(rebuild_cmd, check=True, capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW)
         
-        # 7. Sao chép ISO đã tối ưu vào USB
         worker.status.emit(f"Sao chép ISO đã tối ưu vào USB...")
         copied_bytes = _copy_with_progress(worker, temp_new_iso_path, dest_iso_path, total_copy_size, copied_so_far, base_progress, progress_range)
         
-        # 8. Dọn dẹp file ISO tạm
         os.remove(temp_new_iso_path)
         
         return copied_bytes
 
     finally:
-        # Dọn dẹp
-        if mounted_drive:
+        if mounted_drive: # Chỉ chạy nếu việc unmount ở trên thất bại
             unmount_cmd = ['powershell', '-NoProfile', '-Command', f'Dismount-DiskImage -ImagePath "{iso_info["path"]}"']
             subprocess.run(unmount_cmd, capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW)
         if os.path.exists(temp_iso_content_dir):
@@ -658,14 +675,14 @@ def create_usb_task(main_app):
         # --- GIAI ĐOẠN 4: GHI DẤU BẢN QUYỀN (ANTI-CLONING) ---
         worker.status.emit("Đang ghi dấu bản quyền lên USB...")
         try:
-            _write_usb_signature(main_app.config['device_details'])
+            # Truyền số hiệu ổ đĩa vật lý vào hàm
+            _write_usb_signature(main_app.config['device_details'], phy_drive_num)
             worker.status.emit("Ghi dấu bản quyền thành công.")
             print("Đã ghi chữ ký (signature) chống sao chép vào USB.")
         except Exception as sig_error:
-            # Đây không phải lỗi nghiêm trọng, chỉ cảnh báo
             print(f"Cảnh báo: Không thể ghi dấu bản quyền. Lỗi: {sig_error}")
             worker.status.emit("Cảnh báo: Không thể ghi dấu bản quyền.")
-            time.sleep(2) # Cho người dùng thấy cảnh báo
+            time.sleep(2)
         
         worker.progress.emit(100)
         worker.status.emit("Hoàn tất! USB đã sẵn sàng.")
@@ -709,48 +726,63 @@ def get_generic_key(edition_name):
         keys = json.load(f)
     return keys.get(edition_name)
 
-def _get_disk_signature_data(device_details):
+def _get_disk_id_with_diskpart(phy_drive_num):
     """
-    Tạo một chuỗi dữ liệu duy nhất từ thông tin phần cứng của ổ đĩa.
-    Thứ tự các thuộc tính là rất quan trọng và phải giống với bên AutoIt.
+    Sử dụng diskpart để lấy Disk ID (cho MBR) hoặc Disk GUID (cho GPT).
     """
-    if not device_details:
-        raise ValueError("Không có thông tin chi tiết về thiết bị (device_details).")
-
-    # Lấy các giá trị, thay thế bằng chuỗi rỗng nếu không có
-    serial = device_details.get('SerialNumber', '').strip()
-    model = device_details.get('Model', '').strip()
-    # Các giá trị này thường có trong kết quả Get-PhysicalDisk
-    vendor_id = device_details.get('VendorId', '').strip()
-    product_id = device_details.get('ProductId', '').strip()
-
-    # Tạo chuỗi định danh, các thuộc tính được nối với nhau bằng dấu gạch nối
-    # để đảm bảo tính nhất quán.
-    identifier_string = f"SERIAL:{serial}-MODEL:{model}-VENDOR:{vendor_id}-PRODUCT:{product_id}"
-    print(f"Chuỗi định danh USB để tạo hash: {identifier_string}")
-    return identifier_string
-
-def _write_usb_signature(device_details):
-    """
-    Tạo và ghi chữ ký SHA256 vào một sector gần cuối của ổ đĩa vật lý.
-    """
-    # 1. Tạo hash
-    signature_data = _get_disk_signature_data(device_details)
-    # Mã hóa chuỗi sang bytes trước khi băm
-    hashed_signature = hashlib.sha256(signature_data.encode('utf-8')).hexdigest()
+    script_content = f"select disk {phy_drive_num}\ndetail disk\nexit"
     
-    # 2. Chuẩn bị dữ liệu để ghi (đảm bảo nó dài đúng 512 bytes)
-    # Chữ ký (64 bytes) + padding bằng ký tự null
+    # Chạy diskpart và lấy output
+    proc = subprocess.run(
+        'diskpart',
+        input=script_content,
+        capture_output=True,
+        text=True,
+        encoding='utf-8',
+        errors='ignore',
+        creationflags=subprocess.CREATE_NO_WINDOW
+    )
+    
+    if proc.returncode != 0:
+        raise IOError(f"Diskpart thất bại khi lấy chi tiết ổ đĩa {phy_drive_num}.")
+
+    output = proc.stdout
+    # Thử tìm Disk GUID trước (cho GPT)
+    guid_match = re.search(r"Disk ID\s*:\s*\{([A-F0-9-]+)\}", output, re.IGNORECASE)
+    if guid_match:
+        disk_id = guid_match.group(1)
+        print(f"Tìm thấy Disk GUID (GPT): {disk_id}")
+        return disk_id
+
+    # Nếu không, tìm Disk ID (cho MBR)
+    id_match = re.search(r"Disk ID\s*:\s*([A-F0-9]+)", output, re.IGNORECASE)
+    if id_match:
+        disk_id = id_match.group(1)
+        print(f"Tìm thấy Disk ID (MBR): {disk_id}")
+        return disk_id
+
+    raise ValueError(f"Không thể tìm thấy Disk ID hoặc GUID cho ổ đĩa {phy_drive_num}.")
+
+def _write_usb_signature(device_details, phy_drive_num):
+    """
+    Tạo và ghi chữ ký dựa trên Disk ID/GUID vào một sector của ổ đĩa.
+    """
+    # 1. Lấy Disk ID/GUID
+    disk_identifier = _get_disk_id_with_diskpart(phy_drive_num)
+    
+    # 2. Tạo hash
+    hashed_signature = hashlib.sha256(disk_identifier.encode('utf-8')).hexdigest()
+    
+    # 3. Chuẩn bị dữ liệu để ghi
     sector_data = (hashed_signature + "::TEKDT_BMC_SIGNATURE").encode('utf-8')
     padded_data = sector_data.ljust(512, b'\0')
 
-    # 3. Ghi vào sector
-    drive_path = device_details.get('DeviceIDPath') # Ví dụ: \\.\PHYSICALDRIVE1
+    # 4. Ghi vào sector
+    drive_path = f"\\\\.\\PHYSICALDRIVE{phy_drive_num}"
     disk_size = device_details.get('Size', 0)
-    if not drive_path or disk_size == 0:
-        raise IOError("Không thể xác định đường dẫn hoặc kích thước ổ đĩa vật lý.")
+    if disk_size == 0:
+        raise IOError("Không thể xác định kích thước ổ đĩa vật lý.")
 
-    # Chọn sector thứ 10 từ cuối để ghi
     SECTOR_SIZE = 512
     target_offset = disk_size - (10 * SECTOR_SIZE)
     
@@ -758,7 +790,6 @@ def _write_usb_signature(device_details):
         raise IOError("Kích thước ổ đĩa quá nhỏ để ghi chữ ký.")
 
     try:
-        # Mở ổ đĩa vật lý ở chế độ ghi nhị phân
         with open(drive_path, 'rb+') as f:
             f.seek(target_offset)
             f.write(padded_data)
