@@ -1,13 +1,13 @@
 {
-    "device": "\\\\.\\PHYSICALDRIVE1",
-    "device_name": "JetFlash Transcend 8GB (7.36 GB) - USB",
+    "device": "\\\\.\\PHYSICALDRIVE3",
+    "device_name": "SMI USB DISK (30.45 GB) - USB",
     "partition_scheme": "GPT",
     "filesystem": "ExFAT",
     "theme": "Purple.zip",
     "fill_space": true,
     "iso_list": [
         {
-            "path": "D:/tekdtbmc/ISOs/Win10_22H2_English_x32v1.iso",
+            "path": "E:\\GitHub\\tekdtbmc\\ISOs\\Win10_22H2_English_x32v1.iso",
             "filename": "Win10_22H2_English_x32v1.iso",
             "edition_index": null,
             "edition_name": null,
@@ -26,13 +26,14 @@
     "prune_iso": true,
     "device_details": {
         "BusType": "USB",
-        "DeviceID": "1",
-        "FriendlyName": "JetFlash Transcend 8GB",
+        "DeviceID": "3",
+        "FriendlyName": "SMI USB DISK",
         "MediaType": "Unspecified",
         "ProductID": null,
-        "SerialNumber": "75PJ4IC7YY5L6BG2",
-        "Size": 7902068736,
+        "SerialNumber": "AA00000000000489",
+        "Size": 32700628992,
         "VendorID": null
     },
-    "install_mode": "DESTRUCTIVE"
+    "install_mode": "DESTRUCTIVE",
+    "iso_path": "E:\\GitHub\\tekdtbmc\\ISOs\\Win10_22H2_English_x32v1.iso"
 }
