@@ -1,7 +1,7 @@
-import json, os, shutil, time, subprocess, ctypes, zipfile, config, tempfile, re, hash, traceback
+import json, os, shutil, time, subprocess, ctypes, zipfile, config, tempfile, re, hashlib, traceback
 from ctypes import wintypes
 from pathlib import Path
-from secret_key import SECRET_KEY
+from ui.utils import secret_key
 
 def _copy_with_progress(worker, src, dst, total_copy_size, copied_so_far, base_progress, progress_range):
     """
