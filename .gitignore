@@ -3,7 +3,8 @@
 *.aria2
 *.7z
 ISOs
-Scripts
+secret_key.py
+secret_key.au3
 Tools
 build
 build.bat

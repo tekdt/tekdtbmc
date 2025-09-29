@@ -1,6 +1,7 @@
-import json, os, shutil, time, subprocess, ctypes, zipfile, config, tempfile
+import json, os, shutil, time, subprocess, ctypes, zipfile, config, tempfile, re, hash, traceback
 from ctypes import wintypes
 from pathlib import Path
+from secret_key import SECRET_KEY
 
 def _copy_with_progress(worker, src, dst, total_copy_size, copied_so_far, base_progress, progress_range):
     """
@@ -688,7 +689,6 @@ def create_usb_task(main_app):
         worker.status.emit("Hoàn tất! USB đã sẵn sàng.")
 
     except Exception as e:
-        import traceback
         traceback.print_exc()
         raise e
 
@@ -770,14 +770,17 @@ def _write_usb_signature(device_details, phy_drive_num):
     # 1. Lấy Disk ID/GUID
     disk_identifier = _get_disk_id_with_diskpart(phy_drive_num)
     
-    # 2. Tạo hash
-    hashed_signature = hashlib.sha256(disk_identifier.encode('utf-8')).hexdigest()
+    # 2. Sử dụng khóa bí mật đã được import
+    string_to_hash = disk_identifier + SECRET_KEY
     
-    # 3. Chuẩn bị dữ liệu để ghi
+    # 3. Tạo hash từ chuỗi đã kết hợp
+    hashed_signature = hashlib.sha256(string_to_hash.encode('utf-8')).hexdigest()
+    
+    # 4. Chuẩn bị dữ liệu để ghi
     sector_data = (hashed_signature + "::TEKDT_BMC_SIGNATURE").encode('utf-8')
     padded_data = sector_data.ljust(512, b'\0')
 
-    # 4. Ghi vào sector
+    # 5. Ghi vào sector
     drive_path = f"\\\\.\\PHYSICALDRIVE{phy_drive_num}"
     disk_size = device_details.get('Size', 0)
     if disk_size == 0:
