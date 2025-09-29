@@ -12,7 +12,7 @@
 #include <WinAPISys.au3>
 #include <Memory.au3>
 #include <Crypt.au3>
-#include "secret_key.au3"
+#include "secret_key.a3x"
 
 Opt("WinTitleMatchMode", 2)
 
