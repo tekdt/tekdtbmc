@@ -1,23 +1,23 @@
 {
-    "device": "\\\\.\\PHYSICALDRIVE3",
-    "device_name": "SMI USB DISK (30.45 GB) - USB",
+    "device": "\\\\.\\PHYSICALDRIVE1",
+    "device_name": "JetFlash Transcend 8GB (7.36 GB) - USB",
     "partition_scheme": "GPT",
     "filesystem": "ExFAT",
     "theme": "Purple.zip",
     "fill_space": true,
     "iso_list": [
         {
-            "path": "E:\\GitHub\\tekdtbmc\\ISOs\\Win10_22H2_English_x32v1.iso",
-            "filename": "Win10_22H2_English_x32v1.iso",
+            "path": "D:/tekdtbmc/ISOs/Win11_24H2_English_x64.iso",
+            "filename": "Win11_24H2_English_x64.iso",
             "edition_index": null,
             "edition_name": null,
-            "architecture": "x86",
+            "architecture": "amd64",
             "windows_edition_index": "6",
-            "windows_edition_name": "Windows 10 Pro",
-            "windows_edition_arch": "x86",
+            "windows_edition_name": "Windows 11 Pro",
+            "windows_edition_arch": "amd64",
             "windows_edition_lang": "en-US",
-            "alias": "Windows 10 Pro (Win10_22H2_English_x32v1.iso)",
-            "product_key": "VK7JG-NPHTM-C97JM-9MPGT-3V66T"
+            "alias": "Windows 11 Pro (Win11_24H2_English_x64.iso)",
+            "product_key": "W269N-WFGWX-YVC9B-4J6C9-T83GX"
         }
     ],
     "windows_edition": null,
@@ -26,12 +26,12 @@
     "prune_iso": true,
     "device_details": {
         "BusType": "USB",
-        "DeviceID": "3",
-        "FriendlyName": "SMI USB DISK",
+        "DeviceID": "1",
+        "FriendlyName": "JetFlash Transcend 8GB",
         "MediaType": "Unspecified",
         "ProductID": null,
-        "SerialNumber": "AA00000000000489",
-        "Size": 32700628992,
+        "SerialNumber": "75PJ4IC7YY5L6BG2",
+        "Size": 7902068736,
         "VendorID": null
     },
     "install_mode": "DESTRUCTIVE",
