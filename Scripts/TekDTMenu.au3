@@ -37,6 +37,7 @@ Global $g_aButtons_All[0][8] ; Mảng chứa TẤT CẢ các nút từ INI
 Global $g_hGUI, $g_hShrinkLabel, $hTitleBar, $hTitleText, $g_hFooterLabel
 Global $g_hScrollUp, $g_hScrollDown
 Global $g_iScrollOffset = 0 ; Vị trí cuộn hiện tại (index của nút đầu tiên)
+GLobal $CPU = RegRead("HKEY_LOCAL_MACHINE\HARDWARE\DESCRIPTION\System\CentralProcessor\0", "ProcessorNameString")
 
 Global $g_bIsShrunken = False
 Global $g_bIsAnimating = False
@@ -271,7 +272,8 @@ Func _HandleButtonPress($iCtrlID)
                 Case "AUTO_CLEAN_PARTITIONS"
                     _AutoCleanPartitions()
 				Case Else
-                    _RunTool($sAction)
+					If StringInStr($CPU, "AMD") AND StringInStr($sAction, "%ScriptDir%\Tools\SDIO%ARCH%\SDIO_R816.exe") Then Return
+					_RunTool($sAction)
             EndSwitch
 
             If Not $bWait Then Sleep(500)
@@ -404,7 +406,7 @@ Func _RunTool($sTool)
         EndIf
     EndIf
 
-    ; Kiểm tra và chạy tệp thực thi (giữ nguyên logic cũ, nhưng bây giờ nó sẽ kiểm tra lại sau khi đã giải nén)
+    ; Kiểm tra và chạy tệp thực thi (kiểm tra lại sau khi đã giải nén)
     If FileExists($sExePath) Then
         Run('"' & $sExePath & '" ' & $sParams, "", @SW_SHOW)
     Else
