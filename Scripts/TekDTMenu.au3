@@ -12,7 +12,7 @@
 #include <WinAPISys.au3>
 #include <Memory.au3>
 #include <Crypt.au3>
-#include "secret_key.a3x"
+#include "secret_key.au3"
 
 Opt("WinTitleMatchMode", 2)
 
@@ -919,16 +919,6 @@ Func _WaitForWinPEBootComplete()
     Sleep(1000)
 EndFunc
 
-Func ServiceExists($sServiceName)
-    Local $aServices = _Service_List()
-    If Not @error Then
-        For $i = 1 To $aServices[0][0]
-            If $aServices[$i][0] = $sServiceName Then Return True
-        Next
-    EndIf
-    Return False
-EndFunc
-
 ; Hàm kiểm tra BitLocker qua metadata sector
 Func _CheckBitLockerMetadata($iDiskNum, $iPartNum)
     Local $hDisk = _WinAPI_CreateFile("\\.\PhysicalDrive" & $iDiskNum, 2, 6, 6)
@@ -939,12 +929,12 @@ Func _CheckBitLockerMetadata($iDiskNum, $iPartNum)
 
     Local $tBuffer = DllStructCreate("byte[512]")
     Local $iBytesRead = 0
-    
+
     ; Đọc sector đầu tiên của partition
     _WinAPI_SetFilePointer($hDisk, 512 * _GetPartitionStartSector($iDiskNum, $iPartNum))
     Local $bSuccess = _WinAPI_ReadFile($hDisk, DllStructGetPtr($tBuffer), 512, $iBytesRead)
     _WinAPI_CloseHandle($hDisk)
-    
+
     If Not $bSuccess Or $iBytesRead <> 512 Then
         ConsoleWrite("Đọc sector thất bại. Thử qua diskpart." & @CRLF)
         Return _CheckBitLockerViaDiskpart($iDiskNum, $iPartNum)
@@ -958,52 +948,52 @@ EndFunc
 Func _CheckBitLockerViaDiskpart($iDiskNum, $iPartNum)
     Local $sTempFile = @TempDir & "\sector_dump_" & $iDiskNum & "_" & $iPartNum & ".bin"
     Local $sScript = @TempDir & "\read_sector.txt"
-    
+
     ; Tạo script diskpart
     FileWrite($sScript, "select disk " & $iDiskNum & @CRLF & _
                       "select partition " & $iPartNum & @CRLF & _
                       "dump sector 0 1 """ & $sTempFile & """" & @CRLF & _
                       "exit")
-    
+
     ; Chạy diskpart
     RunWait('diskpart /s "' & $sScript & '"', "", @SW_HIDE)
-    
+
     ; Kiểm tra nếu file tồn tại và có dữ liệu
     If Not FileExists($sTempFile) Or FileGetSize($sTempFile) < 512 Then
         FileDelete($sScript)
         Return False
     EndIf
-    
+
     Local $hFile = FileOpen($sTempFile, 16)
     Local $sData = FileRead($hFile, 512)
     FileClose($hFile)
-    
+
     ; Dọn dẹp
     FileDelete($sScript)
     FileDelete($sTempFile)
-    
+
     Return (StringInStr($sData, "-FVE-FS") > 0)
 EndFunc
 
 ; Hàm hỗ trợ lấy sector bắt đầu của partition
 Func _GetPartitionStartSector($iDiskNum, $iPartNum)
     Local $sOutput = "", $sScript = @TempDir & "\get_offset.txt"
-    
+
     FileWrite($sScript, "select disk " & $iDiskNum & @CRLF & _
                       "select partition " & $iPartNum & @CRLF & _
                       "detail partition" & @CRLF & _
                       "exit")
-    
+
     RunWait('diskpart /s "' & $sScript & '" > "' & @TempDir & '"\part_info.txt"', "", @SW_HIDE)
     $sOutput = FileRead(@TempDir & "\part_info.txt")
     FileDelete($sScript)
     FileDelete(@TempDir & "\part_info.txt")
-    
+
     Local $aMatches = StringRegExp($sOutput, "Offset\s*:\s*(\d+)\s*KB", 1)
     If Not @error Then
         Return Number($aMatches[0]) * 2 ; Convert KB to sectors (512B)
     EndIf
-    
+
     Return 0 ; Mặc định sector 0 nếu không xác định được
 EndFunc
 
@@ -1200,6 +1190,8 @@ Func _VerifyUSBSignature()
 
     Local $iOffset = $iDiskSize - (10 * 512)
     Local $sStoredData = _ReadSectorData($sPhysicalDrivePath, $iOffset, 512)
+	MsgBox(0,0,$sStoredData)
+	Exit
     If $sStoredData = "" Then
         ConsoleWrite("Lỗi: Không đọc được dữ liệu từ sector." & @CRLF)
         Return False
