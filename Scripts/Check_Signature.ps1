@@ -1,248 +1,270 @@
-#Requires -RunAsAdministrator
-<#
-.SYNOPSIS
-    Kiểm tra chữ ký USB đã được ghi bởi Python script (Đồng bộ hoàn toàn)
-
-.PARAMETER PhysicalDriveNumber
-    Số hiệu ổ đĩa cần kiểm tra (mặc định: 1)
-
-.PARAMETER SecretKey
-    Secret key dùng để tạo hash (phải khớp với Python)
-#>
+# ============================================================================
+# Script: Check USB Signature (100% synced with Python implementation)
+# Purpose: Verify USB authenticity by checking SHA256 hash signature
+# ============================================================================
 
 param(
-    [int]$PhysicalDriveNumber = 1,
-    [string]$SecretKey = "_TekDT@BMC391152"  # Thay bằng secret key thực tế
+    [int]$PhyDriveNum = -1  # -1 = check all drives
 )
 
-# ==================== CẤU HÌNH ====================
-$SECTOR_SIZE = 512
-$NUM_SECTORS = 10
-$REQUIRED_SPACE = $NUM_SECTORS * $SECTOR_SIZE
+# Import secret key (adjust path as needed)
+$ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+$SecretKeyFile = Join-Path $ScriptDir "secret_key.ps1"
 
-# ==================== HÀM CHÍNH ====================
+if (Test-Path $SecretKeyFile) {
+    . $SecretKeyFile
+    Write-Host "Secret key loaded" -ForegroundColor Green
+} else {
+    Write-Host "ERROR: secret_key.ps1 not found!" -ForegroundColor Red
+    exit 1
+}
 
-function Get-DiskIdentifier {
+# ============================================================================
+# Function: Get-DiskIDViaDiskpart
+# Get Disk ID/GUID using diskpart (same as Python)
+# ============================================================================
+function Get-DiskIDViaDiskpart {
     param([int]$DiskNum)
     
-    $scriptFile = "$env:TEMP\get_disk_id_$DiskNum.txt"
-    $outputFile = "$env:TEMP\disk_id_out_$DiskNum.txt"
+    $ScriptFile = [System.IO.Path]::GetTempFileName()
+    $OutputFile = [System.IO.Path]::GetTempFileName()
     
-    # Tạo script diskpart
     @"
 select disk $DiskNum
 detail disk
-list partition
 exit
-"@ | Out-File -FilePath $scriptFile -Encoding ASCII
+"@ | Out-File -FilePath $ScriptFile -Encoding ASCII
     
-    # Chạy diskpart
-    diskpart /s $scriptFile | Out-File -FilePath $outputFile -Encoding UTF8
-    $output = Get-Content -Path $outputFile -Raw
+    $null = diskpart /s $ScriptFile > $OutputFile 2>&1
+    $Output = Get-Content $OutputFile -Raw
     
-    # Dọn dẹp
-    Remove-Item $scriptFile, $outputFile -ErrorAction SilentlyContinue
+    Remove-Item $ScriptFile, $OutputFile -Force -ErrorAction SilentlyContinue
     
-    # Parse Disk ID (GPT GUID hoặc MBR hex)
-    if ($output -match 'Disk ID\s*:\s*\{([A-F0-9-]+)\}') {
-        $diskID = $matches[1]
-        Write-Host "Disk ID (GPT GUID): $diskID" -ForegroundColor Cyan
-    }
-    elseif ($output -match 'Disk ID\s*:\s*([A-F0-9]+)') {
-        $diskID = $matches[1]
-        Write-Host "Disk ID (MBR): $diskID" -ForegroundColor Cyan
-    }
-    else {
-        throw "Không tìm thấy Disk ID trong output của diskpart"
+    # Try to find GUID first (GPT)
+    if ($Output -match "Disk ID\s*:\s*\{([A-F0-9-]+)\}") {
+        return $Matches[1]
     }
     
-    return $diskID, $output
+    # Try to find Disk ID (MBR)
+    if ($Output -match "Disk ID\s*:\s*([A-F0-9]{8})") {
+        return $Matches[1]
+    }
+    
+    return $null
 }
 
-function Get-EndOfLastPartition {
-    param([string]$DiskpartOutput, [int]$DiskNum)
-    
-    $maxEnd = 0
-    
-    # Parse từng partition
-    $partitionMatches = [regex]::Matches($DiskpartOutput, 'Partition\s+(\d+).*?Offset:\s+(\d+)\s+KB.*?Size:\s+([\d.]+)\s+(MB|GB|TB|KB)')
-    
-    foreach ($match in $partitionMatches) {
-        $partNum = $match.Groups[1].Value
-        $offsetKB = [long]$match.Groups[2].Value
-        $size = [double]$match.Groups[3].Value
-        $unit = $match.Groups[4].Value
-        
-        # Quy đổi Size về KB
-        switch ($unit) {
-            'TB' { $sizeKB = $size * 1024 * 1024 * 1024 }
-            'GB' { $sizeKB = $size * 1024 * 1024 }
-            'MB' { $sizeKB = $size * 1024 }
-            'KB' { $sizeKB = $size }
-        }
-        
-        # Tính end (bytes)
-        $offsetBytes = $offsetKB * 1024
-        $sizeBytes = $sizeKB * 1024
-        $end = $offsetBytes + $sizeBytes
-        
-        if ($end -gt $maxEnd) {
-            $maxEnd = $end
-        }
-        
-        Write-Host "  Partition $partNum : Offset=$offsetBytes, Size=$sizeBytes, End=$end" -ForegroundColor Gray
-    }
-    
-    if ($maxEnd -eq 0) {
-        throw "Không tìm thấy partition nào hoặc không parse được"
-    }
-    
-    Write-Host "End of last partition: $maxEnd bytes" -ForegroundColor Cyan
-    return $maxEnd
-}
-
-function Get-DiskSizeViaWMI {
+# ============================================================================
+# Function: Get-DiskSizeViaDiskpart
+# Get exact disk size using diskpart (synced with Python WMI method)
+# ============================================================================
+function Get-DiskSizeViaDiskpart {
     param([int]$DiskNum)
     
-    $disk = Get-WmiObject -Class Win32_DiskDrive | Where-Object { $_.Index -eq $DiskNum }
-    if (-not $disk) {
-        throw "Không tìm thấy PhysicalDrive $DiskNum trong WMI"
+    try {
+        # Method 1: WMI (same as Python)
+        $Disk = Get-WmiObject -Class Win32_DiskDrive -Filter "Index = $DiskNum"
+        if ($Disk -and $Disk.Size) {
+            Write-Host "  → Disk size from WMI: $($Disk.Size) bytes" -ForegroundColor Cyan
+            return [int64]$Disk.Size
+        }
+    } catch {
+        Write-Host "  → WMI failed, trying diskpart..." -ForegroundColor Yellow
     }
     
-    $diskSize = [long]$disk.Size
-    Write-Host "Disk Size (WMI): $diskSize bytes" -ForegroundColor Cyan
-    return $diskSize
+    # Method 2: Parse diskpart detail disk
+    $ScriptFile = [System.IO.Path]::GetTempFileName()
+    $OutputFile = [System.IO.Path]::GetTempFileName()
+    
+    @"
+select disk $DiskNum
+detail disk
+exit
+"@ | Out-File -FilePath $ScriptFile -Encoding ASCII
+    
+    $null = diskpart /s $ScriptFile > $OutputFile 2>&1
+    $Output = Get-Content $OutputFile -Raw
+    
+    Remove-Item $ScriptFile, $OutputFile -Force -ErrorAction SilentlyContinue
+    
+    # Parse: "Disk ID: ... Type: ... Status: ... Capacity: XXX GB"
+    if ($Output -match "Capacity\s*:\s*([\d.]+)\s*(GB|MB|TB)") {
+        $Value = [double]$Matches[1]
+        $Unit = $Matches[2]
+        
+        $SizeBytes = switch ($Unit) {
+            "TB" { $Value * 1024 * 1024 * 1024 * 1024 }
+            "GB" { $Value * 1024 * 1024 * 1024 }
+            "MB" { $Value * 1024 * 1024 }
+            default { $Value }
+        }
+        
+        Write-Host "  → Disk size from diskpart: $([int64]$SizeBytes) bytes" -ForegroundColor Cyan
+        return [int64]$SizeBytes
+    }
+    
+    return 0
 }
 
+# ============================================================================
+# Function: Read-SectorData
+# Read data from specific offset (synced with Python)
+# ============================================================================
 function Read-SectorData {
     param(
         [string]$DevicePath,
-        [long]$Offset,
+        [int64]$Offset,
         [int]$BytesToRead
     )
     
     try {
-        $buffer = New-Object byte[] $BytesToRead
-        $fileStream = New-Object System.IO.FileStream(
-            $DevicePath, 
-            [System.IO.FileMode]::Open, 
-            [System.IO.FileAccess]::Read, 
+        # Open device with read access
+        $FileStream = New-Object System.IO.FileStream(
+            $DevicePath,
+            [System.IO.FileMode]::Open,
+            [System.IO.FileAccess]::Read,
             [System.IO.FileShare]::ReadWrite
         )
         
-        $fileStream.Seek($Offset, [System.IO.SeekOrigin]::Begin) | Out-Null
-        $bytesRead = $fileStream.Read($buffer, 0, $BytesToRead)
-        $fileStream.Close()
+        # Seek to offset
+        $null = $FileStream.Seek($Offset, [System.IO.SeekOrigin]::Begin)
         
-        if ($bytesRead -eq 0) {
-            throw "Đọc được 0 bytes"
+        # Read data
+        $Buffer = New-Object byte[] $BytesToRead
+        $BytesRead = $FileStream.Read($Buffer, 0, $BytesToRead)
+        
+        $FileStream.Close()
+        $FileStream.Dispose()
+        
+        if ($BytesRead -eq 0) {
+            Write-Host "  → ERROR: 0 bytes read from offset" -ForegroundColor Red
+            return ""
         }
         
-        Write-Host "Đã đọc $bytesRead bytes từ offset $Offset" -ForegroundColor Green
-        return $buffer
-    }
-    catch {
-        Write-Host "Lỗi khi đọc sector: $_" -ForegroundColor Red
-        return $null
+        Write-Host "  → Successfully read $BytesRead bytes from offset $Offset" -ForegroundColor Green
+        
+        # Convert to ASCII string (same as Python: decode as ASCII)
+        $Result = [System.Text.Encoding]::ASCII.GetString($Buffer)
+        
+        # Trim null characters
+        return $Result.TrimEnd([char]0)
+        
+    } catch {
+        Write-Host "  → ERROR reading sector: $_" -ForegroundColor Red
+        return ""
     }
 }
 
-function Get-SHA256Hash {
-    param([string]$InputString)
+# ============================================================================
+# Function: Verify-USBSignature
+# Main verification function (100% synced with Python)
+# ============================================================================
+function Verify-USBSignature {
+    param([int]$DiskNum)
     
-    $sha256 = [System.Security.Cryptography.SHA256]::Create()
-    $bytes = [System.Text.Encoding]::UTF8.GetBytes($InputString)
-    $hashBytes = $sha256.ComputeHash($bytes)
-    $hash = [System.BitConverter]::ToString($hashBytes) -replace '-', ''
+    Write-Host "`n=== Checking PhysicalDrive$DiskNum ===" -ForegroundColor Cyan
     
-    return $hash.ToLower()
+    # STEP 1: Get Disk ID/GUID
+    $DiskID = Get-DiskIDViaDiskpart -DiskNum $DiskNum
+    if (-not $DiskID) {
+        Write-Host "  → ERROR: Cannot get Disk ID. Skipping." -ForegroundColor Red
+        return $false
+    }
+    Write-Host "  Disk ID/GUID: $DiskID" -ForegroundColor White
+    
+    # STEP 2: Get Disk Size
+    $DiskSize = Get-DiskSizeViaDiskpart -DiskNum $DiskNum
+    if ($DiskSize -le 0) {
+        Write-Host "  → ERROR: Cannot get disk size. Skipping." -ForegroundColor Red
+        return $false
+    }
+    Write-Host "  Disk Size: $DiskSize bytes ($([math]::Round($DiskSize/1GB, 2)) GB)" -ForegroundColor White
+    
+    # STEP 3: Calculate target offset (EXACTLY as Python does)
+    $SECTOR_SIZE = 512
+    $NUM_SECTORS = 10
+    $RequiredSpace = $NUM_SECTORS * $SECTOR_SIZE
+    $TargetOffset = $DiskSize - $RequiredSpace
+    
+    Write-Host "  Target Offset: $TargetOffset bytes (Disk Size - $RequiredSpace)" -ForegroundColor White
+    
+    if ($TargetOffset -lt 0) {
+        Write-Host "  → ERROR: Negative offset. Skipping." -ForegroundColor Red
+        return $false
+    }
+    
+    # STEP 4: Generate expected hash (same as Python: SHA256(disk_id + secret_key))
+    $StringToHash = $DiskID + $SECRET_KEY
+    $SHA256 = [System.Security.Cryptography.SHA256]::Create()
+    $HashBytes = $SHA256.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($StringToHash))
+    $ExpectedHash = ($HashBytes | ForEach-Object { $_.ToString("x2") }) -join ""
+    $SHA256.Dispose()
+    
+    Write-Host "  Expected Hash: $ExpectedHash" -ForegroundColor Yellow
+    
+    # STEP 5: Read stored data from sector
+    $DevicePath = "\\.\PhysicalDrive$DiskNum"
+    $StoredData = Read-SectorData -DevicePath $DevicePath -Offset $TargetOffset -BytesToRead $SECTOR_SIZE
+    
+    if (-not $StoredData) {
+        Write-Host "  → ERROR: Cannot read data from offset." -ForegroundColor Red
+        return $false
+    }
+    
+    # STEP 6: Extract stored hash (first 64 hex characters)
+    $StoredHash = $StoredData.Substring(0, [Math]::Min(64, $StoredData.Length)).ToLower()
+    $StoredHash = $StoredHash -replace '[^0-9a-f]', ''  # Remove non-hex chars
+    
+    Write-Host "  Stored Hash:   $StoredHash" -ForegroundColor Yellow
+    
+    # STEP 7: Compare
+    if ($ExpectedHash -eq $StoredHash -and $StoredHash.Length -eq 64) {
+        Write-Host "`n✅ VERIFICATION SUCCESS on PhysicalDrive$DiskNum ✅`n" -ForegroundColor Green
+        return $true
+    } else {
+        Write-Host "  → Hash mismatch! USB may be cloned." -ForegroundColor Red
+        if ($StoredHash.Length -ne 64) {
+            Write-Host "    (Stored hash length: $($StoredHash.Length), expected: 64)" -ForegroundColor Red
+        }
+        return $false
+    }
 }
 
-# ==================== CHƯƠNG TRÌNH CHÍNH ====================
+# ============================================================================
+# Main Execution
+# ============================================================================
+Write-Host "`n============================================" -ForegroundColor Cyan
+Write-Host "USB Signature Verification Tool (Synced)" -ForegroundColor Cyan
+Write-Host "============================================`n" -ForegroundColor Cyan
 
-Write-Host "========================================" -ForegroundColor Yellow
-Write-Host "  USB Signature Checker (Python Synced)" -ForegroundColor Yellow
-Write-Host "========================================" -ForegroundColor Yellow
-Write-Host ""
-
-try {
-    # Bước 1: Lấy Disk ID
-    Write-Host "[1/5] Lấy Disk Identifier..." -ForegroundColor Cyan
-    $diskID, $diskpartOutput = Get-DiskIdentifier -DiskNum $PhysicalDriveNumber
-    
-    # Bước 2: Tính End of Last Partition
-    Write-Host "`n[2/5] Tính End of Last Partition..." -ForegroundColor Cyan
-    $endLastPart = Get-EndOfLastPartition -DiskpartOutput $diskpartOutput -DiskNum $PhysicalDriveNumber
-    
-    # Bước 3: Lấy Disk Size
-    Write-Host "`n[3/5] Lấy Disk Size..." -ForegroundColor Cyan
-    $diskSize = Get-DiskSizeViaWMI -DiskNum $PhysicalDriveNumber
-    
-    # Kiểm tra unallocated space
-    $unallocatedEnd = $diskSize - $endLastPart
-    Write-Host "Unallocated at end: $unallocatedEnd bytes" -ForegroundColor Cyan
-    
-    if ($unallocatedEnd -lt $REQUIRED_SPACE) {
-        Write-Host "CẢNH BÁO: Unallocated tại cuối không đủ ($unallocatedEnd < $REQUIRED_SPACE bytes)" -ForegroundColor Yellow
+if ($PhyDriveNum -ge 0) {
+    # Check specific drive
+    $Result = Verify-USBSignature -DiskNum $PhyDriveNum
+    exit $(if ($Result) { 0 } else { 1 })
+} else {
+    # Check all drives
+    $Found = $false
+    for ($i = 0; $i -le 15; $i++) {
+        $DevPath = "\\.\PhysicalDrive$i"
+        
+        # Quick check if drive exists
+        try {
+            $fs = New-Object System.IO.FileStream($DevPath, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::ReadWrite)
+            $fs.Close()
+            $fs.Dispose()
+            
+            if (Verify-USBSignature -DiskNum $i) {
+                $Found = $true
+                break
+            }
+        } catch {
+            # Drive doesn't exist, skip silently
+            continue
+        }
     }
     
-    # Tính target offset (GIỐNG PYTHON)
-    $targetOffset = $diskSize - $REQUIRED_SPACE
-    Write-Host "Target Offset: $targetOffset bytes (Hex: 0x$($targetOffset.ToString('X')))" -ForegroundColor Cyan
-    
-    # Bước 4: Tạo Expected Hash
-    Write-Host "`n[4/5] Tạo Expected Hash..." -ForegroundColor Cyan
-    $stringToHash = $diskID + $SecretKey
-    $expectedHash = Get-SHA256Hash -InputString $stringToHash
-    Write-Host "Expected Hash: $expectedHash" -ForegroundColor Green
-    
-    # Bước 5: Đọc và kiểm tra
-    Write-Host "`n[5/5] Đọc Stored Hash từ USB..." -ForegroundColor Cyan
-    $drivePath = "\\.\PHYSICALDRIVE$PhysicalDriveNumber"
-    $buffer = Read-SectorData -DevicePath $drivePath -Offset $targetOffset -BytesToRead $SECTOR_SIZE
-    
-    if ($null -eq $buffer) {
-        throw "Không đọc được dữ liệu từ ổ đĩa"
+    if (-not $Found) {
+        Write-Host "`n❌ VERIFICATION FAILED on all drives ❌`n" -ForegroundColor Red
+        exit 1
     }
-    
-    # Trích xuất hash (64 ký tự hex đầu tiên)
-    $storedHashBytes = $buffer[0..63]
-    $storedHash = [System.Text.Encoding]::ASCII.GetString($storedHashBytes).ToLower()
-    
-    # Kiểm tra format hex hợp lệ
-    if ($storedHash -notmatch '^[a-f0-9]{64}$') {
-        Write-Host "CẢNH BÁO: Stored hash không đúng format hex (có thể chưa ghi hoặc bị lỗi)" -ForegroundColor Yellow
-        Write-Host "Stored Hash (raw): $storedHash" -ForegroundColor Gray
-    }
-    else {
-        Write-Host "Stored Hash: $storedHash" -ForegroundColor Green
-    }
-    
-    # So sánh
-    Write-Host "`n========================================" -ForegroundColor Yellow
-    if ($expectedHash -eq $storedHash) {
-        Write-Host "✓ KIỂM TRA THÀNH CÔNG!" -ForegroundColor Green
-        Write-Host "USB này là bản gốc hợp lệ." -ForegroundColor Green
-    }
-    else {
-        Write-Host "✗ KIỂM TRA THẤT BẠI!" -ForegroundColor Red
-        Write-Host "USB này không hợp lệ hoặc đã bị sao chép." -ForegroundColor Red
-        Write-Host "`nChi tiết:" -ForegroundColor Yellow
-        Write-Host "  Expected: $expectedHash" -ForegroundColor Gray
-        Write-Host "  Stored  : $storedHash" -ForegroundColor Gray
-    }
-    Write-Host "========================================" -ForegroundColor Yellow
-    
-    # Hiển thị dữ liệu raw (để debug)
-    Write-Host "`n[DEBUG] Dữ liệu raw (512 bytes đầu):" -ForegroundColor DarkGray
-    $hexString = [System.BitConverter]::ToString($buffer) -replace '-', ' '
-    Write-Host $hexString.Substring(0, [Math]::Min(200, $hexString.Length)) -ForegroundColor DarkGray
-    Write-Host "..." -ForegroundColor DarkGray
+    exit 0
 }
-catch {
-    Write-Host "`n✗ LỖI: $_" -ForegroundColor Red
-    Write-Host $_.ScriptStackTrace -ForegroundColor DarkRed
-    exit 1
-}
-
-Write-Host "`nHoàn tất." -ForegroundColor Cyan
