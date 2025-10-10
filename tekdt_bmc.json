@@ -46,7 +46,7 @@
     "windows_edition": null,
     "windows_edition_index": null,
     "copy_ais_selection_only": true,
-    "prune_iso": true,
+    "prune_iso": false,
     "device_details": {
         "BusType": "USB",
         "DeviceID": "1",
