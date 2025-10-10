@@ -33,6 +33,7 @@ Global $g_iFooterHeight = _Scale(20)
 Global $g_iMainHeight = $g_iTitleHeight ; Sẽ được tính toán lại sau
 Global $g_iShrinkSize = _Scale(50)
 Global $g_iTransparency = 230 ; Độ trong suốt (0-255)
+Global Const $GENERIC_READ = 0x80000000
 
 Global $g_aButtons_All[0][8] ; Mảng chứa TẤT CẢ các nút từ INI
 Global $g_hGUI, $g_hShrinkLabel, $hTitleBar, $hTitleText, $g_hFooterLabel
@@ -1223,23 +1224,24 @@ Func _GetPhysicalDriveInfoViaAPI($iDiskNum)
     _ArrayAdd($aResult, $sDiskID)
 
     ; --- BƯỚC 2: LẤY KÍCH THƯỚC CHÍNH XÁC BẰNG WINAPI ---
-    Local $hDevice = _WinAPI_CreateFile("\\.\PhysicalDrive" & $iDiskNum, 0, BitOR($FILE_SHARE_READ, $FILE_SHARE_WRITE), 0, $OPEN_EXISTING)
-    If $hDevice = -1 Then Return SetError(2, 0, 0)
+    Local $hDevice = _WinAPI_CreateFile("\\.\PhysicalDrive" & $iDiskNum, $GENERIC_READ, BitOR($FILE_SHARE_READ, $FILE_SHARE_WRITE), 0, $OPEN_EXISTING)
+    If $hDevice = -1 Then
+		ConsoleWrite("WinAPI_CreateFile failed for PhysicalDrive" & $iDiskNum & ". Error: " & @error & @CRLF)
+		Return SetError(2, 0, 0)
+	EndIf
 
-    ; Định nghĩa cấu trúc DISK_GEOMETRY_EX chính xác theo tài liệu của Microsoft.
-    ; Cấu trúc này bao gồm một cấu trúc con DISK_GEOMETRY và sau đó là DiskSize.
     Local $tDiskGeometryEx = DllStructCreate( _
-            "int64 Cylinders;" & _      ; DISK_GEOMETRY.Cylinders
-            "uint MediaType;" & _       ; DISK_GEOMETRY.MediaType
-            "dword TracksPerCylinder;" & _ ; DISK_GEOMETRY.TracksPerCylinder
-            "dword SectorsPerTrack;" & _   ; DISK_GEOMETRY.SectorsPerTrack
-            "dword BytesPerSector;" & _    ; DISK_GEOMETRY.BytesPerSector
-            "int64 DiskSize" _           ; Kích thước đĩa chính xác bằng byte
+            "int64 Cylinders;" & _
+            "uint MediaType;" & _
+            "dword TracksPerCylinder;" & _
+            "dword SectorsPerTrack;" & _
+            "dword BytesPerSector;" & _
+            "int64 DiskSize" _
     )
 
     Local $aRet = DllCall("kernel32.dll", "bool", "DeviceIoControl", _
             "handle", $hDevice, _
-            "dword", 0x000700A0, _      ; IOCTL_DISK_GET_DRIVE_GEOMETRY_EX
+            "dword", 0x000700A0, _
             "ptr", 0, _
             "dword", 0, _
             "struct*", $tDiskGeometryEx, _
