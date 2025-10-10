@@ -1153,7 +1153,6 @@ Func _UpdateVisibleButtons($bHideAll = False)
     EndIf
 EndFunc
 
-; Thêm các hàm kiểm tra chữ ký vào cuối file, trước các hàm về giao diện
 ;===============================================================================
 ; Hàm: _VerifyUSBSignature
 ; Mục đích: Kiểm tra xem USB đang chạy có phải là USB gốc được tạo bởi chương trình không.
