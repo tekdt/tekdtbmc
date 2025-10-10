@@ -33,7 +33,6 @@ Global $g_iFooterHeight = _Scale(20)
 Global $g_iMainHeight = $g_iTitleHeight ; Sẽ được tính toán lại sau
 Global $g_iShrinkSize = _Scale(50)
 Global $g_iTransparency = 230 ; Độ trong suốt (0-255)
-Global Const $GENERIC_READ = 0x80000000
 
 Global $g_aButtons_All[0][8] ; Mảng chứa TẤT CẢ các nút từ INI
 Global $g_hGUI, $g_hShrinkLabel, $hTitleBar, $hTitleText, $g_hFooterLabel
@@ -1160,113 +1159,175 @@ EndFunc
 ; Trả về: True nếu hợp lệ, False nếu không.
 ;===============================================================================
 Func _VerifyUSBSignature()
-    ConsoleWrite("--- Bắt đầu kiểm tra chữ ký USB (WinAPI Method) ---" & @CRLF)
+    ConsoleWrite("--- Bắt đầu kiểm tra chữ ký USB (Synced with Python) ---" & @CRLF)
     Local $aDisks = _GetAllPhysicalDiskNumbers()
     If @error Then Return False
 
     For $iPhysicalDriveNum In $aDisks
         ConsoleWrite("--- Đang kiểm tra PhysicalDrive" & $iPhysicalDriveNum & " ---" & @CRLF)
         
-        ; SỬ DỤNG HÀM API ĐỂ LẤY THÔNG TIN CHÍNH XÁC
+        ; Lấy thông tin disk (đồng bộ với Python)
         Local $aDiskInfo = _GetPhysicalDriveInfoViaAPI($iPhysicalDriveNum)
         If @error Then
-            ConsoleWrite("Lỗi: Không thể lấy thông tin chi tiết cho PhysicalDrive" & $iPhysicalDriveNum & ". Bỏ qua." & @CRLF)
+            ConsoleWrite("Lỗi: Không thể lấy thông tin cho PhysicalDrive" & $iPhysicalDriveNum & ". Bỏ qua." & @CRLF)
             ContinueLoop
         EndIf
 
-        Local $sDiskIdentifier = $aDiskInfo[0]
-        Local $iDiskSize = $aDiskInfo[1]
+        Local $sDiskIdentifier = $aDiskInfo[0]  ; Disk ID/GUID
+        Local $iDiskSize = $aDiskInfo[1]        ; Kích thước disk (bytes)
+        Local $iEndLastPart = $aDiskInfo[2]     ; End of last partition (bytes)
         
         ConsoleWrite("Định danh (Disk ID): " & $sDiskIdentifier & @CRLF)
-        ConsoleWrite("Kích thước đĩa (API): " & $iDiskSize & " bytes" & @CRLF)
+        ConsoleWrite("Kích thước đĩa: " & $iDiskSize & " bytes" & @CRLF)
+        ConsoleWrite("End of last partition: " & $iEndLastPart & " bytes" & @CRLF)
+        
+        Local $iUnallocatedEnd = $iDiskSize - $iEndLastPart
+        ConsoleWrite("Unallocated at end: " & $iUnallocatedEnd & " bytes" & @CRLF)
 
+        ; QUAN TRỌNG: Tính offset GIỐNG HỆT Python
+        Local $SECTOR_SIZE = 512
+        Local $NUM_SECTORS = 10
+        Local $iRequiredSpace = $NUM_SECTORS * $SECTOR_SIZE
+        Local $iTargetOffset = $iDiskSize - $iRequiredSpace
+        
+        ConsoleWrite("Target offset: " & $iTargetOffset & " bytes" & @CRLF)
+        
+        If $iUnallocatedEnd < $iRequiredSpace Then
+            ConsoleWrite("Cảnh báo: Unallocated tại cuối không đủ (" & $iUnallocatedEnd & " < " & $iRequiredSpace & ")" & @CRLF)
+        EndIf
+        
+        If $iTargetOffset < 0 Then 
+            ConsoleWrite("Lỗi: Offset âm, bỏ qua disk này." & @CRLF)
+            ContinueLoop
+        EndIf
+
+        ; Tạo hash mong đợi (giống Python)
         Local $sStringToHash = $sDiskIdentifier & $g_sSecretKey
         Local $sExpectedHash = StringLower(_Crypt_HashData($sStringToHash, $CALG_SHA_256))
-        Local $iOffset = $iDiskSize - (10 * 512)
-        
-        If $iOffset < 0 Then ContinueLoop
+        ConsoleWrite("Expected hash: " & $sExpectedHash & @CRLF)
 
-        Local $sStoredData = _ReadSectorData("\\.\PhysicalDrive" & $iPhysicalDriveNum, $iOffset, 512)
-        If $sStoredData = "" Then ContinueLoop
+        ; Đọc dữ liệu từ sector
+        Local $sStoredData = _ReadSectorData("\\.\PhysicalDrive" & $iPhysicalDriveNum, $iTargetOffset, $SECTOR_SIZE)
+        If $sStoredData = "" Then 
+            ConsoleWrite("Lỗi: Không đọc được dữ liệu từ offset." & @CRLF)
+            ContinueLoop
+        EndIf
 
-        Local $sStoredHash = StringRegExpReplace($sStoredData, "(?s)^([a-f0-9]{64}).*", "$1")
+        ; Trích xuất hash từ dữ liệu đọc được (64 ký tự hex đầu tiên)
+        Local $sStoredHash = StringLower(StringRegExpReplace($sStoredData, "(?s)^([a-f0-9]{64}).*", "$1"))
+        ConsoleWrite("Stored hash: " & $sStoredHash & @CRLF)
         
+        ; So sánh
         If $sExpectedHash = $sStoredHash And $sStoredHash <> "" Then
-            ConsoleWrite("--- KIỂM TRA THÀNH CÔNG trên PhysicalDrive" & $iPhysicalDriveNum & ". ---" & @CRLF)
+            ConsoleWrite(">>> KIỂM TRA THÀNH CÔNG trên PhysicalDrive" & $iPhysicalDriveNum & " <<<" & @CRLF)
             Return True
+        Else
+            ConsoleWrite("Hash không khớp trên PhysicalDrive" & $iPhysicalDriveNum & @CRLF)
         EndIf
     Next
 
-    ConsoleWrite("--- KIỂM TRA THẤT BẠI trên tất cả các ổ đĩa. ---" & @CRLF)
+    ConsoleWrite("--- KIỂM TRA THẤT BẠI trên tất cả các ổ đĩa ---" & @CRLF)
     Return False
 EndFunc
 
 ;===============================================================================
-; Lấy thông tin ổ đĩa bằng WinAPI và diskpart
-; - Dùng WinAPI để lấy KÍCH THƯỚC BYTE CHÍNH XÁC.
-; - Dùng diskpart để lấy DISK ID.
+; HÀM: _GetPhysicalDriveInfoViaAPI
+; Trả về: Array [Disk ID, Disk Size, End of Last Partition]
 ;===============================================================================
 Func _GetPhysicalDriveInfoViaAPI($iDiskNum)
+    Local $aResult[3]
+    
     ; --- BƯỚC 1: LẤY DISK ID BẰNG DISKPART ---
-    Local $aResult[0]
     Local $sScriptFile = @TempDir & "\get_disk_id.txt"
     Local $sOutputFile = @TempDir & "\disk_id_out.txt"
-    FileWrite($sScriptFile, "select disk " & $iDiskNum & @CRLF & "detail disk" & @CRLF & "exit")
+    
+    FileWrite($sScriptFile, "select disk " & $iDiskNum & @CRLF & "detail disk" & @CRLF & "list partition" & @CRLF & "exit")
     RunWait(@ComSpec & ' /c diskpart /s "' & $sScriptFile & '" > "' & $sOutputFile & '"', "", @SW_HIDE)
+    
     Local $sOutput = FileRead($sOutputFile)
     FileDelete($sScriptFile)
     FileDelete($sOutputFile)
 
+    ; Parse Disk ID (GUID cho GPT hoặc hex cho MBR)
     Local $sDiskID = ""
-    Local $aMatch = StringRegExp($sOutput, "Disk ID\s*:\s*\{?([A-F0-9-]+)\}?", 1)
-    If Not @error Then $sDiskID = $aMatch[0]
-    If $sDiskID = "" Then Return SetError(1, 0, 0)
-    _ArrayAdd($aResult, $sDiskID)
-
-    ; --- BƯỚC 2: LẤY KÍCH THƯỚC CHÍNH XÁC BẰNG WINAPI ---
-    Local $hDevice = _WinAPI_CreateFile("\\.\PhysicalDrive" & $iDiskNum, $GENERIC_READ, BitOR($FILE_SHARE_READ, $FILE_SHARE_WRITE), 0, $OPEN_EXISTING)
-    If $hDevice = -1 Then
-		ConsoleWrite("WinAPI_CreateFile failed for PhysicalDrive" & $iDiskNum & ". Error: " & @error & @CRLF)
-		Return SetError(2, 0, 0)
-	EndIf
-
-    Local $tDiskGeometryEx = DllStructCreate( _
-            "int64 Cylinders;" & _
-            "uint MediaType;" & _
-            "dword TracksPerCylinder;" & _
-            "dword SectorsPerTrack;" & _
-            "dword BytesPerSector;" & _
-            "int64 DiskSize" _
-    )
-
-    Local $aRet = DllCall("kernel32.dll", "bool", "DeviceIoControl", _
-            "handle", $hDevice, _
-            "dword", 0x000700A0, _
-            "ptr", 0, _
-            "dword", 0, _
-            "struct*", $tDiskGeometryEx, _
-            "dword", DllStructGetSize($tDiskGeometryEx), _
-            "dword*", 0, _
-            "ptr", 0)
-
-    _WinAPI_CloseHandle($hDevice)
-
-    If @error Or Not $aRet[0] Then
-        ConsoleWrite("DeviceIoControl failed. Error: " & _WinAPI_GetLastError() & @CRLF)
-        Return SetError(3, 0, 0)
+    Local $aMatchGUID = StringRegExp($sOutput, "Disk ID\s*:\s*\{([A-F0-9-]+)\}", 1)
+    If Not @error Then
+        $sDiskID = $aMatchGUID[0]
+    Else
+        Local $aMatchMBR = StringRegExp($sOutput, "Disk ID\s*:\s*([A-F0-9]+)", 1)
+        If Not @error Then $sDiskID = $aMatchMBR[0]
     EndIf
+    
+    If $sDiskID = "" Then Return SetError(1, 0, 0)
+    $aResult[0] = $sDiskID
 
-    Local $iDiskSize = DllStructGetData($tDiskGeometryEx, "DiskSize")
-    ConsoleWrite("DiskSize from API (Corrected): " & $iDiskSize & " bytes" & @CRLF)
+    ; --- BƯỚC 2: TÍNH END_OF_LAST_PARTITION ---
+    ; Parse từng partition để tìm max(Offset + Size)
+    Local $iMaxEnd = 0
+    Local $aPartMatches = StringRegExp($sOutput, "Partition\s+(\d+).*?Offset:\s+(\d+)\s+KB.*?Size:\s+([\d.]+)\s+(MB|GB|TB|KB)", 3)
+    
+    If IsArray($aPartMatches) And UBound($aPartMatches) > 0 Then
+        For $i = 0 To UBound($aPartMatches) - 1 Step 4
+            Local $iOffsetKB = Number($aPartMatches[$i + 1])
+            Local $fSize = Number($aPartMatches[$i + 2])
+            Local $sUnit = $aPartMatches[$i + 3]
+            
+            ; Quy đổi Size về KB
+            Local $iSizeKB = $fSize
+            If $sUnit = "GB" Then $iSizeKB = $fSize * 1024 * 1024
+            If $sUnit = "MB" Then $iSizeKB = $fSize * 1024
+            If $sUnit = "TB" Then $iSizeKB = $fSize * 1024 * 1024 * 1024
+            
+            ; Tính end của partition này (bytes)
+            Local $iOffsetBytes = $iOffsetKB * 1024
+            Local $iSizeBytes = $iSizeKB * 1024
+            Local $iEnd = $iOffsetBytes + $iSizeBytes
+            
+            If $iEnd > $iMaxEnd Then $iMaxEnd = $iEnd
+            
+            ConsoleWrite("  Partition " & $aPartMatches[$i] & ": Offset=" & $iOffsetBytes & ", Size=" & $iSizeBytes & ", End=" & $iEnd & @CRLF)
+        Next
+    EndIf
+    
+    If $iMaxEnd = 0 Then Return SetError(2, 0, 0)
+    $aResult[2] = $iMaxEnd
 
-    _ArrayAdd($aResult, $iDiskSize)
+    ; --- BƯỚC 3: LẤY KÍCH THƯỚC ĐĨA BẰNG WMI ---
+    Local $iDiskSize = _GetDiskSizeViaWMI($iDiskNum)
+    If @error Then Return SetError(3, 0, 0)
+    $aResult[1] = $iDiskSize
+
     Return $aResult
 EndFunc
 
-; Hàm hỗ trợ lấy số hiệu ổ đĩa
+;===============================================================================
+; HÀM: _GetDiskSizeViaWMI
+;===============================================================================
+Func _GetDiskSizeViaWMI($iDiskNum)
+    Local $oWMI = ObjGet("winmgmts:\\.\root\cimv2")
+    If Not IsObj($oWMI) Then Return SetError(1, 0, 0)
+    
+    Local $sQuery = "SELECT Size FROM Win32_DiskDrive WHERE Index = " & $iDiskNum
+    Local $colDisks = $oWMI.ExecQuery($sQuery)
+    If Not IsObj($colDisks) Then Return SetError(2, 0, 0)
+    
+    For $oDisk In $colDisks
+        Local $iDiskSize = Number($oDisk.Size)
+        If $iDiskSize > 0 Then
+            ConsoleWrite("Disk Size từ WMI: " & $iDiskSize & " bytes" & @CRLF)
+            Return $iDiskSize
+        EndIf
+    Next
+    
+    Return SetError(3, 0, 0)
+EndFunc
+
+;===============================================================================
+; HÀM: _GetAllPhysicalDiskNumbers
+;===============================================================================
 Func _GetAllPhysicalDiskNumbers()
     Local $aDiskNumbers[0]
-    For $i = 0 to 15 ; Quét từ PhysicalDrive0 đến 10
+    For $i = 0 To 15
         Local $hDevice = _WinAPI_CreateFile("\\.\PhysicalDrive" & $i, 0, BitOR($FILE_SHARE_READ, $FILE_SHARE_WRITE), 0, $OPEN_EXISTING)
         If $hDevice <> -1 Then
             _WinAPI_CloseHandle($hDevice)
@@ -1278,22 +1339,59 @@ Func _GetAllPhysicalDiskNumbers()
 EndFunc
 
 ;===============================================================================
-; Hàm: _ReadSectorData
-; Mục đích: Đọc dữ liệu từ một sector cụ thể của ổ đĩa vật lý.
+; HÀM: _ReadSectorData
+; Đọc dữ liệu từ offset cụ thể của ổ đĩa vật lý
 ;===============================================================================
 Func _ReadSectorData($sDevicePath, $iOffset, $iBytesToRead)
-    Local $hFile = DllCall("kernel32.dll", "handle", "CreateFile", "str", $sDevicePath, "dword", 0x80000000, "dword", 1, "ptr", 0, "dword", 3, "dword", 0, "ptr", 0)
-    If @error Or $hFile[0] = -1 Then Return ""
-
-    Local $tBuffer = DllStructCreate("byte[" & $iBytesToRead & "]")
-    Local $iBytesRead = 0
-
-    _WinAPI_SetFilePointer($hFile[0], $iOffset, 0)
-    _WinAPI_ReadFile($hFile[0], DllStructGetPtr($tBuffer), $iBytesToRead, $iBytesRead)
-    _WinAPI_CloseHandle($hFile[0])
-
-    If $iBytesRead > 0 Then
-        Return BinaryToString(DllStructGetData($tBuffer, 1), 1) ;
+    ; Mở file với quyền đọc
+    Local $hFile = DllCall("kernel32.dll", "handle", "CreateFileW", _
+        "wstr", $sDevicePath, _
+        "dword", 0x80000000, _  ; GENERIC_READ
+        "dword", 3, _            ; FILE_SHARE_READ | FILE_SHARE_WRITE
+        "ptr", 0, _
+        "dword", 3, _            ; OPEN_EXISTING
+        "dword", 0, _
+        "ptr", 0)
+    
+    If @error Or $hFile[0] = -1 Or $hFile[0] = 0 Then
+        ConsoleWrite("Lỗi: Không thể mở " & $sDevicePath & @CRLF)
+        Return ""
     EndIf
-    Return ""
+
+    ; Di chuyển file pointer đến offset
+    Local $iOffsetLow = BitAND($iOffset, 0xFFFFFFFF)
+    Local $iOffsetHigh = BitShift($iOffset, 32)
+    
+    Local $aResult = DllCall("kernel32.dll", "dword", "SetFilePointer", _
+        "handle", $hFile[0], _
+        "long", $iOffsetLow, _
+        "long*", $iOffsetHigh, _
+        "dword", 0) ; FILE_BEGIN
+    
+    If @error Or $aResult[0] = 0xFFFFFFFF Then
+        ConsoleWrite("Lỗi: Không thể SetFilePointer" & @CRLF)
+        DllCall("kernel32.dll", "bool", "CloseHandle", "handle", $hFile[0])
+        Return ""
+    EndIf
+
+    ; Đọc dữ liệu
+    Local $tBuffer = DllStructCreate("byte[" & $iBytesToRead & "]")
+    Local $aBytesRead = DllCall("kernel32.dll", "bool", "ReadFile", _
+        "handle", $hFile[0], _
+        "ptr", DllStructGetPtr($tBuffer), _
+        "dword", $iBytesToRead, _
+        "dword*", 0, _
+        "ptr", 0)
+    
+    DllCall("kernel32.dll", "bool", "CloseHandle", "handle", $hFile[0])
+    
+    If @error Or Not $aBytesRead[0] Or $aBytesRead[4] = 0 Then
+        ConsoleWrite("Lỗi: Không đọc được dữ liệu" & @CRLF)
+        Return ""
+    EndIf
+    
+    ConsoleWrite("Đã đọc " & $aBytesRead[4] & " bytes từ offset " & $iOffset & @CRLF)
+    
+    ; Chuyển đổi sang string (ASCII encoding để giữ nguyên dữ liệu)
+    Return BinaryToString(DllStructGetData($tBuffer, 1), 1)
 EndFunc
