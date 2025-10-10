@@ -766,32 +766,38 @@ def _get_disk_id_with_diskpart(phy_drive_num):
 def _write_usb_signature(device_details, phy_drive_num):
     """
     Tạo và ghi chữ ký dựa trên Disk ID/GUID vào một sector của ổ đĩa.
+    (Phiên bản đã được tinh chỉnh và xác nhận)
     """
-    # 1. Lấy Disk ID/GUID
+    # 1. Lấy Disk ID/GUID (Logic này nhất quán với AutoIt)
     disk_identifier = _get_disk_id_with_diskpart(phy_drive_num)
     
-    # 2. Sử dụng khóa bí mật đã được import
-    string_to_hash = disk_identifier + SECRET_KEY
+    # 2. Sử dụng khóa bí mật
+    string_to_hash = disk_identifier + secret_key.SECRET_KEY
     
-    # 3. Tạo hash từ chuỗi đã kết hợp
+    # 3. Tạo hash SHA-256
     hashed_signature = hashlib.sha256(string_to_hash.encode('utf-8')).hexdigest()
     
-    # 4. Chuẩn bị dữ liệu để ghi
-    sector_data = (hashed_signature + "::TEKDT_BMC_SIGNATURE").encode('utf-8')
+    # 4. Chuẩn bị dữ liệu để ghi (64 bytes hash + null padding -> 512 bytes)
+    # Script AutoIt chỉ đọc 64 ký tự đầu tiên, nên chỉ cần ghi hash là đủ.
+    # Việc padding đảm bảo sector được ghi đè hoàn toàn.
+    sector_data = hashed_signature.encode('ascii')
     padded_data = sector_data.ljust(512, b'\0')
 
-    # 5. Ghi vào sector
+    # 5. Lấy kích thước đĩa chính xác từ device_details
     drive_path = f"\\\\.\\PHYSICALDRIVE{phy_drive_num}"
-    disk_size = device_details.get('Size', 0)
+    disk_size = int(device_details.get('Size', 0))
     if disk_size == 0:
         raise IOError("Không thể xác định kích thước ổ đĩa vật lý.")
 
+    # 6. Tính toán offset (Logic này giờ đã đồng bộ với AutoIt)
     SECTOR_SIZE = 512
-    target_offset = disk_size - (10 * SECTOR_SIZE)
+    # Ghi vào sector thứ 10 tính từ cuối đĩa
+    target_offset = disk_size - (10 * SECTOR_TO_WRITE_SIZE) 
     
     if target_offset < 0:
         raise IOError("Kích thước ổ đĩa quá nhỏ để ghi chữ ký.")
 
+    # 7. Ghi dữ liệu vào sector
     try:
         with open(drive_path, 'rb+') as f:
             f.seek(target_offset)

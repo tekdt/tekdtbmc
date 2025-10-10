@@ -225,39 +225,72 @@ class PageDeviceSelect(QWidget):
     def _on_eligibility_finished(self, success, message):
         """Callback mới để reset flag sau khi eligibility check xong."""
         self.is_checking_eligibility = False
-    
+
     def _check_hdd_eligibility_task(self, disk_id):
         """
-        Checks a disk for sufficient unallocated space for non-destructive install.
-        Returns a tuple: (is_eligible, message)
+        Kiểm tra xem một ổ đĩa có đủ dung lượng trống liền mạch Ở CUỐI ĐĨA
+        cho việc cài đặt không phá hủy hay không.
         """
         try:
-            # 1. Get total disk size
+            # 1. Lấy thông tin về phân vùng cuối cùng trên đĩa
+            # Sắp xếp các phân vùng theo vị trí bắt đầu (Offset) giảm dần và lấy cái đầu tiên
+            cmd_last_partition = (
+                f"Get-Partition -DiskNumber {disk_id} | "
+                f"Sort-Object -Property Offset -Descending | "
+                f"Select-Object -First 1 | "
+                f"ConvertTo-Json -Compress"
+            )
+            proc_last_partition = subprocess.run(
+                ['powershell', '-Command', cmd_last_partition],
+                capture_output=True, text=True, check=True, creationflags=subprocess.CREATE_NO_WINDOW
+            )
+            
+            last_partition_info_str = proc_last_partition.stdout.strip()
+            
+            end_of_last_partition = 0
+            if last_partition_info_str:
+                # Nếu có phân vùng, tính toán điểm kết thúc của nó
+                last_partition = json.loads(last_partition_info_str)
+                # Offset là vị trí bắt đầu, cộng với Size để ra điểm kết thúc
+                end_of_last_partition = int(last_partition.get('Offset', 0)) + int(last_partition.get('Size', 0))
+            # Nếu không có phân vùng nào, coi như toàn bộ đĩa là không gian trống từ offset 0
+            
+            # 2. Lấy tổng kích thước của đĩa
             cmd_disk_size = f"(Get-Disk -Number {disk_id}).Size"
-            proc_disk_size = subprocess.run(['powershell', '-Command', cmd_disk_size], capture_output=True, text=True, check=True, creationflags=subprocess.CREATE_NO_WINDOW)
+            proc_disk_size = subprocess.run(
+                ['powershell', '-Command', cmd_disk_size],
+                capture_output=True, text=True, check=True, creationflags=subprocess.CREATE_NO_WINDOW
+            )
             total_size = int(proc_disk_size.stdout.strip())
 
-            # 2. Get sum of all partitions' sizes
-            cmd_partitions_size = f"Get-Partition -DiskNumber {disk_id} | Measure-Object -Property Size -Sum | Select-Object -ExpandProperty Sum"
-            proc_partitions_size = subprocess.run(['powershell', '-Command', cmd_partitions_size], capture_output=True, text=True, check=True, creationflags=subprocess.CREATE_NO_WINDOW)
+            # 3. Tính dung lượng trống ở cuối đĩa
+            unallocated_space_at_end = total_size - end_of_last_partition
             
-            # Xử lý trường hợp không có phân vùng nào
-            partitions_output = proc_partitions_size.stdout.strip()
-            partitions_total_size = int(partitions_output) if partitions_output else 0
-            
-            unallocated_space = total_size - partitions_total_size
-            
-            if unallocated_space >= MIN_UNALLOCATED_SPACE_BYTES:
-                gb_space = unallocated_space / (1024**3)
-                return (True, f"Phát hiện {gb_space:.2f} GB dung lượng trống. Sẵn sàng cho cài đặt không phá hủy.")
+            if unallocated_space_at_end >= MIN_UNALLOCATED_SPACE_BYTES:
+                gb_space = unallocated_space_at_end / (1024**3)
+                return (True, f"Phát hiện {gb_space:.2f} GB dung lượng trống ở cuối đĩa. Sẵn sàng cho cài đặt không phá hủy.")
             else:
                 gb_required = MIN_UNALLOCATED_SPACE_BYTES / (1024**3)
-                return (False, f"Không đủ dung lượng chưa phân bổ ở cuối ổ đĩa. Yêu cầu ít nhất {gb_required:.2f} GB.")
+                gb_available = unallocated_space_at_end / (1024**3) if unallocated_space_at_end > 0 else 0
+                return (False, f"Không đủ dung lượng trống ở cuối đĩa (có {gb_available:.2f} GB). Yêu cầu ít nhất {gb_required:.2f} GB.")
 
         except Exception as e:
+            # Xử lý trường hợp không có phân vùng nào (toàn bộ đĩa trống)
+            if "Cannot convert null to type" in str(e) or "Cannot index into a null array" in str(e):
+                 try:
+                    cmd_disk_size = f"(Get-Disk -Number {disk_id}).Size"
+                    proc_disk_size = subprocess.run(['powershell', '-Command', cmd_disk_size], capture_output=True, text=True, check=True, creationflags=subprocess.CREATE_NO_WINDOW)
+                    total_size = int(proc_disk_size.stdout.strip())
+                    if total_size >= MIN_UNALLOCATED_SPACE_BYTES:
+                        gb_space = total_size / (1024**3)
+                        return (True, f"Toàn bộ ổ đĩa ({gb_space:.2f} GB) chưa được phân bổ. Sẵn sàng để cài đặt.")
+                 except Exception as inner_e:
+                     print(f"Lỗi khi kiểm tra ổ cứng trống: {inner_e}")
+                     return (False, "Lỗi khi kiểm tra ổ đĩa. Không thể tiếp tục.")
+
             print(f"Lỗi khi kiểm tra ổ cứng: {e}")
             return (False, "Lỗi khi kiểm tra ổ đĩa. Không thể tiếp tục.")
-
+    
     def _handle_hdd_eligibility_result(self, result):
         is_eligible, message = result
         if is_eligible:

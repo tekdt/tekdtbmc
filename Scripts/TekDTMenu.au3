@@ -1,3 +1,4 @@
+#RequireAdmin
 #include <GUIConstantsEx.au3>
 #include <WindowsConstants.au3>
 #include <StaticConstants.au3>
@@ -1159,131 +1160,120 @@ EndFunc
 ; Trả về: True nếu hợp lệ, False nếu không.
 ;===============================================================================
 Func _VerifyUSBSignature()
-    ConsoleWrite("--- Bắt đầu kiểm tra chữ ký USB ---" & @CRLF)
+    ConsoleWrite("--- Bắt đầu kiểm tra chữ ký USB (WinAPI Method) ---" & @CRLF)
+    Local $aDisks = _GetAllPhysicalDiskNumbers()
+    If @error Then Return False
 
-    Local $sScriptDrive = StringLeft(@ScriptDir, 2)
-    If $sScriptDrive = "" Then
-        ConsoleWrite("Lỗi: Không thể xác định ký tự ổ đĩa của script." & @CRLF)
-        Return False
-    EndIf
-    ConsoleWrite("Script đang chạy trên ổ: " & $sScriptDrive & @CRLF)
+    For $iPhysicalDriveNum In $aDisks
+        ConsoleWrite("--- Đang kiểm tra PhysicalDrive" & $iPhysicalDriveNum & " ---" & @CRLF)
+        
+        ; SỬ DỤNG HÀM API ĐỂ LẤY THÔNG TIN CHÍNH XÁC
+        Local $aDiskInfo = _GetPhysicalDriveInfoViaAPI($iPhysicalDriveNum)
+        If @error Then
+            ConsoleWrite("Lỗi: Không thể lấy thông tin chi tiết cho PhysicalDrive" & $iPhysicalDriveNum & ". Bỏ qua." & @CRLF)
+            ContinueLoop
+        EndIf
 
-    Local $aDiskInfo = _GetPhysicalDriveInfoFromLetter($sScriptDrive)
-    If @error Or UBound($aDiskInfo) < 3 Then
-        ConsoleWrite("Lỗi: Không thể tìm thấy thông tin ổ đĩa vật lý." & @CRLF)
-        Return False
-    EndIf
+        Local $sDiskIdentifier = $aDiskInfo[0]
+        Local $iDiskSize = $aDiskInfo[1]
+        
+        ConsoleWrite("Định danh (Disk ID): " & $sDiskIdentifier & @CRLF)
+        ConsoleWrite("Kích thước đĩa (API): " & $iDiskSize & " bytes" & @CRLF)
 
-    Local $iPhysicalDriveNum = $aDiskInfo[0]
-    Local $sDiskIdentifier = $aDiskInfo[1]
-    Local $iDiskSize = $aDiskInfo[2]
-    Local $sPhysicalDrivePath = "\\.\PhysicalDrive" & $iPhysicalDriveNum
+        Local $sStringToHash = $sDiskIdentifier & $g_sSecretKey
+        Local $sExpectedHash = StringLower(_Crypt_HashData($sStringToHash, $CALG_SHA_256))
+        Local $iOffset = $iDiskSize - (10 * 512)
+        
+        If $iOffset < 0 Then ContinueLoop
 
-    ConsoleWrite("Ổ đĩa vật lý: PhysicalDrive" & $iPhysicalDriveNum & @CRLF)
-    ConsoleWrite("Định danh (Disk ID/GUID): " & $sDiskIdentifier & @CRLF)
-    ConsoleWrite("Kích thước đĩa: " & $iDiskSize & " bytes" & @CRLF)
+        Local $sStoredData = _ReadSectorData("\\.\PhysicalDrive" & $iPhysicalDriveNum, $iOffset, 512)
+        If $sStoredData = "" Then ContinueLoop
 
-	; Tạo chuỗi để băm bằng cách sử dụng biến $g_sSecretKey từ file include
-    Local $sStringToHash = $sDiskIdentifier & $g_sSecretKey
-    Local $sExpectedHash = StringLower(_Crypt_HashData($sStringToHash, $CALG_SHA_256))
-    ConsoleWrite("Hash dự kiến (Expected): " & $sExpectedHash & @CRLF)
-
-    Local $iOffset = $iDiskSize - (10 * 512)
-    Local $sStoredData = _ReadSectorData($sPhysicalDrivePath, $iOffset, 512)
-	MsgBox(0,0,$sStoredData)
-	Exit
-    If $sStoredData = "" Then
-        ConsoleWrite("Lỗi: Không đọc được dữ liệu từ sector." & @CRLF)
-        Return False
-    EndIf
-
-    Local $sStoredHash = StringRegExpReplace($sStoredData, "(?s)^([a-f0-9]{64}).*", "$1")
-    ConsoleWrite("Hash đã lưu (Stored): " & $sStoredHash & @CRLF)
-
-    If $sExpectedHash = $sStoredHash And $sStoredHash <> "" Then
-        ConsoleWrite("--- KIỂM TRA THÀNH CÔNG! Chữ ký hợp lệ. ---" & @CRLF)
-        Return True
-    Else
-        ConsoleWrite("--- KIỂM TRA THẤT BẠI! Chữ ký không khớp. ---" & @CRLF)
-        Return False
-    EndIf
-EndFunc
-
-;===============================================================================
-; Hàm: _GetPhysicalDriveFromLetter
-; Mục đích: Tìm số hiệu ổ đĩa vật lý từ ký tự ổ đĩa (ví dụ: "C:" -> 0).
-;===============================================================================
-Func _GetPhysicalDriveInfoFromLetter($sDriveLetter)
-    Local $sTempDir = @TempDir
-    Local $sScriptFile = $sTempDir & "\get_disk_info.txt"
-    Local $sOutputFile = $sTempDir & "\disk_info_out.txt"
-    Local $sLetterOnly = StringReplace($sDriveLetter, ":", "")
-
-    ; Tạo script diskpart để lấy thông tin volume và disk
-    Local $sScriptContent = "list volume" & @CRLF & "exit"
-    FileWrite($sScriptFile, $sScriptContent)
-    RunWait(@ComSpec & ' /c diskpart /s "' & $sScriptFile & '" > "' & $sOutputFile & '"', "", @SW_HIDE)
-
-    Local $sOutput = FileRead($sOutputFile)
-    Local $aLines = StringSplit($sOutput, @CRLF)
-    Local $iDiskNum = -1
-
-    ; Tìm số hiệu disk từ ký tự volume
-    For $i = 1 To $aLines[0]
-        If StringInStr($aLines[$i], " " & $sLetterOnly & " ") Then
-            Local $aMatch = StringRegExp($aLines[$i], "Disk (\d+)", 1)
-            If Not @error Then
-                $iDiskNum = $aMatch[0]
-                ExitLoop
-            EndIf
+        Local $sStoredHash = StringRegExpReplace($sStoredData, "(?s)^([a-f0-9]{64}).*", "$1")
+        
+        If $sExpectedHash = $sStoredHash And $sStoredHash <> "" Then
+            ConsoleWrite("--- KIỂM TRA THÀNH CÔNG trên PhysicalDrive" & $iPhysicalDriveNum & ". ---" & @CRLF)
+            Return True
         EndIf
     Next
 
-    If $iDiskNum = -1 Then Return SetError(1) ; Không tìm thấy disk
+    ConsoleWrite("--- KIỂM TRA THẤT BẠI trên tất cả các ổ đĩa. ---" & @CRLF)
+    Return False
+EndFunc
 
-    ; Lấy chi tiết của disk đã tìm thấy
-    $sScriptContent = "select disk " & $iDiskNum & @CRLF & "detail disk" & @CRLF & "exit"
-    FileWrite($sScriptFile, $sScriptContent)
+;===============================================================================
+; Lấy thông tin ổ đĩa bằng WinAPI và diskpart
+; - Dùng WinAPI để lấy KÍCH THƯỚC BYTE CHÍNH XÁC.
+; - Dùng diskpart để lấy DISK ID.
+;===============================================================================
+Func _GetPhysicalDriveInfoViaAPI($iDiskNum)
+    ; --- BƯỚC 1: LẤY DISK ID BẰNG DISKPART (Giữ nguyên, logic này đã đúng) ---
+    Local $aResult[0]
+    Local $sScriptFile = @TempDir & "\get_disk_id.txt"
+    Local $sOutputFile = @TempDir & "\disk_id_out.txt"
+    FileWrite($sScriptFile, "select disk " & $iDiskNum & @CRLF & "detail disk" & @CRLF & "exit")
     RunWait(@ComSpec & ' /c diskpart /s "' & $sScriptFile & '" > "' & $sOutputFile & '"', "", @SW_HIDE)
-
-    $sOutput = FileRead($sOutputFile)
+    Local $sOutput = FileRead($sOutputFile)
     FileDelete($sScriptFile)
     FileDelete($sOutputFile)
 
     Local $sDiskID = ""
-    Local $iDiskSize = 0
+    Local $aMatch = StringRegExp($sOutput, "Disk ID\s*:\s*\{?([A-F0-9-]+)\}?", 1)
+    If Not @error Then $sDiskID = $aMatch[0]
+    If $sDiskID = "" Then Return SetError(1, 0, 0)
+    _ArrayAdd($aResult, $sDiskID)
 
-    ; Tìm Disk GUID (GPT)
-    Local $aMatchGUID = StringRegExp($sOutput, "Disk ID\s*:\s*\{([A-F0-9-]+)\}", 1)
-    If Not @error Then
-        $sDiskID = $aMatchGUID[0]
-    Else
-        ; Tìm Disk ID (MBR)
-        Local $aMatchID = StringRegExp($sOutput, "Disk ID\s*:\s*([A-F0-9]+)", 1)
-        If Not @error Then
-            $sDiskID = $aMatchID[0]
-        EndIf
+    ; --- BƯỚC 2: LẤY KÍCH THƯỚC CHÍNH XÁC BẰNG WINAPI (Đã sửa lỗi) ---
+    Local $hDevice = _WinAPI_CreateFile("\\.\PhysicalDrive" & $iDiskNum, 0, BitOR($FILE_SHARE_READ, $FILE_SHARE_WRITE), 0, $OPEN_EXISTING)
+    If $hDevice = -1 Then Return SetError(2, 0, 0)
+
+    ; SỬA ĐỔI: Định nghĩa cấu trúc DISK_GEOMETRY_EX chính xác theo tài liệu của Microsoft.
+    ; Cấu trúc này bao gồm một cấu trúc con DISK_GEOMETRY và sau đó là DiskSize.
+    Local $tDiskGeometryEx = DllStructCreate( _
+            "int64 Cylinders;" & _      ; DISK_GEOMETRY.Cylinders
+            "uint MediaType;" & _       ; DISK_GEOMETRY.MediaType
+            "dword TracksPerCylinder;" & _ ; DISK_GEOMETRY.TracksPerCylinder
+            "dword SectorsPerTrack;" & _   ; DISK_GEOMETRY.SectorsPerTrack
+            "dword BytesPerSector;" & _    ; DISK_GEOMETRY.BytesPerSector
+            "int64 DiskSize" _           ; Kích thước đĩa chính xác bằng byte
+    )
+
+    Local $aRet = DllCall("kernel32.dll", "bool", "DeviceIoControl", _
+            "handle", $hDevice, _
+            "dword", 0x000700A0, _      ; IOCTL_DISK_GET_DRIVE_GEOMETRY_EX
+            "ptr", 0, _
+            "dword", 0, _
+            "struct*", $tDiskGeometryEx, _
+            "dword", DllStructGetSize($tDiskGeometryEx), _
+            "dword*", 0, _
+            "ptr", 0)
+
+    _WinAPI_CloseHandle($hDevice)
+
+    If @error Or Not $aRet[0] Then
+        ConsoleWrite("DeviceIoControl failed. Error: " & _WinAPI_GetLastError() & @CRLF)
+        Return SetError(3, 0, 0)
     EndIf
 
-    ; Tìm kích thước disk
-    Local $aMatchSize = StringRegExp($sOutput, "Size\s*:\s*(\d+)\s*([GMK]B)", 3)
-    If Not @error Then
-        Local $iSize = Number($aMatchSize[0])
-        Local $sUnit = $aMatchSize[1]
-        Switch $sUnit
-            Case "GB"
-                $iDiskSize = $iSize * 1024 * 1024 * 1024
-            Case "MB"
-                $iDiskSize = $iSize * 1024 * 1024
-            Case "KB"
-                $iDiskSize = $iSize * 1024
-        EndSwitch
-    EndIf
+    Local $iDiskSize = DllStructGetData($tDiskGeometryEx, "DiskSize")
+    ConsoleWrite("DiskSize from API (Corrected): " & $iDiskSize & " bytes" & @CRLF)
 
-    If $sDiskID = "" Or $iDiskSize = 0 Then Return SetError(2) ; Không tìm thấy ID hoặc kích thước
-
-    Local $aResult[3] = [$iDiskNum, $sDiskID, $iDiskSize]
+    _ArrayAdd($aResult, $iDiskSize)
     Return $aResult
+EndFunc
+
+; Hàm hỗ trợ lấy số hiệu ổ đĩa (có thể giữ lại cách dùng WMI vì nó chạy ở chương trình tạo USB, không phải WinPE, hoặc thay bằng cách khác nếu cần)
+Func _GetAllPhysicalDiskNumbers()
+    Local $aDiskNumbers[0]
+    For $i = 0 to 15 ; Quét từ PhysicalDrive0 đến 10
+        Local $hDevice = _WinAPI_CreateFile("\\.\PhysicalDrive" & $i, 0, BitOR($FILE_SHARE_READ, $FILE_SHARE_WRITE), 0, $OPEN_EXISTING)
+        If $hDevice <> -1 Then
+            _WinAPI_CloseHandle($hDevice)
+            _ArrayAdd($aDiskNumbers, $i)
+        EndIf
+    Next
+    If UBound($aDiskNumbers) = 0 Then Return SetError(1, 0, 0)
+    Return $aDiskNumbers
 EndFunc
 
 ;===============================================================================
