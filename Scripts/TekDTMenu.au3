@@ -1206,7 +1206,7 @@ EndFunc
 ; - Dùng diskpart để lấy DISK ID.
 ;===============================================================================
 Func _GetPhysicalDriveInfoViaAPI($iDiskNum)
-    ; --- BƯỚC 1: LẤY DISK ID BẰNG DISKPART (Giữ nguyên, logic này đã đúng) ---
+    ; --- BƯỚC 1: LẤY DISK ID BẰNG DISKPART ---
     Local $aResult[0]
     Local $sScriptFile = @TempDir & "\get_disk_id.txt"
     Local $sOutputFile = @TempDir & "\disk_id_out.txt"
@@ -1222,11 +1222,11 @@ Func _GetPhysicalDriveInfoViaAPI($iDiskNum)
     If $sDiskID = "" Then Return SetError(1, 0, 0)
     _ArrayAdd($aResult, $sDiskID)
 
-    ; --- BƯỚC 2: LẤY KÍCH THƯỚC CHÍNH XÁC BẰNG WINAPI (Đã sửa lỗi) ---
+    ; --- BƯỚC 2: LẤY KÍCH THƯỚC CHÍNH XÁC BẰNG WINAPI ---
     Local $hDevice = _WinAPI_CreateFile("\\.\PhysicalDrive" & $iDiskNum, 0, BitOR($FILE_SHARE_READ, $FILE_SHARE_WRITE), 0, $OPEN_EXISTING)
     If $hDevice = -1 Then Return SetError(2, 0, 0)
 
-    ; SỬA ĐỔI: Định nghĩa cấu trúc DISK_GEOMETRY_EX chính xác theo tài liệu của Microsoft.
+    ; Định nghĩa cấu trúc DISK_GEOMETRY_EX chính xác theo tài liệu của Microsoft.
     ; Cấu trúc này bao gồm một cấu trúc con DISK_GEOMETRY và sau đó là DiskSize.
     Local $tDiskGeometryEx = DllStructCreate( _
             "int64 Cylinders;" & _      ; DISK_GEOMETRY.Cylinders
@@ -1261,7 +1261,7 @@ Func _GetPhysicalDriveInfoViaAPI($iDiskNum)
     Return $aResult
 EndFunc
 
-; Hàm hỗ trợ lấy số hiệu ổ đĩa (có thể giữ lại cách dùng WMI vì nó chạy ở chương trình tạo USB, không phải WinPE, hoặc thay bằng cách khác nếu cần)
+; Hàm hỗ trợ lấy số hiệu ổ đĩa
 Func _GetAllPhysicalDiskNumbers()
     Local $aDiskNumbers[0]
     For $i = 0 to 15 ; Quét từ PhysicalDrive0 đến 10
