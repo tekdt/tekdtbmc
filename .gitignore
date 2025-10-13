@@ -14,3 +14,5 @@ TekDT.BMC_v1.0.4.zip
 Cert
 __pycache__
 tekdt_bmc.json
+Scripts/Check_Signature.ps1
+Scripts/secret_key.ps1

@@ -55,23 +55,23 @@ exit
 
 # ============================================================================
 # Function: Get-DiskSizeViaDiskpart
-# Get exact disk size using diskpart (synced with Python WMI method)
+# Get exact disk size, prioritizing modern cmdlets and falling back to diskpart
 # ============================================================================
 function Get-DiskSizeViaDiskpart {
     param([int]$DiskNum)
     
     try {
-        # Method 1: WMI (same as Python)
-        $Disk = Get-WmiObject -Class Win32_DiskDrive -Filter "Index = $DiskNum"
+        # Method 1: Get-Disk (Modern and most accurate)
+        $Disk = Get-Disk -Number $DiskNum
         if ($Disk -and $Disk.Size) {
-            Write-Host "  → Disk size from WMI: $($Disk.Size) bytes" -ForegroundColor Cyan
+            Write-Host "  → Disk size from Get-Disk: $($Disk.Size) bytes" -ForegroundColor Cyan
             return [int64]$Disk.Size
         }
     } catch {
-        Write-Host "  → WMI failed, trying diskpart..." -ForegroundColor Yellow
+        Write-Host "  → Get-Disk failed, trying diskpart..." -ForegroundColor Yellow
     }
     
-    # Method 2: Parse diskpart detail disk
+    # Method 2: Fallback to parsing 'diskpart detail disk'
     $ScriptFile = [System.IO.Path]::GetTempFileName()
     $OutputFile = [System.IO.Path]::GetTempFileName()
     
@@ -86,20 +86,22 @@ exit
     
     Remove-Item $ScriptFile, $OutputFile -Force -ErrorAction SilentlyContinue
     
-    # Parse: "Disk ID: ... Type: ... Status: ... Capacity: XXX GB"
-    if ($Output -match "Capacity\s*:\s*([\d.]+)\s*(GB|MB|TB)") {
+    # Parse: "Size : XXX GB" (diskpart uses "Size", not "Capacity" in detail disk)
+    if ($Output -match "Size\s*:\s*([\d.]+)\s*(GB|MB|TB|KB)") {
         $Value = [double]$Matches[1]
-        $Unit = $Matches[2]
+        $Unit = $Matches[2].ToUpper()
         
         $SizeBytes = switch ($Unit) {
             "TB" { $Value * 1024 * 1024 * 1024 * 1024 }
             "GB" { $Value * 1024 * 1024 * 1024 }
             "MB" { $Value * 1024 * 1024 }
+            "KB" { $Value * 1024 }
             default { $Value }
         }
         
-        Write-Host "  → Disk size from diskpart: $([int64]$SizeBytes) bytes" -ForegroundColor Cyan
-        return [int64]$SizeBytes
+        $finalSize = [int64]$SizeBytes
+        Write-Host "  → Disk size from diskpart: $finalSize bytes" -ForegroundColor Cyan
+        return $finalSize
     }
     
     return 0
@@ -156,14 +158,14 @@ function Read-SectorData {
 
 # ============================================================================
 # Function: Verify-USBSignature
-# Main verification function (100% synced with Python)
+# Main verification function
 # ============================================================================
 function Verify-USBSignature {
     param([int]$DiskNum)
     
     Write-Host "`n=== Checking PhysicalDrive$DiskNum ===" -ForegroundColor Cyan
     
-    # STEP 1: Get Disk ID/GUID
+    # STEP 1: Get Disk ID/GUID (Correctly implemented)
     $DiskID = Get-DiskIDViaDiskpart -DiskNum $DiskNum
     if (-not $DiskID) {
         Write-Host "  → ERROR: Cannot get Disk ID. Skipping." -ForegroundColor Red
@@ -171,7 +173,7 @@ function Verify-USBSignature {
     }
     Write-Host "  Disk ID/GUID: $DiskID" -ForegroundColor White
     
-    # STEP 2: Get Disk Size
+    # STEP 2: Get Disk Size (Using updated, reliable function)
     $DiskSize = Get-DiskSizeViaDiskpart -DiskNum $DiskNum
     if ($DiskSize -le 0) {
         Write-Host "  → ERROR: Cannot get disk size. Skipping." -ForegroundColor Red
@@ -205,12 +207,13 @@ function Verify-USBSignature {
     $DevicePath = "\\.\PhysicalDrive$DiskNum"
     $StoredData = Read-SectorData -DevicePath $DevicePath -Offset $TargetOffset -BytesToRead $SECTOR_SIZE
     
-    if (-not $StoredData) {
+    # STEP 6 (and bug fix): Check if data is null or empty
+    if ([string]::IsNullOrEmpty($StoredData)) {
         Write-Host "  → ERROR: Cannot read data from offset." -ForegroundColor Red
         return $false
     }
     
-    # STEP 6: Extract stored hash (first 64 hex characters)
+    # Extract stored hash (first 64 hex characters)
     $StoredHash = $StoredData.Substring(0, [Math]::Min(64, $StoredData.Length)).ToLower()
     $StoredHash = $StoredHash -replace '[^0-9a-f]', ''  # Remove non-hex chars
     
@@ -218,7 +221,7 @@ function Verify-USBSignature {
     
     # STEP 7: Compare
     if ($ExpectedHash -eq $StoredHash -and $StoredHash.Length -eq 64) {
-        Write-Host "`n✅ VERIFICATION SUCCESS on PhysicalDrive$DiskNum ✅`n" -ForegroundColor Green
+        Write-Host "`n VERIFICATION SUCCESS on PhysicalDrive$DiskNum `n" -ForegroundColor Green
         return $true
     } else {
         Write-Host "  → Hash mismatch! USB may be cloned." -ForegroundColor Red
@@ -263,7 +266,7 @@ if ($PhyDriveNum -ge 0) {
     }
     
     if (-not $Found) {
-        Write-Host "`n❌ VERIFICATION FAILED on all drives ❌`n" -ForegroundColor Red
+        Write-Host "`n VERIFICATION FAILED on all drives `n" -ForegroundColor Red
         exit 1
     }
     exit 0

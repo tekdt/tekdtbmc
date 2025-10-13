@@ -13,7 +13,8 @@
 #include <WinAPISys.au3>
 #include <Memory.au3>
 #include <Crypt.au3>
-#include "secret_key.au3"
+#include <Process.au3>
+#include "secret_key.a3x"
 
 Opt("WinTitleMatchMode", 2)
 
@@ -58,7 +59,7 @@ _Main()
 
 Func _Main()
 	If Not _VerifyUSBSignature() Then
-        MsgBox(16, "Lỗi bản quyền", "USB không hợp lệ hoặc đã bị sao chép." & @CRLF & "Vui lòng sử dụng công cụ TekDT BMC để tạo USB chính thức.")
+        _ShowFatalErrorAndReboot() ; Gọi màn hình lỗi và reboot
         Exit
     EndIf
 	_WaitForWinPEBootComplete()
@@ -1159,145 +1160,223 @@ EndFunc
 ; Trả về: True nếu hợp lệ, False nếu không.
 ;===============================================================================
 Func _VerifyUSBSignature()
-    ConsoleWrite("--- Bắt đầu kiểm tra chữ ký USB (Synced with Python) ---" & @CRLF)
+    ConsoleWrite("--- Start to check the signature ---" & @CRLF)
     Local $aDisks = _GetAllPhysicalDiskNumbers()
-    If @error Then Return False
+    If @error Then
+        ConsoleWrite("Error: Could not list all physical drive." & @CRLF)
+        Return False
+    EndIf
 
     For $iPhysicalDriveNum In $aDisks
-        ConsoleWrite("--- Đang kiểm tra PhysicalDrive" & $iPhysicalDriveNum & " ---" & @CRLF)
-        
-        ; Lấy thông tin disk (đồng bộ với Python)
-        Local $aDiskInfo = _GetPhysicalDriveInfoViaAPI($iPhysicalDriveNum)
+        ConsoleWrite("--- Checking on PhysicalDrive" & $iPhysicalDriveNum & " ---" & @CRLF)
+
+        ; BƯỚC 1 & 2: Lấy Disk ID và Tổng kích thước đĩa (logic mới, tin cậy cho WinPE)
+        Local $aDiskInfo = _GetDiskInfo_WinPE($iPhysicalDriveNum)
         If @error Then
-            ConsoleWrite("Lỗi: Không thể lấy thông tin cho PhysicalDrive" & $iPhysicalDriveNum & ". Bỏ qua." & @CRLF)
+            ConsoleWrite("Error: Could not ge the data for PhysicalDrive" & $iPhysicalDriveNum & ". Skipped." & @CRLF)
             ContinueLoop
         EndIf
 
         Local $sDiskIdentifier = $aDiskInfo[0]  ; Disk ID/GUID
-        Local $iDiskSize = $aDiskInfo[1]        ; Kích thước disk (bytes)
-        Local $iEndLastPart = $aDiskInfo[2]     ; End of last partition (bytes)
-        
-        ConsoleWrite("Định danh (Disk ID): " & $sDiskIdentifier & @CRLF)
-        ConsoleWrite("Kích thước đĩa: " & $iDiskSize & " bytes" & @CRLF)
-        ConsoleWrite("End of last partition: " & $iEndLastPart & " bytes" & @CRLF)
-        
-        Local $iUnallocatedEnd = $iDiskSize - $iEndLastPart
-        ConsoleWrite("Unallocated at end: " & $iUnallocatedEnd & " bytes" & @CRLF)
+        Local $iDiskSize = $aDiskInfo[1]        ; Tổng kích thước disk (bytes)
 
-        ; QUAN TRỌNG: Tính offset GIỐNG HỆT Python
+        If $sDiskIdentifier = "" Or $iDiskSize <= 0 Then
+            ConsoleWrite("Eror: Disk ID or disk size is invalid. Skipped." & @CRLF)
+            ContinueLoop
+        EndIf
+
+        ConsoleWrite("Disk ID: " & $sDiskIdentifier & @CRLF)
+        ConsoleWrite("Disk size (Total): " & $iDiskSize & " bytes" & @CRLF)
+
+        ; BƯỚC 3: Tính toán offset GIỐNG HỆT Python
         Local $SECTOR_SIZE = 512
         Local $NUM_SECTORS = 10
         Local $iRequiredSpace = $NUM_SECTORS * $SECTOR_SIZE
         Local $iTargetOffset = $iDiskSize - $iRequiredSpace
-        
+
         ConsoleWrite("Target offset: " & $iTargetOffset & " bytes" & @CRLF)
-        
-        If $iUnallocatedEnd < $iRequiredSpace Then
-            ConsoleWrite("Cảnh báo: Unallocated tại cuối không đủ (" & $iUnallocatedEnd & " < " & $iRequiredSpace & ")" & @CRLF)
-        EndIf
-        
-        If $iTargetOffset < 0 Then 
-            ConsoleWrite("Lỗi: Offset âm, bỏ qua disk này." & @CRLF)
+
+        If $iTargetOffset < 0 Then
+            ConsoleWrite("Lỗi: Offset âm, skipped this disk." & @CRLF)
             ContinueLoop
         EndIf
 
-        ; Tạo hash mong đợi (giống Python)
+        ; BƯỚC 4: Tạo hash mong đợi (giống hệt Python)
         Local $sStringToHash = $sDiskIdentifier & $g_sSecretKey
         Local $sExpectedHash = StringLower(_Crypt_HashData($sStringToHash, $CALG_SHA_256))
         ConsoleWrite("Expected hash: " & $sExpectedHash & @CRLF)
 
-        ; Đọc dữ liệu từ sector
+        ; BƯỚC 5: Đọc dữ liệu từ sector tại offset đã tính
         Local $sStoredData = _ReadSectorData("\\.\PhysicalDrive" & $iPhysicalDriveNum, $iTargetOffset, $SECTOR_SIZE)
-        If $sStoredData = "" Then 
-            ConsoleWrite("Lỗi: Không đọc được dữ liệu từ offset." & @CRLF)
+        If $sStoredData = "" Then
+            ConsoleWrite("Error: Could not read the data at offset." & @CRLF)
             ContinueLoop
         EndIf
 
-        ; Trích xuất hash từ dữ liệu đọc được (64 ký tự hex đầu tiên)
-        Local $sStoredHash = StringLower(StringRegExpReplace($sStoredData, "(?s)^([a-f0-9]{64}).*", "$1"))
-        ConsoleWrite("Stored hash: " & $sStoredHash & @CRLF)
-        
-        ; So sánh
-        If $sExpectedHash = $sStoredHash And $sStoredHash <> "" Then
-            ConsoleWrite(">>> KIỂM TRA THÀNH CÔNG trên PhysicalDrive" & $iPhysicalDriveNum & " <<<" & @CRLF)
+        ; BƯỚC 6: Trích xuất hash từ dữ liệu đọc được (64 ký tự hex đầu tiên)
+        Local $sStoredHash = StringLeft($sStoredData, 64)
+        $sStoredHash = "0x"&StringLower(StringRegExpReplace($sStoredHash, "[^a-f0-9]", ""))
+        ConsoleWrite("Stored hash:   " & $sStoredHash & @CRLF)
+
+        ; BƯỚC 7: So sánh
+        If $sExpectedHash = $sStoredHash And StringLen($sStoredHash) = 66 Then
+            ConsoleWrite(">>>  SUCCESSFULLY CHECK on PhysicalDrive" & $iPhysicalDriveNum & " <<<" & @CRLF)
             Return True
         Else
-            ConsoleWrite("Hash không khớp trên PhysicalDrive" & $iPhysicalDriveNum & @CRLF)
+            ConsoleWrite("Hash is not match on PhysicalDrive" & $iPhysicalDriveNum & @CRLF)
         EndIf
     Next
 
-    ConsoleWrite("--- KIỂM TRA THẤT BẠI trên tất cả các ổ đĩa ---" & @CRLF)
+    ConsoleWrite("--- FAILED CHECK on all drives ---" & @CRLF)
     Return False
 EndFunc
 
 ;===============================================================================
-; HÀM: _GetPhysicalDriveInfoViaAPI
-; Trả về: Array [Disk ID, Disk Size, End of Last Partition]
+; HÀM: _GetDiskInfo_WinPE
+; Mục đích: Lấy Disk ID và Tổng kích thước đĩa một cách đáng tin cậy trong WinPE.
+;           Ưu tiên WMI cho kích thước, nếu thất bại sẽ dùng diskpart.
+; Trả về: Array[Disk ID, Disk Size in Bytes]. SetError nếu thất bại.
 ;===============================================================================
-Func _GetPhysicalDriveInfoViaAPI($iDiskNum)
-    Local $aResult[3]
-    
-    ; --- BƯỚC 1: LẤY DISK ID BẰNG DISKPART ---
-    Local $sScriptFile = @TempDir & "\get_disk_id.txt"
-    Local $sOutputFile = @TempDir & "\disk_id_out.txt"
-    
-    FileWrite($sScriptFile, "select disk " & $iDiskNum & @CRLF & "detail disk" & @CRLF & "list partition" & @CRLF & "exit")
-    RunWait(@ComSpec & ' /c diskpart /s "' & $sScriptFile & '" > "' & $sOutputFile & '"', "", @SW_HIDE)
-    
-    Local $sOutput = FileRead($sOutputFile)
-    FileDelete($sScriptFile)
-    FileDelete($sOutputFile)
-
-    ; Parse Disk ID (GUID cho GPT hoặc hex cho MBR)
+Func _GetDiskInfo_WinPE($iDiskNum)
+    Local $aResult[2] = ["", 0]
     Local $sDiskID = ""
-    Local $aMatchGUID = StringRegExp($sOutput, "Disk ID\s*:\s*\{([A-F0-9-]+)\}", 1)
+    Local $iDiskSize = 0
+
+    ; --- BƯỚC 1: Lấy Disk ID từ 'detail disk' (Phương pháp này vẫn ổn định) ---
+    Local $sDetailScriptFile = @TempDir & "\get_disk_detail.txt"
+    Local $sDetailOutputFile = @TempDir & "\disk_detail_out.txt"
+
+    FileWrite($sDetailScriptFile, "select disk " & $iDiskNum & @CRLF & "detail disk" & @CRLF & "exit")
+    RunWait(@ComSpec & ' /c diskpart /s "' & $sDetailScriptFile & '" > "' & $sDetailOutputFile & '"', "", @SW_HIDE)
+
+    Local $sDetailOutput = FileRead($sDetailOutputFile)
+    FileDelete($sDetailScriptFile)
+    FileDelete($sDetailOutputFile)
+
+    If $sDetailOutput = "" Then
+        ConsoleWrite("Diskpart 'detail disk' output is empty for disk " & $iDiskNum & @CRLF)
+        Return SetError(1, 0, 0)
+    EndIf
+
+    Local $aMatchGUID = StringRegExp($sDetailOutput, "Disk ID\s*:\s*\{([A-F0-9-]+)\}", 1)
     If Not @error Then
         $sDiskID = $aMatchGUID[0]
     Else
-        Local $aMatchMBR = StringRegExp($sOutput, "Disk ID\s*:\s*([A-F0-9]+)", 1)
+        Local $aMatchMBR = StringRegExp($sDetailOutput, "Disk ID\s*:\s*([A-F0-9]{8})", 1)
         If Not @error Then $sDiskID = $aMatchMBR[0]
     EndIf
-    
-    If $sDiskID = "" Then Return SetError(1, 0, 0)
+
+    If $sDiskID = "" Then
+        ConsoleWrite("Could not parse Disk ID for disk " & $iDiskNum & @CRLF)
+        Return SetError(2, 0, 0)
+    EndIf
     $aResult[0] = $sDiskID
 
-    ; --- BƯỚC 2: TÍNH END_OF_LAST_PARTITION ---
-    ; Parse từng partition để tìm max(Offset + Size)
-    Local $iMaxEnd = 0
-    Local $aPartMatches = StringRegExp($sOutput, "Partition\s+(\d+).*?Offset:\s+(\d+)\s+KB.*?Size:\s+([\d.]+)\s+(MB|GB|TB|KB)", 3)
-    
-    If IsArray($aPartMatches) And UBound($aPartMatches) > 0 Then
-        For $i = 0 To UBound($aPartMatches) - 1 Step 4
-            Local $iOffsetKB = Number($aPartMatches[$i + 1])
-            Local $fSize = Number($aPartMatches[$i + 2])
-            Local $sUnit = $aPartMatches[$i + 3]
-            
-            ; Quy đổi Size về KB
-            Local $iSizeKB = $fSize
-            If $sUnit = "GB" Then $iSizeKB = $fSize * 1024 * 1024
-            If $sUnit = "MB" Then $iSizeKB = $fSize * 1024
-            If $sUnit = "TB" Then $iSizeKB = $fSize * 1024 * 1024 * 1024
-            
-            ; Tính end của partition này (bytes)
-            Local $iOffsetBytes = $iOffsetKB * 1024
-            Local $iSizeBytes = $iSizeKB * 1024
-            Local $iEnd = $iOffsetBytes + $iSizeBytes
-            
-            If $iEnd > $iMaxEnd Then $iMaxEnd = $iEnd
-            
-            ConsoleWrite("  Partition " & $aPartMatches[$i] & ": Offset=" & $iOffsetBytes & ", Size=" & $iSizeBytes & ", End=" & $iEnd & @CRLF)
-        Next
+    ; --- BƯỚC 2: Lấy dung lượng đĩa ---
+    ; Ưu tiên phương pháp API trực tiếp vì độ tin cậy cao nhất
+    $iDiskSize = _GetDiskSizeViaAPI($iDiskNum)
+
+    ; Nếu API thất bại, thử phương pháp WMIC làm dự phòng
+    If @error Or $iDiskSize <= 0 Then
+        ConsoleWrite("API call failed for disk " & $iDiskNum & ". Trying WMIC as fallback..." & @CRLF)
+        
+        ; Khởi động dịch vụ WMI
+        RunWait(@ComSpec & " /c net start winmgmt", "", @SW_HIDE)
+        Sleep(500)
+
+        Local $sWmicOutputFile = @TempDir & "\wmic_size_out.txt"
+        Local $sCommand = 'wmic diskdrive where index=' & $iDiskNum & ' get size'
+        RunWait(@ComSpec & ' /c ' & $sCommand & ' > "' & $sWmicOutputFile & '"', "", @SW_HIDE)
+        
+        If Not FileExists($sWmicOutputFile) Or FileGetSize($sWmicOutputFile) = 0 Then
+             ConsoleWrite("Fallback WMIC also failed for disk " & $iDiskNum & @CRLF)
+             FileDelete($sWmicOutputFile)
+             Return SetError(3, 0, 0)
+        EndIf
+
+        Local $hFile = FileOpen($sWmicOutputFile, 16)
+        Local $sFileContent = FileRead($hFile)
+        FileClose($hFile)
+        FileDelete($sWmicOutputFile)
+
+        Local $sConvertedContent = BinaryToString($sFileContent, 4)
+        Local $aLines = StringSplit($sConvertedContent, @CRLF, 1)
+        If @error Or UBound($aLines) < 2 Then
+            ConsoleWrite("Could not parse WMIC fallback output for disk " & $iDiskNum & @CRLF)
+            Return SetError(4, 0, 0)
+        EndIf
+
+        $iDiskSize = Number(StringStripWS($aLines[1], 3))
     EndIf
-    
-    If $iMaxEnd = 0 Then Return SetError(2, 0, 0)
-    $aResult[2] = $iMaxEnd
 
-    ; --- BƯỚC 3: LẤY KÍCH THƯỚC ĐĨA BẰNG WMI ---
-    Local $iDiskSize = _GetDiskSizeViaWMI($iDiskNum)
-    If @error Then Return SetError(3, 0, 0)
+    If $iDiskSize <= 0 Then
+        ConsoleWrite("All methods failed to get a valid size for disk " & $iDiskNum & @CRLF)
+        Return SetError(5, 0, 0)
+    EndIf
+
     $aResult[1] = $iDiskSize
-
     Return $aResult
+EndFunc
+
+;===============================================================================
+; HÀM: _GetDiskSizeViaAPI
+; Mục đích: Lấy tổng dung lượng vật lý của ổ đĩa bằng cách gọi trực tiếp
+;            Windows API (DeviceIoControl), đảm bảo kết quả chính xác nhất.
+; Tham số:
+;    $iDiskNum  - Chỉ số của ổ đĩa vật lý (ví dụ: 0 cho PhysicalDrive0)
+; Trả về:
+;    Tổng dung lượng đĩa bằng byte nếu thành công.
+;    SetError và trả về 0 nếu thất bại.
+;===============================================================================
+Func _GetDiskSizeViaAPI($iDiskNum)
+    Local $sDevicePath = "\\.\PhysicalDrive" & $iDiskNum
+    Local Const $GENERIC_READ = 0x80000000
+    Local Const $FILE_SHARE_READ = 0x1
+    Local Const $FILE_SHARE_WRITE = 0x2
+    Local Const $OPEN_EXISTING = 3
+    Local Const $IOCTL_DISK_GET_LENGTH_INFO = 0x0007405C
+
+    ; Mở một handle tới ổ đĩa vật lý
+    Local $hDevice = DllCall("kernel32.dll", "handle", "CreateFileW", _
+            "wstr", $sDevicePath, _
+            "dword", $GENERIC_READ, _
+            "dword", BitOR($FILE_SHARE_READ, $FILE_SHARE_WRITE), _
+            "ptr", 0, _
+            "dword", $OPEN_EXISTING, _
+            "dword", 0, _
+            "ptr", 0)
+
+    If @error Or $hDevice[0] = -1 Or $hDevice[0] = 0 Then
+        ConsoleWrite("API Error: Could not create a handle to " & $sDevicePath & @CRLF)
+        Return SetError(1, 0, 0)
+    EndIf
+
+    ; Chuẩn bị buffer để nhận kết quả (một số 64-bit)
+    Local $tLengthInfo = DllStructCreate("int64")
+    Local $aBytesReturned = DllCall("kernel32.dll", "dword*", 0)
+
+    ; Gọi API để lấy thông tin dung lượng
+    Local $aResult = DllCall("kernel32.dll", "bool", "DeviceIoControl", _
+            "handle", $hDevice[0], _
+            "dword", $IOCTL_DISK_GET_LENGTH_INFO, _
+            "ptr", 0, _
+            "dword", 0, _
+            "ptr", DllStructGetPtr($tLengthInfo), _
+            "dword", DllStructGetSize($tLengthInfo), _
+            "ptr", DllStructGetPtr($aBytesReturned), _
+            "ptr", 0)
+
+    ; Đóng handle ngay sau khi dùng xong
+    DllCall("kernel32.dll", "bool", "CloseHandle", "handle", $hDevice[0])
+
+    If @error Or $aResult[0] = 0 Then
+        ConsoleWrite("API Error: DeviceIoControl call failed for " & $sDevicePath & @CRLF)
+        Return SetError(2, 0, 0)
+    EndIf
+
+    ; Lấy giá trị từ buffer và trả về
+    Local $iDiskSizeBytes = DllStructGetData($tLengthInfo, 1)
+    Return $iDiskSizeBytes
 EndFunc
 
 ;===============================================================================
@@ -1352,7 +1431,7 @@ Func _ReadSectorData($sDevicePath, $iOffset, $iBytesToRead)
         "dword", 3, _            ; OPEN_EXISTING
         "dword", 0, _
         "ptr", 0)
-    
+
     If @error Or $hFile[0] = -1 Or $hFile[0] = 0 Then
         ConsoleWrite("Lỗi: Không thể mở " & $sDevicePath & @CRLF)
         Return ""
@@ -1360,14 +1439,18 @@ Func _ReadSectorData($sDevicePath, $iOffset, $iBytesToRead)
 
     ; Di chuyển file pointer đến offset
     Local $iOffsetLow = BitAND($iOffset, 0xFFFFFFFF)
-    Local $iOffsetHigh = BitShift($iOffset, 32)
-    
+    ; ======================= SỬA LỖI TẠI ĐÂY =======================
+    ; Dùng phép chia số học để lấy 32-bit cao một cách chính xác cho offset 64-bit
+    ; thay vì dùng BitShift không đáng tin cậy. 2^32 = 4294967296
+    Local $iOffsetHigh = Int($iOffset / 4294967296)
+    ; ===============================================================
+
     Local $aResult = DllCall("kernel32.dll", "dword", "SetFilePointer", _
         "handle", $hFile[0], _
         "long", $iOffsetLow, _
         "long*", $iOffsetHigh, _
         "dword", 0) ; FILE_BEGIN
-    
+
     If @error Or $aResult[0] = 0xFFFFFFFF Then
         ConsoleWrite("Lỗi: Không thể SetFilePointer" & @CRLF)
         DllCall("kernel32.dll", "bool", "CloseHandle", "handle", $hFile[0])
@@ -1382,16 +1465,72 @@ Func _ReadSectorData($sDevicePath, $iOffset, $iBytesToRead)
         "dword", $iBytesToRead, _
         "dword*", 0, _
         "ptr", 0)
-    
+
     DllCall("kernel32.dll", "bool", "CloseHandle", "handle", $hFile[0])
-    
+
     If @error Or Not $aBytesRead[0] Or $aBytesRead[4] = 0 Then
         ConsoleWrite("Lỗi: Không đọc được dữ liệu" & @CRLF)
         Return ""
     EndIf
-    
+
     ConsoleWrite("Đã đọc " & $aBytesRead[4] & " bytes từ offset " & $iOffset & @CRLF)
-    
-    ; Chuyển đổi sang string (ASCII encoding để giữ nguyên dữ liệu)
+
+    ; Chuyển đổi sang string (ASCII/ANSI encoding)
+    ; Flag 1 là đúng vì Python ghi chuỗi ASCII, không phải UTF-8
     Return BinaryToString(DllStructGetData($tBuffer, 1), 1)
+EndFunc
+
+;===============================================================================
+; Hàm: _ShowFatalErrorAndReboot
+; Mục đích: Hiển thị một thông báo lỗi toàn màn hình, không thể bỏ qua.
+;           Buộc khởi động lại máy tính khi nhấn OK hoặc khi script bị đóng.
+;===============================================================================
+Func _ShowFatalErrorAndReboot()
+    ; Đăng ký hàm _ForceReboot sẽ được gọi khi script này bị tắt đột ngột
+    OnAutoItExitRegister("_ForceReboot")
+
+    Local $sMsg = "LỖI BẢN QUYỀN" & @CRLF & @CRLF & "USB không hợp lệ hoặc đã bị sao chép." & @CRLF & _
+                   "Vui lòng sử dụng công cụ TekDT BMC để tạo USB chính thức." & @CRLF & @CRLF & _
+                   "Hệ thống sẽ khởi động lại sau khi bạn nhấn OK."
+
+    ; Tạo một GUI toàn màn hình
+    Local $hErrorGUI = GUICreate("Lỗi nghiêm trọng", @DesktopWidth, @DesktopHeight, 0, 0, $WS_POPUP, $WS_EX_TOPMOST)
+    GUISetBkColor(0xFF0000) ; Nền màu đỏ
+
+    ; Tạo Label thông báo
+    Local $iLabelWidth = @DesktopWidth * 0.8
+    Local $iLabelHeight = @DesktopHeight * 0.5
+    Local $iLabelX = (@DesktopWidth - $iLabelWidth) / 2
+    Local $iLabelY = (@DesktopHeight - $iLabelHeight) / 3
+    GUICtrlCreateLabel($sMsg, $iLabelX, $iLabelY, $iLabelWidth, $iLabelHeight, $SS_CENTER)
+    GUICtrlSetFont(-1, 24, 800, 0, "Segoe UI")
+    GUICtrlSetColor(-1, 0xFFFFFF) ; Chữ trắng
+    GUICtrlSetBkColor(-1, $GUI_BKCOLOR_TRANSPARENT)
+
+    ; Tạo nút OK
+    Local $iBtnWidth = 200
+    Local $iBtnHeight = 60
+    Local $iBtnX = (@DesktopWidth - $iBtnWidth) / 2
+    Local $iBtnY = $iLabelY + $iLabelHeight + 20
+    Local $hOkButton = GUICtrlCreateButton("OK", $iBtnX, $iBtnY, $iBtnWidth, $iBtnHeight)
+    GUICtrlSetFont(-1, 18, 600)
+
+    GUISetState(@SW_SHOW, $hErrorGUI)
+
+    While 1
+        Local $iMsg = GUIGetMsg()
+        Switch $iMsg
+            Case $GUI_EVENT_CLOSE, $hOkButton
+                _ForceReboot()
+        EndSwitch
+    WEnd
+EndFunc
+
+;===============================================================================
+; Hàm: _ForceReboot
+; Mục đích: Hàm được gọi để khởi động lại máy tính.
+;===============================================================================
+Func _ForceReboot()
+    _RunDos("wpeutil.exe reboot")
+	Shutdown(2) ; 2 = Reboot
 EndFunc
