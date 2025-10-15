@@ -13,7 +13,6 @@
 #include <WinAPISys.au3>
 #include <Memory.au3>
 #include <Crypt.au3>
-#include <Process.au3>
 #include "secret_key.a3x"
 
 Opt("WinTitleMatchMode", 2)
@@ -62,7 +61,8 @@ Func _Main()
         _ShowFatalErrorAndReboot() ; Gọi màn hình lỗi và reboot
         Exit
     EndIf
-	_WaitForWinPEBootComplete()
+	_AutoExtractDrivers()
+	;_WaitForWinPEBootComplete()
 	_ReadButtonsInfoFromINI()
     _CreateGUI()
 	_CreateButtons()
@@ -330,7 +330,6 @@ Func _WM_MOUSEWHEEL($hWnd, $iMsg, $wParam, $lParam)
 EndFunc
 
 ; --- Các hàm tiện ích ---
-
 Func _RunTool($sTool)
     If $sTool = "" Then
         ConsoleWrite("Error: Empty tool path in _RunTool" & @CRLF)
@@ -352,6 +351,10 @@ Func _RunTool($sTool)
 
     ; Xử lý lệnh shutdown với xác nhận (giữ nguyên)
     If StringInStr($sTool, "wpeutil.exe") Then
+		If StringInStr($sTool, "/Y") Then
+			Run(@ComSpec & " /c " & StringReplace($sTool," /Y",""), "", @SW_HIDE)
+			Return
+		EndIf
         Local $sMsg = StringInStr($sTool, "reboot") ? "Bạn có chắc chắn muốn khởi động lại máy tính?" : "Bạn có chắc chắn muốn tắt máy tính?"
         If MsgBox(36, "Xác Nhận", $sMsg) = 6 Then ; 6 = Yes
             Run(@ComSpec & " /c " & $sTool, "", @SW_HIDE)
@@ -465,117 +468,200 @@ Func StringToBool($sString)
     Return StringLower($sString) = "true"
 EndFunc
 
-Func _AnalyzePartitions()
-    Local $sTempDir = @TempDir
-    Local $sScriptFile = $sTempDir & "\listdisk.txt"
-    Local $sOutputFile = $sTempDir & "\disklist.txt"
+; Func _AnalyzePartitions()
+    ; Local $sTempDir = @TempDir
+    ; Local $sScriptFile = $sTempDir & "\listdisk.txt"
+    ; Local $sOutputFile = $sTempDir & "\disklist.txt"
 
-    ; Tạo script để lấy danh sách disk
-    Local $hFile = FileOpen($sScriptFile, 2)
-    FileWriteLine($hFile, "list disk")
-    FileWriteLine($hFile, "exit")
-    FileClose($hFile)
+    ; ; Tạo script để lấy danh sách disk
+    ; Local $hFile = FileOpen($sScriptFile, 2)
+    ; FileWriteLine($hFile, "list disk")
+    ; FileWriteLine($hFile, "exit")
+    ; FileClose($hFile)
 
-    ; Chạy diskpart và lưu kết quả
-	RunWait(@ComSpec & ' /c diskpart /s "' & $sScriptFile & '" > "' & $sOutputFile & '"', "", @SW_HIDE)
+    ; ; Chạy diskpart và lưu kết quả
+	; RunWait(@ComSpec & ' /c diskpart /s "' & $sScriptFile & '" > "' & $sOutputFile & '"', "", @SW_HIDE)
 
-    ; Đọc danh sách disk
-    Local $aLines = FileReadToArray($sOutputFile)
-    If @error Then
-        MsgBox(16, "Lỗi", "Không thể lấy danh sách ổ đĩa.")
-        FileDelete($sScriptFile)
-        FileDelete($sOutputFile)
+    ; ; Đọc danh sách disk
+    ; Local $aLines = FileReadToArray($sOutputFile)
+    ; If @error Then
+        ; MsgBox(16, "Lỗi", "Không thể lấy danh sách ổ đĩa.")
+        ; FileDelete($sScriptFile)
+        ; FileDelete($sOutputFile)
+        ; Return
+    ; EndIf
+
+    ; Local $aDisks[0]
+    ; For $sLine In $aLines
+        ; Local $aMatch = StringRegExp($sLine, "Disk\s+(\d+)", 1)
+        ; If Not @error Then
+            ; _ArrayAdd($aDisks, $aMatch[0])
+        ; EndIf
+    ; Next
+
+    ; Local $sMsg = "Các phân vùng hiện có (theo Disk/Partition):" & @CRLF & @CRLF
+    ; For $sDiskNum In $aDisks
+        ; Local $sPartScriptFile = $sTempDir & "\listpart" & $sDiskNum & ".txt"
+        ; Local $sPartOutputFile = $sTempDir & "\partitions" & $sDiskNum & ".txt"
+
+        ; ; Tạo script để lấy danh sách partition của disk
+        ; Local $hFile = FileOpen($sPartScriptFile, 2)
+        ; FileWriteLine($hFile, "select disk " & $sDiskNum)
+        ; FileWriteLine($hFile, "list partition")
+        ; FileWriteLine($hFile, "exit")
+        ; FileClose($hFile)
+
+        ; ; Chạy diskpart và lưu kết quả
+		; RunWait(@ComSpec & ' /c diskpart /s "' & $sPartScriptFile & '" > "' & $sPartOutputFile & '"', "", @SW_HIDE)
+
+        ; ; Đọc và phân tích danh sách partition
+        ; Local $aPartLines = FileReadToArray($sPartOutputFile)
+        ; If @error Then
+            ; $sMsg &= "Disk " & $sDiskNum & ": Không thể lấy danh sách phân vùng." & @CRLF & @CRLF
+            ; ContinueLoop
+        ; EndIf
+
+        ; $sMsg &= "Disk " & $sDiskNum & ":" & @CRLF
+        ; For $sLine In $aPartLines
+			; Local $aMatch = StringRegExp($sLine, "Partition\s+(\d+)\s+([^\d]+?)\s+(\d+)\s*([KMGTP]?B)", 3)
+			; If Not @error Then
+				; Local $sPartNum = $aMatch[0]
+				; Local $sType = StringStripWS($aMatch[1], 3)  ; Xóa khoảng trắng thừa
+				; Local $iSizeValue = Number($aMatch[2])
+				; Local $sUnit = $aMatch[3]
+				; Local $iSizeMB = 0
+
+				; ; SỬA ĐỔI: Quy đổi dung lượng về MB để kiểm tra thống nhất
+				; Switch $sUnit
+					; Case "GB"
+						; $iSizeMB = $iSizeValue * 1024
+					; Case "TB"
+						; $iSizeMB = $iSizeValue * 1024 * 1024
+					; Case "MB"
+						; $iSizeMB = $iSizeValue
+					; Case "KB"
+						; $iSizeMB = $iSizeValue / 1024
+					; Case Else
+						; $iSizeMB = $iSizeValue / (1024 * 1024) ; Cho B
+				; EndSwitch
+
+			; Local $sNotes = ""
+			; Local $bIsBitLocker = False
+			; Local $bFoundBitLocker = False
+
+                ; ; Kiểm tra BitLocker trước khi kiểm tra các điều kiện khác
+                ; If $iSizeMB > 100 Then ; Chỉ kiểm tra phân vùng đủ lớn
+                    ; $bIsBitLocker = _CheckBitLockerMetadata($sDiskNum, $sPartNum)
+                    ; If $bIsBitLocker Then
+                        ; $sNotes &= " 🔒 BITLOCKER ĐÃ BẬT!"
+                        ; $bFoundBitLocker = True
+                    ; EndIf
+                ; EndIf
+
+				; ; Kiểm tra các loại phân vùng đặc biệt
+				; If $iSizeMB < 1000 Then $sNotes &= " ⚠️ Nhỏ (<1GB)"
+				; If StringRegExp($sType, "(?i)Recovery|EFI|MSR|System") Then $sNotes &= " ⚠️ Hệ thống"
+
+				; ; Phân tích sâu hơn cho các phân vùng dữ liệu cơ bản (Primary/Basic)
+				; If StringRegExp($sType, "(?i)Primary|Basic") Then
+					; Local $bIsWin = _IsWindowsPartition($sDiskNum, $sPartNum)
+					; If $bIsWin Then
+						 ; $sNotes &= " 💻 Có thể là Windows cũ!"
+					; Else
+						; $sNotes &= " 👤 Dữ liệu người dùng?"
+					; EndIf
+				; EndIf
+
+				; $sMsg &= "  Partition " & $sPartNum & " (" & $sType & ", " & $iSizeValue & " " & $sUnit & ")" & $sNotes & @CRLF
+			; EndIf
+		; Next
+        ; $sMsg &= @CRLF
+    ; Next
+
+    ; ; Thêm cảnh báo đặc biệt nếu phát hiện BitLocker
+    ; If $bFoundBitLocker Then
+        ; $sMsg &= @CRLF & "--- CẢNH BÁO QUAN TRỌNG ---" & @CRLF
+        ; $sMsg &= "🔒 Phát hiện phân vùng được mã hóa BitLocker!" & @CRLF
+        ; $sMsg &= "Nếu bạn cài đặt Windows lên phân vùng này mà không mở khóa trước," & @CRLF
+        ; $sMsg &= "TẤT CẢ DỮ LIỆU SẼ BỊ MẤT VĨNH VIỄN!" & @CRLF & @CRLF
+        ; $sMsg &= "👉 HÃY: Mở khóa BitLocker trước khi tiếp tục, hoặc sao lưu dữ liệu!" & @CRLF
+    ; EndIf
+
+    ; $sMsg &= "--- Chú thích ---" & @CRLF
+    ; $sMsg &= "💻 Windows cũ: Phát hiện có thư mục hệ thống (Windows, Program Files)." & @CRLF
+    ; $sMsg &= "👤 Dữ liệu người dùng: Phân vùng dữ liệu." & @CRLF
+    ; $sMsg &= "⚠️ Hệ thống: Phân vùng EFI, Recovery... quan trọng cho việc khởi động." & @CRLF & @CRLF
+    ; $sMsg &= "👉 KHUYẾN CÁO: KHÔNG XOÁ các phân vùng có ký hiệu 💻, 👤, ⚠️ nếu không chắc chắn!"
+    ; MsgBox(64, "Phân Tích Phân Vùng", $sMsg)
+
+    ; ; Xóa file tạm
+    ; FileDelete($sScriptFile)
+    ; FileDelete($sOutputFile)
+    ; For $sDiskNum In $aDisks
+        ; FileDelete($sTempDir & "\listpart" & $sDiskNum & ".txt")
+        ; FileDelete($sTempDir & "\partitions" & $sDiskNum & ".txt")
+    ; Next
+; EndFunc
+
+Func _AnalyzePartitions_WMI()
+    Local $oWMI = ObjGet("winmgmts:\\.\root\cimv2")
+    If Not IsObj($oWMI) Then
+        MsgBox(16, "Lỗi WMI", "Không thể kết nối tới dịch vụ Windows Management Instrumentation.")
         Return
     EndIf
 
-    Local $aDisks[0]
-    For $sLine In $aLines
-        Local $aMatch = StringRegExp($sLine, "Disk\s+(\d+)", 1)
-        If Not @error Then
-            _ArrayAdd($aDisks, $aMatch[0])
-        EndIf
-    Next
+    Local $sMsg = "Các phân vùng hiện có (Phân tích bằng WMI):" & @CRLF & @CRLF
+    Local $bFoundBitLocker = False
 
-    Local $sMsg = "Các phân vùng hiện có (theo Disk/Partition):" & @CRLF & @CRLF
-    For $sDiskNum In $aDisks
-        Local $sPartScriptFile = $sTempDir & "\listpart" & $sDiskNum & ".txt"
-        Local $sPartOutputFile = $sTempDir & "\partitions" & $sDiskNum & ".txt"
+    Local $colDisks = $oWMI.ExecQuery("SELECT * FROM Win32_DiskDrive")
+    If Not IsObj($colDisks) Then Return
 
-        ; Tạo script để lấy danh sách partition của disk
-        Local $hFile = FileOpen($sPartScriptFile, 2)
-        FileWriteLine($hFile, "select disk " & $sDiskNum)
-        FileWriteLine($hFile, "list partition")
-        FileWriteLine($hFile, "exit")
-        FileClose($hFile)
+    For $oDisk In $colDisks
+        $sMsg &= "Disk " & $oDisk.Index & " (" & Round($oDisk.Size / (1024^3), 2) & " GB):" & @CRLF
+        Local $sQuery = "ASSOCIATORS OF {Win32_DiskDrive.DeviceID='" & StringReplace($oDisk.DeviceID, "\", "\\") & "'} WHERE AssocClass = Win32_DiskDriveToDiskPartition"
+        Local $colPartitions = $oWMI.ExecQuery($sQuery)
 
-        ; Chạy diskpart và lưu kết quả
-		RunWait(@ComSpec & ' /c diskpart /s "' & $sPartScriptFile & '" > "' & $sPartOutputFile & '"', "", @SW_HIDE)
+        If IsObj($colPartitions) Then
+            For $oPartition In $colPartitions
+                Local $sPartInfo = StringRegExpReplace($oPartition.DeviceID, ".*Partition#", "Partition ")
+                Local $iSizeMB = Round($oPartition.Size / (1024^2))
+                Local $sUnit = "MB"
+                Local $iDisplaySize = $iSizeMB
+                If $iSizeMB >= 1024 Then
+                    $sUnit = "GB"
+                    $iDisplaySize = Round($iSizeMB / 1024, 2)
+                EndIf
 
-        ; Đọc và phân tích danh sách partition
-        Local $aPartLines = FileReadToArray($sPartOutputFile)
-        If @error Then
-            $sMsg &= "Disk " & $sDiskNum & ": Không thể lấy danh sách phân vùng." & @CRLF & @CRLF
-            ContinueLoop
-        EndIf
+                Local $sNotes = ""
+                ; WMI không trực tiếp trả về loại phân vùng như "Recovery", "MSR"
+                ; nhưng ta có thể suy luận từ các thuộc tính khác như Bootable, Type, Size
+                If $oPartition.Bootable Or $oPartition.BootPartition Then $sNotes &= " 🚀 Khởi động"
+                If $oPartition.Type = "EFI System Partition" Or StringInStr($oPartition.Type, "Recovery") Then $sNotes &= " ⚠️ Hệ thống"
+                If $iSizeMB < 1000 Then $sNotes &= " ⚠️ Nhỏ (<1GB)"
 
-        $sMsg &= "Disk " & $sDiskNum & ":" & @CRLF
-        For $sLine In $aPartLines
-			Local $aMatch = StringRegExp($sLine, "Partition\s+(\d+)\s+([^\d]+?)\s+(\d+)\s*([KMGTP]?B)", 3)
-			If Not @error Then
-				Local $sPartNum = $aMatch[0]
-				Local $sType = StringStripWS($aMatch[1], 3)  ; Xóa khoảng trắng thừa
-				Local $iSizeValue = Number($aMatch[2])
-				Local $sUnit = $aMatch[3]
-				Local $iSizeMB = 0
+                ; Lấy ký tự ổ đĩa (nếu có) để kiểm tra sâu hơn
+                Local $sDriveLetter = _GetDriveLetterFromPartition($oWMI, $oPartition.DeviceID)
+                If $sDriveLetter <> "" Then
+                    If _CheckWindowsFiles($sDriveLetter) Then
+                        $sNotes &= " 💻 Có thể là Windows cũ!"
+                    Else
+                        $sNotes &= " 👤 Dữ liệu người dùng?"
+                    EndIf
 
-				; SỬA ĐỔI: Quy đổi dung lượng về MB để kiểm tra thống nhất
-				Switch $sUnit
-					Case "GB"
-						$iSizeMB = $iSizeValue * 1024
-					Case "TB"
-						$iSizeMB = $iSizeValue * 1024 * 1024
-					Case "MB"
-						$iSizeMB = $iSizeValue
-					Case "KB"
-						$iSizeMB = $iSizeValue / 1024
-					Case Else
-						$iSizeMB = $iSizeValue / (1024 * 1024) ; Cho B
-				EndSwitch
-
-			Local $sNotes = ""
-			Local $bIsBitLocker = False
-			Local $bFoundBitLocker = False
-
-                ; Kiểm tra BitLocker trước khi kiểm tra các điều kiện khác
-                If $iSizeMB > 100 Then ; Chỉ kiểm tra phân vùng đủ lớn
-                    $bIsBitLocker = _CheckBitLockerMetadata($sDiskNum, $sPartNum)
-                    If $bIsBitLocker Then
-                        $sNotes &= " 🔒 BITLOCKER ĐÃ BẬT!"
-                        $bFoundBitLocker = True
+                    ; Kiểm tra BitLocker bằng WMI (đáng tin cậy hơn)
+                    Local $oEncVolume = $oWMI.Get('Win32_EncryptableVolume.DeviceID="' & StringReplace($sDriveLetter, ":", "\\:") & '"')
+                    If IsObj($oEncVolume) And $oEncVolume.GetProtectionStatus()[0] > 0 Then
+                         $sNotes &= " 🔒 BITLOCKER ĐÃ BẬT!"
+                         $bFoundBitLocker = True
                     EndIf
                 EndIf
 
-				; Kiểm tra các loại phân vùng đặc biệt
-				If $iSizeMB < 1000 Then $sNotes &= " ⚠️ Nhỏ (<1GB)"
-				If StringRegExp($sType, "(?i)Recovery|EFI|MSR|System") Then $sNotes &= " ⚠️ Hệ thống"
-
-				; Phân tích sâu hơn cho các phân vùng dữ liệu cơ bản (Primary/Basic)
-				If StringRegExp($sType, "(?i)Primary|Basic") Then
-					Local $bIsWin = _IsWindowsPartition($sDiskNum, $sPartNum)
-					If $bIsWin Then
-						 $sNotes &= " 💻 Có thể là Windows cũ!"
-					Else
-						$sNotes &= " 👤 Dữ liệu người dùng?"
-					EndIf
-				EndIf
-
-				$sMsg &= "  Partition " & $sPartNum & " (" & $sType & ", " & $iSizeValue & " " & $sUnit & ")" & $sNotes & @CRLF
-			EndIf
-		Next
+                $sMsg &= "  " & $sPartInfo & " (" & $oPartition.Type & ", " & $iDisplaySize & " " & $sUnit & ")" & $sNotes & @CRLF
+            Next
+        EndIf
         $sMsg &= @CRLF
     Next
 
-    ; Thêm cảnh báo đặc biệt nếu phát hiện BitLocker
     If $bFoundBitLocker Then
         $sMsg &= @CRLF & "--- CẢNH BÁO QUAN TRỌNG ---" & @CRLF
         $sMsg &= "🔒 Phát hiện phân vùng được mã hóa BitLocker!" & @CRLF
@@ -584,192 +670,287 @@ Func _AnalyzePartitions()
         $sMsg &= "👉 HÃY: Mở khóa BitLocker trước khi tiếp tục, hoặc sao lưu dữ liệu!" & @CRLF
     EndIf
 
-    $sMsg &= "--- Chú thích ---" & @CRLF
-    $sMsg &= "💻 Windows cũ: Phát hiện có thư mục hệ thống (Windows, Program Files)." & @CRLF
-    $sMsg &= "👤 Dữ liệu người dùng: Phân vùng dữ liệu." & @CRLF
-    $sMsg &= "⚠️ Hệ thống: Phân vùng EFI, Recovery... quan trọng cho việc khởi động." & @CRLF & @CRLF
-    $sMsg &= "👉 KHUYẾN CÁO: KHÔNG XOÁ các phân vùng có ký hiệu 💻, 👤, ⚠️ nếu không chắc chắn!"
-    MsgBox(64, "Phân Tích Phân Vùng", $sMsg)
-
-    ; Xóa file tạm
-    FileDelete($sScriptFile)
-    FileDelete($sOutputFile)
-    For $sDiskNum In $aDisks
-        FileDelete($sTempDir & "\listpart" & $sDiskNum & ".txt")
-        FileDelete($sTempDir & "\partitions" & $sDiskNum & ".txt")
-    Next
+    MsgBox(64, "Phân Tích Phân Vùng (WMI)", $sMsg)
 EndFunc
 
+; Func _AutoCleanPartitions()
+    ; ; Bước 1: Xác nhận ban đầu
+    ; Local $iConfirm = MsgBox(36, "Cảnh Báo Nâng Cao", "Tính năng này sẽ tự động xoá các phân vùng:" & @CRLF & _
+        ; "- Phân vùng nhỏ (<1GB)" & @CRLF & _
+        ; "- Phân vùng hệ thống (Recovery, MSR...)" & @CRLF & _
+        ; "- Phân vùng chứa Windows cũ" & @CRLF & @CRLF & _
+        ; "BẠN CÓ CHẮC CHẮN MUỐN TIẾP TỤC KHÔNG?")
+    ; If $iConfirm <> 6 Then Return ; 6 = Yes
+
+    ; ; Bước 2: Phân tích disk và partition
+    ; Local $sTempDir = @TempDir
+    ; Local $sScriptFile = $sTempDir & "\listdisk.txt"
+    ; Local $sOutputFile = $sTempDir & "\disklist.txt"
+    ; ; Tạo script để lấy danh sách disk
+    ; Local $hFile = FileOpen($sScriptFile, 2)
+    ; FileWriteLine($hFile, "list disk")
+    ; FileWriteLine($hFile, "exit")
+    ; FileClose($hFile)
+
+    ; ; Chạy diskpart và lưu kết quả
+    ; RunWait(@ComSpec & ' /c diskpart /s "' & $sScriptFile & '" > "' & $sOutputFile & '"', "", @SW_HIDE)
+
+    ; ; Đọc danh sách disk
+    ; Local $aLines = FileReadToArray($sOutputFile)
+    ; If @error Then
+        ; MsgBox(16, "Lỗi", "Không thể lấy danh sách ổ đĩa.")
+        ; FileDelete($sScriptFile)
+        ; FileDelete($sOutputFile)
+        ; Return
+    ; EndIf
+
+    ; Local $aDisks[0]
+    ; For $sLine In $aLines
+        ; Local $aMatch = StringRegExp($sLine, "Disk\s+(\d+)", 1)
+        ; If Not @error Then
+            ; _ArrayAdd($aDisks, $aMatch[0])
+        ; EndIf
+    ; Next
+
+    ; Local $sCleanScriptFile = $sTempDir & "\cleanpart.txt"
+    ; $hFile = FileOpen($sCleanScriptFile, 2)
+
+    ; ; Bước 3: Thu thập thông tin phân vùng sẽ xóa
+    ; Local $aToDelete[0][5] ; [Disk, Partition, Type, Size, Reason]
+    ; Local $sMsg = "Các phân vùng sau sẽ bị xóa:" & @CRLF & @CRLF
+
+    ; For $sDiskNum In $aDisks
+        ; Local $sPartScriptFile = $sTempDir & "\listpart" & $sDiskNum & ".txt"
+        ; Local $sPartOutputFile = $sTempDir & "\partitions" & $sDiskNum & ".txt"
+
+        ; ; Tạo script để lấy danh sách partition của disk
+        ; Local $hPartFile = FileOpen($sPartScriptFile, 2)
+        ; FileWriteLine($hPartFile, "select disk " & $sDiskNum)
+        ; FileWriteLine($hPartFile, "list partition")
+        ; FileWriteLine($hPartFile, "exit")
+        ; FileClose($hPartFile)
+
+        ; ; Chạy diskpart và lưu kết quả
+        ; RunWait(@ComSpec & ' /c diskpart /s "' & $sPartScriptFile & '" > "' & $sPartOutputFile & '"', "", @SW_HIDE)
+
+        ; ; Đọc và phân tích danh sách partition
+        ; Local $aPartLines = FileReadToArray($sPartOutputFile)
+        ; If @error Then
+            ; $sMsg &= "Disk " & $sDiskNum & ": Không thể lấy danh sách phân vùng." & @CRLF & @CRLF
+            ; ContinueLoop
+        ; EndIf
+
+        ; For $sLine In $aPartLines
+            ; Local $sPartNum = ""
+            ; Local $sType = ""
+            ; Local $iSizeValue = 0
+            ; Local $sUnit = ""
+            ; Local $iSizeMB = 0
+            ; Local $aMatch = StringRegExp($sLine, "Partition\s+(\d+)\s+([^\d]+?)\s+(\d+)\s*([KMGTP]?B)", 3)
+            ; If Not @error Then
+                ; Local $sPartNum = $aMatch[0]
+                ; Local $sType = StringStripWS($aMatch[1], 3)  ; Xóa khoảng trắng thừa
+                ; Local $iSizeValue = Number($aMatch[2])
+                ; Local $sUnit = $aMatch[3]
+                ; Local $iSizeMB = 0
+
+                ; ; Quy đổi dung lượng về MB
+                ; Switch $sUnit
+                    ; Case "GB"
+                        ; $iSizeMB = $iSizeValue * 1024
+                    ; Case "TB"
+                        ; $iSizeMB = $iSizeValue * 1024 * 1024
+                    ; Case "MB"
+                        ; $iSizeMB = $iSizeValue
+                    ; Case "KB"
+                        ; $iSizeMB = $iSizeValue / 1024
+                    ; Case Else
+                        ; $iSizeMB = $iSizeValue / (1024 * 1024) ; Cho B
+                ; EndSwitch
+				; ; Kiểm tra điều kiện xóa
+				; Local $bIsSmall = False
+				; If $iSizeMB < 1000 Then $bIsSmall = True
+				; Local $bIsSystem = StringRegExp($sType, "(?i)Recovery|EFI|MSR|System")
+				; Local $bIsPrimaryBasic = StringRegExp($sType, "(?i)Primary|Basic")
+				; Local $bIsOldWindows = _IsWindowsPartition($sDiskNum, $sPartNum)
+
+				; Local $sReason = ""
+				; Local $bShouldDelete = False
+
+				; If $bIsOldWindows Then
+					; $sReason = "Chứa hệ điều hành cũ"
+					; $bShouldDelete = True
+				; ElseIf ($bIsSmall Or $bIsSystem) And Not $bIsPrimaryBasic Then
+					; ; $sReason = $bIsSmall ? "Không cần thiết sẽ được tự tạo lại khi cài đặt Windows mới" : "Hệ thống"
+					; If $bIsSmall Then
+						; $sReason = "Không cần thiết sẽ được tự tạo lại khi cài đặt Windows mới"
+					; Else
+						; $sReason = "Hệ thống"
+					; EndIf
+					; $bShouldDelete = True
+				; EndIf
+
+				; If $bShouldDelete Then
+					; ; Thêm vào danh sách xóa và thông báo
+					; Local $iIdx = UBound($aToDelete)
+					; ReDim $aToDelete[$iIdx + 1][5]
+					; $aToDelete[$iIdx][0] = $sDiskNum
+					; $aToDelete[$iIdx][1] = $sPartNum
+					; $aToDelete[$iIdx][2] = $sType
+					; $aToDelete[$iIdx][3] = $iSizeValue & " " & $sUnit
+					; $aToDelete[$iIdx][4] = $sReason
+
+					; $sMsg &= StringFormat("- Disk %s, Partition %s: %s (%s) - Lý do: %s", _
+						; $sDiskNum, $sPartNum, $sType, $iSizeValue & " " & $sUnit, $sReason) & @CRLF
+				; EndIf
+			; EndIf
+        ; Next
+    ; Next
+
+    ; ; Bước 4: Xác nhận lần 2 với danh sách chi tiết
+    ; If UBound($aToDelete) > 0 Then
+        ; $sMsg &= @CRLF & "BẠN CÓ CHẮC CHẮN MUỐN XÓA CÁC PHÂN VÙNG TRÊN?"
+        ; $iConfirm = MsgBox(52, "XÁC NHẬN LẦN CUỐI", $sMsg) ; 52 = Yes/No + Question icon
+        ; If $iConfirm <> 6 Then Return
+    ; Else
+        ; MsgBox(64, "Thông báo", "Không tìm thấy phân vùng nào để xóa tự động")
+        ; Return
+    ; EndIf
+
+    ; ; Bước 5: Thực hiện xóa
+    ; Local $sCleanScriptFile = $sTempDir & "\cleanpart.txt"
+    ; Local $hFile = FileOpen($sCleanScriptFile, 2)
+
+    ; For $i = 0 To UBound($aToDelete) - 1
+        ; FileWriteLine($hFile, "select disk " & $aToDelete[$i][0])
+        ; FileWriteLine($hFile, "select partition " & $aToDelete[$i][1])
+        ; FileWriteLine($hFile, "delete partition override")
+    ; Next
+
+    ; FileClose($hFile)
+    ; RunWait('diskpart /s "' & $sCleanScriptFile & '"', "", @SW_HIDE)
+    ; MsgBox(64, "Hoàn Tất", "Đã xoá " & UBound($aToDelete) & " phân vùng")
+	; If WinExists("Setup","") = 1 Then
+		; ControlClick("Setup","","[CLASS:Button; INSTANCE:1]")
+		; ControlSend("Setup","","[CLASS:Button; INSTANCE:1]","!r")
+	; EndIf
+
+    ; ; Xóa file tạm
+    ; FileDelete($sScriptFile)
+    ; FileDelete($sOutputFile)
+    ; FileDelete($sCleanScriptFile)
+    ; For $sDiskNum In $aDisks
+        ; FileDelete($sTempDir & "\listpart" & $sDiskNum & ".txt")
+        ; FileDelete($sTempDir & "\partitions" & $sDiskNum & ".txt")
+    ; Next
+; EndFunc
+
 Func _AutoCleanPartitions()
-    ; Bước 1: Xác nhận ban đầu
     Local $iConfirm = MsgBox(36, "Cảnh Báo Nâng Cao", "Tính năng này sẽ tự động xoá các phân vùng:" & @CRLF & _
         "- Phân vùng nhỏ (<1GB)" & @CRLF & _
-        "- Phân vùng hệ thống (Recovery, MSR...)" & @CRLF & _
+        "- Phân vùng hệ thống (Recovery, EFI...)" & @CRLF & _
         "- Phân vùng chứa Windows cũ" & @CRLF & @CRLF & _
         "BẠN CÓ CHẮC CHẮN MUỐN TIẾP TỤC KHÔNG?")
     If $iConfirm <> 6 Then Return ; 6 = Yes
 
-    ; Bước 2: Phân tích disk và partition
-    Local $sTempDir = @TempDir
-    Local $sScriptFile = $sTempDir & "\listdisk.txt"
-    Local $sOutputFile = $sTempDir & "\disklist.txt"
-    ; Tạo script để lấy danh sách disk
-    Local $hFile = FileOpen($sScriptFile, 2)
-    FileWriteLine($hFile, "list disk")
-    FileWriteLine($hFile, "exit")
-    FileClose($hFile)
-
-    ; Chạy diskpart và lưu kết quả
-    RunWait(@ComSpec & ' /c diskpart /s "' & $sScriptFile & '" > "' & $sOutputFile & '"', "", @SW_HIDE)
-
-    ; Đọc danh sách disk
-    Local $aLines = FileReadToArray($sOutputFile)
-    If @error Then
-        MsgBox(16, "Lỗi", "Không thể lấy danh sách ổ đĩa.")
-        FileDelete($sScriptFile)
-        FileDelete($sOutputFile)
+    Local $oWMI = ObjGet("winmgmts:\\.\root\cimv2")
+    If Not IsObj($oWMI) Then
+        MsgBox(16, "Lỗi WMI", "Không thể kết nối tới dịch vụ WMI.")
         Return
     EndIf
 
-    Local $aDisks[0]
-    For $sLine In $aLines
-        Local $aMatch = StringRegExp($sLine, "Disk\s+(\d+)", 1)
-        If Not @error Then
-            _ArrayAdd($aDisks, $aMatch[0])
+    Local $aToDelete[0][5] ; [DiskIndex, PartIndex, Type, SizeStr, Reason]
+    Local $sConfirmMsg = "Các phân vùng sau sẽ bị xóa:" & @CRLF & @CRLF
+
+    Local $colDisks = $oWMI.ExecQuery("SELECT * FROM Win32_DiskDrive")
+    If Not IsObj($colDisks) Then Return
+
+    For $oDisk In $colDisks
+        Local $sQuery = "ASSOCIATORS OF {Win32_DiskDrive.DeviceID='" & StringReplace($oDisk.DeviceID, "\", "\\") & "'} WHERE AssocClass = Win32_DiskDriveToDiskPartition"
+        Local $colPartitions = $oWMI.ExecQuery($sQuery)
+
+        If IsObj($colPartitions) Then
+            For $oPartition In $colPartitions
+                Local $iSizeMB = Round($oPartition.Size / (1024^2))
+                Local $bIsSmall = ($iSizeMB < 1000)
+                Local $bIsSystem = ($oPartition.Type = "EFI System Partition" Or StringInStr($oPartition.Type, "Recovery") Or StringInStr($oPartition.Type, "MSR"))
+                Local $sDriveLetter = _GetDriveLetterFromPartition($oWMI, $oPartition.DeviceID)
+                Local $bIsOldWindows = ($sDriveLetter <> "" And _CheckWindowsFiles($sDriveLetter))
+
+                Local $sReason = ""
+                Local $bShouldDelete = False
+
+                ; Logic xác định phân vùng cần xóa
+                If $bIsOldWindows Then
+                    $sReason = "Chứa hệ điều hành cũ"
+                    $bShouldDelete = True
+                ElseIf ($bIsSmall Or $bIsSystem) And Not $oPartition.BootPartition Then
+                    $sReason = $bIsSmall ? "Phân vùng nhỏ không cần thiết" : "Phân vùng hệ thống"
+                    $bShouldDelete = True
+                EndIf
+
+                If $bShouldDelete Then
+                    Local $sSizeStr = Round($iSizeMB, 2) & " MB"
+                    If $iSizeMB >= 1024 Then $sSizeStr = Round($iSizeMB / 1024, 2) & " GB"
+
+                    Local $iIdx = UBound($aToDelete)
+                    ReDim $aToDelete[$iIdx + 1][5]
+                    $aToDelete[$iIdx][0] = $oPartition.DiskIndex
+                    $aToDelete[$iIdx][1] = $oPartition.Index
+                    $aToDelete[$iIdx][2] = $oPartition.Type
+                    $aToDelete[$iIdx][3] = $sSizeStr
+                    $aToDelete[$iIdx][4] = $sReason
+
+                    $sConfirmMsg &= StringFormat("- Disk %s, Partition %s: %s (%s) - Lý do: %s", _
+                        $oPartition.DiskIndex, $oPartition.Index, $oPartition.Type, $sSizeStr, $sReason) & @CRLF
+                EndIf
+            Next
         EndIf
     Next
 
-    Local $sCleanScriptFile = $sTempDir & "\cleanpart.txt"
-    $hFile = FileOpen($sCleanScriptFile, 2)
-
-    ; Bước 3: Thu thập thông tin phân vùng sẽ xóa
-    Local $aToDelete[0][5] ; [Disk, Partition, Type, Size, Reason]
-    Local $sMsg = "Các phân vùng sau sẽ bị xóa:" & @CRLF & @CRLF
-
-    For $sDiskNum In $aDisks
-        Local $sPartScriptFile = $sTempDir & "\listpart" & $sDiskNum & ".txt"
-        Local $sPartOutputFile = $sTempDir & "\partitions" & $sDiskNum & ".txt"
-
-        ; Tạo script để lấy danh sách partition của disk
-        Local $hPartFile = FileOpen($sPartScriptFile, 2)
-        FileWriteLine($hPartFile, "select disk " & $sDiskNum)
-        FileWriteLine($hPartFile, "list partition")
-        FileWriteLine($hPartFile, "exit")
-        FileClose($hPartFile)
-
-        ; Chạy diskpart và lưu kết quả
-        RunWait(@ComSpec & ' /c diskpart /s "' & $sPartScriptFile & '" > "' & $sPartOutputFile & '"', "", @SW_HIDE)
-
-        ; Đọc và phân tích danh sách partition
-        Local $aPartLines = FileReadToArray($sPartOutputFile)
-        If @error Then
-            $sMsg &= "Disk " & $sDiskNum & ": Không thể lấy danh sách phân vùng." & @CRLF & @CRLF
-            ContinueLoop
-        EndIf
-
-        For $sLine In $aPartLines
-            Local $sPartNum = ""
-            Local $sType = ""
-            Local $iSizeValue = 0
-            Local $sUnit = ""
-            Local $iSizeMB = 0
-            Local $aMatch = StringRegExp($sLine, "Partition\s+(\d+)\s+([^\d]+?)\s+(\d+)\s*([KMGTP]?B)", 3)
-            If Not @error Then
-                Local $sPartNum = $aMatch[0]
-                Local $sType = StringStripWS($aMatch[1], 3)  ; Xóa khoảng trắng thừa
-                Local $iSizeValue = Number($aMatch[2])
-                Local $sUnit = $aMatch[3]
-                Local $iSizeMB = 0
-
-                ; Quy đổi dung lượng về MB
-                Switch $sUnit
-                    Case "GB"
-                        $iSizeMB = $iSizeValue * 1024
-                    Case "TB"
-                        $iSizeMB = $iSizeValue * 1024 * 1024
-                    Case "MB"
-                        $iSizeMB = $iSizeValue
-                    Case "KB"
-                        $iSizeMB = $iSizeValue / 1024
-                    Case Else
-                        $iSizeMB = $iSizeValue / (1024 * 1024) ; Cho B
-                EndSwitch
-				; Kiểm tra điều kiện xóa
-				Local $bIsSmall = False
-				If $iSizeMB < 1000 Then $bIsSmall = True
-				Local $bIsSystem = StringRegExp($sType, "(?i)Recovery|EFI|MSR|System")
-				Local $bIsPrimaryBasic = StringRegExp($sType, "(?i)Primary|Basic")
-				Local $bIsOldWindows = _IsWindowsPartition($sDiskNum, $sPartNum)
-
-				Local $sReason = ""
-				Local $bShouldDelete = False
-
-				If $bIsOldWindows Then
-					$sReason = "Chứa hệ điều hành cũ"
-					$bShouldDelete = True
-				ElseIf ($bIsSmall Or $bIsSystem) And Not $bIsPrimaryBasic Then
-					; $sReason = $bIsSmall ? "Không cần thiết sẽ được tự tạo lại khi cài đặt Windows mới" : "Hệ thống"
-					If $bIsSmall Then
-						$sReason = "Không cần thiết sẽ được tự tạo lại khi cài đặt Windows mới"
-					Else
-						$sReason = "Hệ thống"
-					EndIf
-					$bShouldDelete = True
-				EndIf
-
-				If $bShouldDelete Then
-					; Thêm vào danh sách xóa và thông báo
-					Local $iIdx = UBound($aToDelete)
-					ReDim $aToDelete[$iIdx + 1][5]
-					$aToDelete[$iIdx][0] = $sDiskNum
-					$aToDelete[$iIdx][1] = $sPartNum
-					$aToDelete[$iIdx][2] = $sType
-					$aToDelete[$iIdx][3] = $iSizeValue & " " & $sUnit
-					$aToDelete[$iIdx][4] = $sReason
-
-					$sMsg &= StringFormat("- Disk %s, Partition %s: %s (%s) - Lý do: %s", _
-						$sDiskNum, $sPartNum, $sType, $iSizeValue & " " & $sUnit, $sReason) & @CRLF
-				EndIf
-			EndIf
-        Next
-    Next
-
-    ; Bước 4: Xác nhận lần 2 với danh sách chi tiết
-    If UBound($aToDelete) > 0 Then
-        $sMsg &= @CRLF & "BẠN CÓ CHẮC CHẮN MUỐN XÓA CÁC PHÂN VÙNG TRÊN?"
-        $iConfirm = MsgBox(52, "XÁC NHẬN LẦN CUỐI", $sMsg) ; 52 = Yes/No + Question icon
-        If $iConfirm <> 6 Then Return
-    Else
-        MsgBox(64, "Thông báo", "Không tìm thấy phân vùng nào để xóa tự động")
+    If UBound($aToDelete) <= 0 Then
+        MsgBox(64, "Thông báo", "Không tìm thấy phân vùng nào để xóa tự động.")
         Return
     EndIf
 
-    ; Bước 5: Thực hiện xóa
-    Local $sCleanScriptFile = $sTempDir & "\cleanpart.txt"
+    $sConfirmMsg &= @CRLF & "BẠN CÓ CHẮC CHẮN MUỐN XÓA CÁC PHÂN VÙNG TRÊN?"
+    $iConfirm = MsgBox(52, "XÁC NHẬN LẦN CUỐI", $sConfirmMsg)
+    If $iConfirm <> 6 Then Return
+
+    ; Bước 5: Tạo và thực thi script DiskPart
+    Local $sCleanScriptFile = @TempDir & "\cleanpart.txt"
     Local $hFile = FileOpen($sCleanScriptFile, 2)
-
     For $i = 0 To UBound($aToDelete) - 1
         FileWriteLine($hFile, "select disk " & $aToDelete[$i][0])
         FileWriteLine($hFile, "select partition " & $aToDelete[$i][1])
         FileWriteLine($hFile, "delete partition override")
     Next
-
     FileClose($hFile)
-    RunWait('diskpart /s "' & $sCleanScriptFile & '"', "", @SW_HIDE)
-    MsgBox(64, "Hoàn Tất", "Đã xoá " & UBound($aToDelete) & " phân vùng")
-	If WinExists("Setup","") = 1 Then
-		ControlClick("Setup","","[CLASS:Button; INSTANCE:1]")
-		ControlSend("Setup","","[CLASS:Button; INSTANCE:1]","!r")
-	EndIf
 
-    ; Xóa file tạm
-    FileDelete($sScriptFile)
-    FileDelete($sOutputFile)
+    RunWait('diskpart /s "' & $sCleanScriptFile & '"', "", @SW_HIDE)
     FileDelete($sCleanScriptFile)
-    For $sDiskNum In $aDisks
-        FileDelete($sTempDir & "\listpart" & $sDiskNum & ".txt")
-        FileDelete($sTempDir & "\partitions" & $sDiskNum & ".txt")
-    Next
+
+    MsgBox(64, "Hoàn Tất", "Đã xoá " & UBound($aToDelete) & " phân vùng.")
+    If WinExists("Setup", "") = 1 Then
+        ControlClick("Setup", "", "[CLASS:Button; INSTANCE:1]")
+        ControlSend("Setup", "", "[CLASS:Button; INSTANCE:1]", "!r")
+    EndIf
+EndFunc
+
+;===============================================================================
+; HÀM HỖ TRỢ WMI: _GetDriveLetterFromPartition
+; Mục đích: Tìm ký tự ổ đĩa (C:, D:...) tương ứng với một đối tượng
+;           phân vùng WMI.
+;===============================================================================
+Func _GetDriveLetterFromPartition($oWMIService, $sPartitionDeviceID)
+    Local $sQuery = "ASSOCIATORS OF {Win32_DiskPartition.DeviceID='" & $sPartitionDeviceID & "'} WHERE AssocClass = Win32_LogicalDiskToPartition"
+    Local $colLogicalDisks = $oWMIService.ExecQuery($sQuery)
+    If IsObj($colLogicalDisks) And $colLogicalDisks.Count > 0 Then
+        For $oLogicalDisk In $colLogicalDisks
+            Return $oLogicalDisk.DeviceID ; Trả về ký tự đầu tiên tìm thấy (ví dụ: "C:")
+        Next
+    EndIf
+    Return ""
 EndFunc
 
 ;===============================================================================
@@ -1406,14 +1587,28 @@ EndFunc
 ;===============================================================================
 Func _GetAllPhysicalDiskNumbers()
     Local $aDiskNumbers[0]
-    For $i = 0 To 15
-        Local $hDevice = _WinAPI_CreateFile("\\.\PhysicalDrive" & $i, 0, BitOR($FILE_SHARE_READ, $FILE_SHARE_WRITE), 0, $OPEN_EXISTING)
-        If $hDevice <> -1 Then
-            _WinAPI_CloseHandle($hDevice)
-            _ArrayAdd($aDiskNumbers, $i)
-        EndIf
+    Local $oWMIService = ObjGet("winmgmts:\\.\root\cimv2")
+
+    If @error Or Not IsObj($oWMIService) Then
+        ConsoleWrite("! Lỗi: Không thể kết nối tới dịch vụ WMI." & @CRLF)
+        Return SetError(1, 0, 0)
+    EndIf
+
+    ; Tên thuộc tính 'Index' là cố định, không thay đổi theo ngôn ngữ
+    Local $colItems = $oWMIService.ExecQuery("SELECT Index FROM Win32_DiskDrive", "WQL", 48)
+
+    If @error Or Not IsObj($colItems) Then
+        ConsoleWrite("! Lỗi: Truy vấn WMI để lấy danh sách ổ đĩa thất bại." & @CRLF)
+        Return SetError(2, 0, 0)
+    EndIf
+
+    For $oItem In $colItems
+        _ArrayAdd($aDiskNumbers, $oItem.Index)
     Next
-    If UBound($aDiskNumbers) = 0 Then Return SetError(1, 0, 0)
+
+    If UBound($aDiskNumbers) = 0 Then Return SetError(3, 0, 0)
+
+    ConsoleWrite("* Thông tin (WMI): Các ổ đĩa vật lý được tìm thấy: " & _ArrayToString($aDiskNumbers, ", ") & @CRLF)
     Return $aDiskNumbers
 EndFunc
 
@@ -1531,6 +1726,118 @@ EndFunc
 ; Mục đích: Hàm được gọi để khởi động lại máy tính.
 ;===============================================================================
 Func _ForceReboot()
-    _RunDos("wpeutil.exe reboot")
+	_RunTool("wpeutil.exe reboot /Y")
 	Shutdown(2) ; 2 = Reboot
+EndFunc
+
+;===============================================================================
+; Hàm: _AutoExtractDrivers
+; Mục đích: Tự động xác định HĐH từ file ISO do Ventoy boot và giải nén driver
+;           phù hợp dựa trên loại CPU và HĐH đã xác định.
+;===============================================================================
+Func _AutoExtractDrivers()
+    ; --- Biến Cục bộ và Cấu hình ---
+    Local Const $sRelativeArchivePath = "\ventoy\Drivers.7z"
+    Local Const $sDestDir = "X:\Drivers"
+    Local Const $sTempDir = "X:\TempExtract"
+    Local $s7zPath = @ScriptDir & "\Tools\7z" & (@OSArch = "X64" ? "64" : "32") & "\7za.exe"
+    Local $sCpuFolder = "", $sOsFolder = "", $sIsoPath = ""
+
+    ; --- Bước 1: Tự động tìm kiếm file Drivers.7z ---
+    Local $sArchivePath = _FindFileOnDrives($sRelativeArchivePath)
+    If $sArchivePath = "" Or Not FileExists($s7zPath) Then
+        ConsoleWrite("! Cảnh báo: Không tìm thấy Drivers.7z hoặc 7za.exe. Bỏ qua giải nén driver." & @CRLF)
+        Return False
+    EndIf
+    If FileExists($sDestDir & "\Intel") Or FileExists($sDestDir & "\AMD") Then
+        ConsoleWrite("* Thông tin: Thư mục Drivers đã tồn tại. Bỏ qua giải nén." & @CRLF)
+        Return True
+    EndIf
+
+    ; --- Bước 2: Xác định loại CPU ---
+    If StringInStr($CPU, "Intel") Then
+        $sCpuFolder = "Intel"
+    ElseIf StringInStr($CPU, "AMD") Then
+        $sCpuFolder = "AMD"
+    Else
+        $sCpuFolder = "*"
+    EndIf
+    ConsoleWrite("* Thông tin: Đã xác định CPU là " & $sCpuFolder & @CRLF)
+
+    ; --- Bước 3: Tự động xác định phiên bản Windows từ Ventoy ISO ---
+    $sIsoPath = EnvGet("VTOY_ISO_PATH")
+    If $sIsoPath = "" Then
+        ConsoleWrite("! Cảnh báo: Không tìm thấy biến VTOY_ISO_PATH. Sẽ giải nén toàn bộ driver cho CPU." & @CRLF)
+        $sOsFolder = "*"
+    Else
+        ConsoleWrite("* Thông tin: Tìm thấy Ventoy ISO tại: " & $sIsoPath & @CRLF)
+        DirCreate($sTempDir)
+        Local $sWimInfoFile = $sTempDir & "\wiminfo.txt"
+        Local $sImagePath = ""
+
+        ; Ưu tiên tìm install.wim, sau đó mới đến install.esd
+        Local $sCheckWim = 'sources\install.wim'
+        RunWait('"' & $s7zPath & '" t "' & $sIsoPath & '" "' & $sCheckWim & '"', "", @SW_HIDE)
+        If @error = 0 Then
+             $sImagePath = $sCheckWim
+        Else
+             $sImagePath = 'sources\install.esd'
+        EndIf
+
+        ; Trích xuất và đọc thông tin
+        RunWait('"' & $s7zPath & '" e "' & $sIsoPath & '" -o"' & $sTempDir & '" "' & $sImagePath & '" -y', "", @SW_HIDE)
+        Local $sExtractedFile = $sTempDir & "\" & StringRegExpReplace($sImagePath, ".+\\", "")
+        If FileExists($sExtractedFile) Then
+            RunWait(@ComSpec & ' /c Dism /Get-WimInfo /WimFile:"' & $sExtractedFile & '" > "' & $sWimInfoFile & '"', "", @SW_HIDE)
+            Local $sWimInfo = FileRead($sWimInfoFile)
+
+            If StringInStr($sWimInfo, "Windows 7") Then
+                $sOsFolder = "WIN_7"
+            ElseIf StringInStr($sWimInfo, "Windows 11") Or StringInStr($sWimInfo, "Windows 10") Then
+                $sOsFolder = "WIN_10_11"
+            ElseIf StringInStr($sWimInfo, "Server") Then
+                $sOsFolder = "WIN_SERVER"
+            Else
+                $sOsFolder = "*"
+            EndIf
+            ConsoleWrite("* Thông tin: Đã xác định HĐH là " & $sOsFolder & @CRLF)
+        Else
+            $sOsFolder = "*"
+        EndIf
+        DirRemove($sTempDir, 1) ; Dọn dẹp thư mục tạm
+    EndIf
+
+    ; --- Bước 4: Thực thi giải nén ---
+    Local $sExtractPath = $sCpuFolder & "\" & $sOsFolder & "\*"
+    ConsoleWrite("* Thông tin: Chuẩn bị giải nén '" & $sExtractPath & "' từ " & $sArchivePath & " vào " & $sDestDir & @CRLF)
+    DirCreate($sDestDir)
+    Local $sCommand = '"' & $s7zPath & '" x "' & $sArchivePath & '" -o"' & $sDestDir & '" "' & $sExtractPath & '" -y'
+    RunWait($sCommand, "", @SW_HIDE)
+
+    ConsoleWrite("* Thành công: Quá trình giải nén driver đã hoàn tất." & @CRLF)
+    Return True
+EndFunc
+
+;===============================================================================
+; Hàm: _FindFileOnDrives
+; Mục đích: Tìm kiếm một file hoặc thư mục theo một đường dẫn tương đối
+;           trên tất cả các ổ đĩa.
+; Tham số:
+;    $sRelativePath - Đường dẫn tương đối cần tìm (ví dụ: "\ventoy\Drivers.7z")
+; Trả về:
+;    Đường dẫn tuyệt đối đầy đủ nếu tìm thấy (ví dụ: "E:\ventoy\Drivers.7z").
+;    Chuỗi rỗng "" nếu không tìm thấy.
+;===============================================================================
+Func _FindFileOnDrives($sRelativePath)
+    Local $aDrives = DriveGetDrive("ALL")
+    If @error Then Return ""
+    For $i = 1 To $aDrives[0]
+        Local $sFullPath = $aDrives[$i] & $sRelativePath
+        If FileExists($sFullPath) Then
+            ConsoleWrite("* Thông tin: Tìm thấy file tại: " & $sFullPath & @CRLF)
+            Return $sFullPath
+        EndIf
+    Next
+    ConsoleWrite("! Lỗi: Không thể tìm thấy '" & $sRelativePath & "' trên bất kỳ ổ đĩa nào." & @CRLF)
+    Return ""
 EndFunc

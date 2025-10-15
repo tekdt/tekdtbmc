@@ -52,12 +52,14 @@ def _process_driver_archive(main_app, usb_mount_point):
     Gộp các file Drivers.7z.001 và .002, sao chép vào thư mục ventoy trên USB.
     Hàm này được giữ nguyên logic từ file gốc của bạn.
     """
-    main_app.creation_worker.status.emit("Đang xử lý kho driver...")
+    main_app.creation_worker.status.emit("Đang xử lý kho driver và công cụ TekDT_PE...")
     
+    tekdt_pe = config.DRIVERS_DIR / "TekDT_PE.7z"
     drivers_part1 = config.DRIVERS_DIR / "Drivers.7z.001"
     drivers_part2 = config.DRIVERS_DIR / "Drivers.7z.002"
     usb_ventoy_dir = os.path.join(usb_mount_point, "ventoy")
     final_archive_path = os.path.join(usb_ventoy_dir, "Drivers.7z")
+    tekdt_pe_archive_path = os.path.join(usb_ventoy_dir, "TekDT_PE.7z")
     
     if not config.DRIVERS_DIR.exists():
         main_app.creation_worker.status.emit("Thư mục Drivers không tồn tại. Bỏ qua.")
@@ -67,6 +69,11 @@ def _process_driver_archive(main_app, usb_mount_point):
     if not (os.path.exists(drivers_part1) and os.path.exists(drivers_part2)):
         main_app.creation_worker.status.emit("Không tìm thấy Drivers.7z.001/.002. Bỏ qua.")
         print("Không tìm thấy file driver phân mảnh, bỏ qua bước này.")
+        return
+
+    if not os.path.exists(tekdt_pe):
+        main_app.creation_worker.status.emit("Không tìm thấy TekDT_PE.7z. Bỏ qua.")
+        print("Không tìm thấy file TekDT_PE.7z, bỏ qua bước này.")
         return
 
     try:
@@ -88,6 +95,18 @@ def _process_driver_archive(main_app, usb_mount_point):
         print(error_message)
         raise Exception(error_message)
 
+    try:
+        os.makedirs(usb_ventoy_dir, exist_ok=True)
+        main_app.creation_worker.status.emit("Đang sao chép TekDT_PE.7z vào USB...")
+        print(f"Bắt đầu sao chép file vào: {tekdt_pe_archive_path}")
+        shutil.copy(tekdt_pe, tekdt_pe_archive_path)
+        main_app.creation_worker.status.emit("Đã sao chép TekDT_PE.7z vào USB thành công.")
+        print("Sao chép TekDT_PE.7z hoàn tất.")
+    except Exception as e:
+        error_message = f"Lỗi khi gộp và sao chép TekDT_PE.7z: {e}"
+        main_app.creation_worker.status.emit(error_message)
+        print(error_message)
+        raise Exception(error_message)
 
 def _generate_ventoy_json(main_app):
     """
@@ -123,11 +142,11 @@ def _generate_ventoy_json(main_app):
             })
     
     # Chỉ thêm injection nếu có file Drivers
-    drivers_archive = config.DRIVERS_DIR / "Drivers.7z.001"
-    if drivers_archive.exists():
+    tekdtpe_archive = config.DRIVERS_DIR / "TekDT_PE.7z"
+    if tekdtpe_archive.exists():
         config_data["injection"].append({
             "parent": "/",
-            "archive": "/ventoy/Drivers.7z"
+            "archive": "/ventoy/TekDT_PE.7z"
         })
 
     if not config_data["auto_install"]: del config_data["auto_install"]
@@ -604,7 +623,7 @@ def create_usb_task(main_app):
                 copy_percentage = copied_so_far / total_copy_size if total_copy_size > 0 else 1
                 worker.progress.emit(int(base_progress + (copy_percentage * progress_range)))
 
-        # Gộp và chép Drivers.7z
+        # Gộp và chép Drivers.7z và TekDT_PE.7z
         _process_driver_archive(main_app, usb_mount_point)
         
         worker.progress.emit(80) # Hoàn tất sao chép file
