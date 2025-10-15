@@ -73,6 +73,9 @@ Func _Main()
 
     AdlibRegister("_CheckMousePosition", 100)
     AdlibRegister("_InitialShrink", 2000) ; Thu nhỏ sau 2 giây
+	DirRemove("X:\Drivers",1)
+	_RunTool("dism.exe /online /export-driver /destination:X:\Drivers /Y")
+	FileWrite("Done.txt","Done")
 
 	Local $iLastCheck = TimerInit()
 
@@ -350,7 +353,7 @@ Func _RunTool($sTool)
     EndSwitch
 
     ; Xử lý lệnh shutdown với xác nhận (giữ nguyên)
-    If StringInStr($sTool, "wpeutil.exe") Then
+    If StringInStr($sTool, "wpeutil.exe") OR StringInStr($sTool, "dism.exe") Then
 		If StringInStr($sTool, "/Y") Then
 			Run(@ComSpec & " /c " & StringReplace($sTool," /Y",""), "", @SW_HIDE)
 			Return

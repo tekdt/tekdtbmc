@@ -4,7 +4,7 @@
     "partition_scheme": "GPT",
     "filesystem": "ExFAT",
     "theme": "Purple.zip",
-    "fill_space": false,
+    "fill_space": true,
     "iso_list": [
         {
             "path": "D:/Github/tekdtbmc/ISOs/Win11_24H2_English_x64.iso",
