@@ -4,7 +4,7 @@
     "partition_scheme": "GPT",
     "filesystem": "ExFAT",
     "theme": "Purple.zip",
-    "fill_space": true,
+    "fill_space": false,
     "iso_list": [
         {
             "path": "D:/Github/tekdtbmc/ISOs/Win11_24H2_English_x64.iso",
@@ -16,13 +16,14 @@
             "windows_edition_arch": "amd64",
             "windows_edition_lang": "en-US",
             "alias": "Windows 11 Pro (Win11_24H2_English_x64.iso)",
-            "product_key": "W269N-WFGWX-YVC9B-4J6C9-T83GX"
+            "product_key": "W269N-WFGWX-YVC9B-4J6C9-T83GX",
+            "unattend_file": "unattend_0_Win11_24H2_English_x64.xml"
         }
     ],
     "windows_edition": null,
     "windows_edition_index": null,
     "copy_ais_selection_only": true,
-    "prune_iso": true,
+    "prune_iso": false,
     "device_details": {
         "BusType": "USB",
         "DeviceID": "1",
