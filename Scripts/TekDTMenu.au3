@@ -57,16 +57,26 @@ Global $aPastelColors = [0xFFD700, 0xFF6347, 0x98FB98, 0xDDA0DD, 0xAFEEEE, 0xF0E
 _Main()
 
 Func _Main()
+	Local $SplashInfo = SplashTextOn('Thông tin', 'Cập nhật tác vụ thực hiện...', @DesktopWidth*0.7, 150, default, default, 1, '', 13)
+	ControlSetText($SplashInfo, '', 'Static1', 'Xác nhận thiết bị hợp lệ...')
 	If Not _VerifyUSBSignature() Then
+		If $SplashInfo Then SplashOff()
         _ShowFatalErrorAndReboot() ; Gọi màn hình lỗi và reboot
         Exit
     EndIf
+	If $SplashInfo Then ControlSetText($SplashInfo, '', 'Static1', 'Trích xuất trình điều khiển...')
 	_AutoExtractDrivers()
+	;If $SplashInfo Then ControlSetText($SplashInfo, '', 'Static1', 'Chờ hệ thống khởi động đầy đủ...')
 	;_WaitForWinPEBootComplete()
+	If $SplashInfo Then ControlSetText($SplashInfo, '', 'Static1', 'Đọc cấu hình cho TekDT Menu...')
 	_ReadButtonsInfoFromINI()
+	If $SplashInfo Then ControlSetText($SplashInfo, '', 'Static1', 'Tạo giao diện...')
     _CreateGUI()
+	If $SplashInfo Then ControlSetText($SplashInfo, '', 'Static1', 'Tạo các nút nhấn cho giao diện TekDT Menu...')
 	_CreateButtons()
+	If $SplashInfo Then ControlSetText($SplashInfo, '', 'Static1', 'Hiển thị hoàn tất...')
     _UpdateVisibleButtons() ; Hiển thị các nút ban đầu
+	If $SplashInfo Then SplashOff()
     GUISetState(@SW_SHOW, $g_hGUI)
 
 	_RunAutoRunButtons() ; Chạy các button AutoRun
@@ -606,7 +616,7 @@ EndFunc
     ; Next
 ; EndFunc
 
-Func _AnalyzePartitions_WMI()
+Func _AnalyzePartitions()
     Local $oWMI = ObjGet("winmgmts:\\.\root\cimv2")
     If Not IsObj($oWMI) Then
         MsgBox(16, "Lỗi WMI", "Không thể kết nối tới dịch vụ Windows Management Instrumentation.")
@@ -617,16 +627,17 @@ Func _AnalyzePartitions_WMI()
     Local $bFoundBitLocker = False
 
     Local $colDisks = $oWMI.ExecQuery("SELECT * FROM Win32_DiskDrive")
-    If Not IsObj($colDisks) Then Return
+    If Not IsObj($colDisks) Or $colDisks.Count = 0 Then Return
 
     For $oDisk In $colDisks
-        $sMsg &= "Disk " & $oDisk.Index & " (" & Round($oDisk.Size / (1024^3), 2) & " GB):" & @CRLF
-        Local $sQuery = "ASSOCIATORS OF {Win32_DiskDrive.DeviceID='" & StringReplace($oDisk.DeviceID, "\", "\\") & "'} WHERE AssocClass = Win32_DiskDriveToDiskPartition"
+        $sMsg &= StringFormat("Disk %i (%s GB - %s):\n", $oDisk.Index, Round($oDisk.Size / (1024^3), 2), $oDisk.Model)
+        
+        ; === SỬA LỖI TẠI ĐÂY: Truy vấn trực tiếp Partition bằng DiskIndex ===
+        Local $sQuery = "SELECT * FROM Win32_DiskPartition WHERE DiskIndex = " & $oDisk.Index
         Local $colPartitions = $oWMI.ExecQuery($sQuery)
 
-        If IsObj($colPartitions) Then
+        If IsObj($colPartitions) And $colPartitions.Count > 0 Then
             For $oPartition In $colPartitions
-                Local $sPartInfo = StringRegExpReplace($oPartition.DeviceID, ".*Partition#", "Partition ")
                 Local $iSizeMB = Round($oPartition.Size / (1024^2))
                 Local $sUnit = "MB"
                 Local $iDisplaySize = $iSizeMB
@@ -636,44 +647,28 @@ Func _AnalyzePartitions_WMI()
                 EndIf
 
                 Local $sNotes = ""
-                ; WMI không trực tiếp trả về loại phân vùng như "Recovery", "MSR"
-                ; nhưng ta có thể suy luận từ các thuộc tính khác như Bootable, Type, Size
-                If $oPartition.Bootable Or $oPartition.BootPartition Then $sNotes &= " 🚀 Khởi động"
-                If $oPartition.Type = "EFI System Partition" Or StringInStr($oPartition.Type, "Recovery") Then $sNotes &= " ⚠️ Hệ thống"
+                If $oPartition.BootPartition Then $sNotes &= " 🚀 Khởi động"
+                If $oPartition.Type = "EFI System Partition" Or StringInStr($oPartition.Type, "Recovery") Or StringInStr($oPartition.Type, "MSR") Then $sNotes &= " ⚠️ Hệ thống"
                 If $iSizeMB < 1000 Then $sNotes &= " ⚠️ Nhỏ (<1GB)"
 
-                ; Lấy ký tự ổ đĩa (nếu có) để kiểm tra sâu hơn
-                Local $sDriveLetter = _GetDriveLetterFromPartition($oWMI, $oPartition.DeviceID)
-                If $sDriveLetter <> "" Then
-                    If _CheckWindowsFiles($sDriveLetter) Then
-                        $sNotes &= " 💻 Có thể là Windows cũ!"
-                    Else
-                        $sNotes &= " 👤 Dữ liệu người dùng?"
-                    EndIf
-
-                    ; Kiểm tra BitLocker bằng WMI (đáng tin cậy hơn)
-                    Local $oEncVolume = $oWMI.Get('Win32_EncryptableVolume.DeviceID="' & StringReplace($sDriveLetter, ":", "\\:") & '"')
-                    If IsObj($oEncVolume) And $oEncVolume.GetProtectionStatus()[0] > 0 Then
-                         $sNotes &= " 🔒 BITLOCKER ĐÃ BẬT!"
-                         $bFoundBitLocker = True
+                ; === SỬ DỤNG HÀM _IsWindowsPartition PHIÊN BẢN WMI ===
+                If _IsWindowsPartition($oWMI, $oPartition.DiskIndex, $oPartition.Index) Then
+                    $sNotes &= " 💻 Có thể là Windows cũ!"
+                Else
+                    ; Nếu không phải Win cũ và có ký tự -> khả năng là data
+                    If _GetDriveLetterFromPartition($oWMI, $oPartition.DeviceID) <> "" Then
+                         $sNotes &= " 👤 Dữ liệu người dùng?"
                     EndIf
                 EndIf
-
-                $sMsg &= "  " & $sPartInfo & " (" & $oPartition.Type & ", " & $iDisplaySize & " " & $sUnit & ")" & $sNotes & @CRLF
+                
+                $sMsg &= StringFormat("  Partition %i (%s, %s %s)%s\n", $oPartition.Index, $oPartition.Type, $iDisplaySize, $sUnit, $sNotes)
             Next
+        Else
+             $sMsg &= "  (Không tìm thấy phân vùng nào trên ổ đĩa này)\n"
         EndIf
         $sMsg &= @CRLF
     Next
-
-    If $bFoundBitLocker Then
-        $sMsg &= @CRLF & "--- CẢNH BÁO QUAN TRỌNG ---" & @CRLF
-        $sMsg &= "🔒 Phát hiện phân vùng được mã hóa BitLocker!" & @CRLF
-        $sMsg &= "Nếu bạn cài đặt Windows lên phân vùng này mà không mở khóa trước," & @CRLF
-        $sMsg &= "TẤT CẢ DỮ LIỆU SẼ BỊ MẤT VĨNH VIỄN!" & @CRLF & @CRLF
-        $sMsg &= "👉 HÃY: Mở khóa BitLocker trước khi tiếp tục, hoặc sao lưu dữ liệu!" & @CRLF
-    EndIf
-
-    MsgBox(64, "Phân Tích Phân Vùng (WMI)", $sMsg)
+    MsgBox(64, "Phân Tích Phân Vùng", $sMsg)
 EndFunc
 
 ; Func _AutoCleanPartitions()
@@ -849,18 +844,11 @@ EndFunc
 ; EndFunc
 
 Func _AutoCleanPartitions()
-    Local $iConfirm = MsgBox(36, "Cảnh Báo Nâng Cao", "Tính năng này sẽ tự động xoá các phân vùng:" & @CRLF & _
-        "- Phân vùng nhỏ (<1GB)" & @CRLF & _
-        "- Phân vùng hệ thống (Recovery, EFI...)" & @CRLF & _
-        "- Phân vùng chứa Windows cũ" & @CRLF & @CRLF & _
-        "BẠN CÓ CHẮC CHẮN MUỐN TIẾP TỤC KHÔNG?")
-    If $iConfirm <> 6 Then Return ; 6 = Yes
+    Local $iConfirm = MsgBox(36, "Cảnh Báo Nâng Cao", "Tính năng này sẽ tự động xoá các phân vùng không cần thiết." & @CRLF & "BẠN CÓ CHẮC CHẮN MUỐN TIẾP TỤC KHÔNG?")
+    If $iConfirm <> 6 Then Return
 
     Local $oWMI = ObjGet("winmgmts:\\.\root\cimv2")
-    If Not IsObj($oWMI) Then
-        MsgBox(16, "Lỗi WMI", "Không thể kết nối tới dịch vụ WMI.")
-        Return
-    EndIf
+    If Not IsObj($oWMI) Then Return
 
     Local $aToDelete[0][5] ; [DiskIndex, PartIndex, Type, SizeStr, Reason]
     Local $sConfirmMsg = "Các phân vùng sau sẽ bị xóa:" & @CRLF & @CRLF
@@ -869,21 +857,20 @@ Func _AutoCleanPartitions()
     If Not IsObj($colDisks) Then Return
 
     For $oDisk In $colDisks
-        Local $sQuery = "ASSOCIATORS OF {Win32_DiskDrive.DeviceID='" & StringReplace($oDisk.DeviceID, "\", "\\") & "'} WHERE AssocClass = Win32_DiskDriveToDiskPartition"
+        ; === SỬA LỖI TẠI ĐÂY: Truy vấn trực tiếp Partition bằng DiskIndex ===
+        Local $sQuery = "SELECT * FROM Win32_DiskPartition WHERE DiskIndex = " & $oDisk.Index
         Local $colPartitions = $oWMI.ExecQuery($sQuery)
 
-        If IsObj($colPartitions) Then
+        If IsObj($colPartitions) And $colPartitions.Count > 0 Then
             For $oPartition In $colPartitions
                 Local $iSizeMB = Round($oPartition.Size / (1024^2))
                 Local $bIsSmall = ($iSizeMB < 1000)
                 Local $bIsSystem = ($oPartition.Type = "EFI System Partition" Or StringInStr($oPartition.Type, "Recovery") Or StringInStr($oPartition.Type, "MSR"))
-                Local $sDriveLetter = _GetDriveLetterFromPartition($oWMI, $oPartition.DeviceID)
-                Local $bIsOldWindows = ($sDriveLetter <> "" And _CheckWindowsFiles($sDriveLetter))
-
+                Local $bIsOldWindows = _IsWindowsPartition($oWMI, $oPartition.DiskIndex, $oPartition.Index)
+                
                 Local $sReason = ""
                 Local $bShouldDelete = False
 
-                ; Logic xác định phân vùng cần xóa
                 If $bIsOldWindows Then
                     $sReason = "Chứa hệ điều hành cũ"
                     $bShouldDelete = True
@@ -895,7 +882,6 @@ Func _AutoCleanPartitions()
                 If $bShouldDelete Then
                     Local $sSizeStr = Round($iSizeMB, 2) & " MB"
                     If $iSizeMB >= 1024 Then $sSizeStr = Round($iSizeMB / 1024, 2) & " GB"
-
                     Local $iIdx = UBound($aToDelete)
                     ReDim $aToDelete[$iIdx + 1][5]
                     $aToDelete[$iIdx][0] = $oPartition.DiskIndex
@@ -903,7 +889,6 @@ Func _AutoCleanPartitions()
                     $aToDelete[$iIdx][2] = $oPartition.Type
                     $aToDelete[$iIdx][3] = $sSizeStr
                     $aToDelete[$iIdx][4] = $sReason
-
                     $sConfirmMsg &= StringFormat("- Disk %s, Partition %s: %s (%s) - Lý do: %s", _
                         $oPartition.DiskIndex, $oPartition.Index, $oPartition.Type, $sSizeStr, $sReason) & @CRLF
                 EndIf
@@ -912,7 +897,7 @@ Func _AutoCleanPartitions()
     Next
 
     If UBound($aToDelete) <= 0 Then
-        MsgBox(64, "Thông báo", "Không tìm thấy phân vùng nào để xóa tự động.")
+        MsgBox(64, "Thông báo", "Không tìm thấy phân vùng nào phù hợp để xóa tự động.")
         Return
     EndIf
 
@@ -920,7 +905,7 @@ Func _AutoCleanPartitions()
     $iConfirm = MsgBox(52, "XÁC NHẬN LẦN CUỐI", $sConfirmMsg)
     If $iConfirm <> 6 Then Return
 
-    ; Bước 5: Tạo và thực thi script DiskPart
+    ; Tạo và thực thi script DiskPart để xóa
     Local $sCleanScriptFile = @TempDir & "\cleanpart.txt"
     Local $hFile = FileOpen($sCleanScriptFile, 2)
     For $i = 0 To UBound($aToDelete) - 1
@@ -929,15 +914,9 @@ Func _AutoCleanPartitions()
         FileWriteLine($hFile, "delete partition override")
     Next
     FileClose($hFile)
-
     RunWait('diskpart /s "' & $sCleanScriptFile & '"', "", @SW_HIDE)
     FileDelete($sCleanScriptFile)
-
     MsgBox(64, "Hoàn Tất", "Đã xoá " & UBound($aToDelete) & " phân vùng.")
-    If WinExists("Setup", "") = 1 Then
-        ControlClick("Setup", "", "[CLASS:Button; INSTANCE:1]")
-        ControlSend("Setup", "", "[CLASS:Button; INSTANCE:1]", "!r")
-    EndIf
 EndFunc
 
 ;===============================================================================
@@ -967,96 +946,113 @@ EndFunc
 ;    True      - Nếu có vẻ là phân vùng Windows.
 ;    False     - Nếu không phải hoặc có lỗi.
 ;===============================================================================
-Func _IsWindowsPartition($iDiskNum, $iPartNum)
-    Local $sTempDir = @TempDir
-    Local $sExistingLetter = ""
-    Local $sDetailScript = $sTempDir & "\detail_part.txt"
-    Local $sDetailOutput = $sTempDir & "\detail_part_out.txt"
-	Local $bIsBootPartition = False ; Biến để đánh dấu phân vùng khởi động
-	; Tạo script để lấy thông tin chi tiết phân vùng
-    Local $hFile = FileOpen($sDetailScript, 2)
-    FileWriteLine($hFile, "select disk " & $iDiskNum)
-    FileWriteLine($hFile, "select partition " & $iPartNum)
-    FileWriteLine($hFile, "detail partition")
-    FileWriteLine($hFile, "exit")
-    FileClose($hFile)
-    RunWait(@ComSpec & ' /c diskpart /s "' & $sDetailScript & '" > "' & $sDetailOutput & '"', "", @SW_HIDE)
+; Func _IsWindowsPartition($iDiskNum, $iPartNum)
+    ; Local $sTempDir = @TempDir
+    ; Local $sExistingLetter = ""
+    ; Local $sDetailScript = $sTempDir & "\detail_part.txt"
+    ; Local $sDetailOutput = $sTempDir & "\detail_part_out.txt"
+	; Local $bIsBootPartition = False ; Biến để đánh dấu phân vùng khởi động
+	; ; Tạo script để lấy thông tin chi tiết phân vùng
+    ; Local $hFile = FileOpen($sDetailScript, 2)
+    ; FileWriteLine($hFile, "select disk " & $iDiskNum)
+    ; FileWriteLine($hFile, "select partition " & $iPartNum)
+    ; FileWriteLine($hFile, "detail partition")
+    ; FileWriteLine($hFile, "exit")
+    ; FileClose($hFile)
+    ; RunWait(@ComSpec & ' /c diskpart /s "' & $sDetailScript & '" > "' & $sDetailOutput & '"', "", @SW_HIDE)
 
-    Local $aLines = FileReadToArray($sDetailOutput)
-    FileDelete($sDetailScript)
-    FileDelete($sDetailOutput)
+    ; Local $aLines = FileReadToArray($sDetailOutput)
+    ; FileDelete($sDetailScript)
+    ; FileDelete($sDetailOutput)
 
-	If Not @error Then
-        For $sLine In $aLines
-            ; Tìm dòng có dạng "Volume ### Ltr Label Fs Type Size Status Info"
-            Local $aMatchVolume = StringRegExp($sLine, '(?i)Volume\s+\d+\s+([A-Z]?)\s+.*?(\s+Boot)?$', 1)
-            If Not @error Then
-                If UBound($aMatchVolume) > 0 Then
-                    $sExistingLetter = StringStripWS($aMatchVolume[0], 3) ; Lấy ký tự ổ đĩa (nếu có)
-                EndIf
-                If UBound($aMatchVolume) > 1 And StringStripWS($aMatchVolume[1], 3) = "Boot" Then
-                    $bIsBootPartition = True ; Đặt cờ nếu tìm thấy "Boot" trong cột Info
-                EndIf
-                ; Nếu đã tìm thấy cả ký tự và thông tin Boot, có thể thoát sớm
-                If $sExistingLetter <> "" And $bIsBootPartition Then ExitLoop
-            EndIf
-        Next
-    EndIf
+	; If Not @error Then
+        ; For $sLine In $aLines
+            ; ; Tìm dòng có dạng "Volume ### Ltr Label Fs Type Size Status Info"
+            ; Local $aMatchVolume = StringRegExp($sLine, '(?i)Volume\s+\d+\s+([A-Z]?)\s+.*?(\s+Boot)?$', 1)
+            ; If Not @error Then
+                ; If UBound($aMatchVolume) > 0 Then
+                    ; $sExistingLetter = StringStripWS($aMatchVolume[0], 3) ; Lấy ký tự ổ đĩa (nếu có)
+                ; EndIf
+                ; If UBound($aMatchVolume) > 1 And StringStripWS($aMatchVolume[1], 3) = "Boot" Then
+                    ; $bIsBootPartition = True ; Đặt cờ nếu tìm thấy "Boot" trong cột Info
+                ; EndIf
+                ; ; Nếu đã tìm thấy cả ký tự và thông tin Boot, có thể thoát sớm
+                ; If $sExistingLetter <> "" And $bIsBootPartition Then ExitLoop
+            ; EndIf
+        ; Next
+    ; EndIf
 
-    ; Nếu phân vùng được đánh dấu là "Boot", thì đây gần như chắc chắn là phân vùng Windows
-    If $bIsBootPartition Then
-        ConsoleWrite("Disk " & $iDiskNum & ", Partition " & $iPartNum & " identified as BOOT partition." & @CRLF)
-        Return True
-    EndIf
+    ; ; Nếu phân vùng được đánh dấu là "Boot", thì đây gần như chắc chắn là phân vùng Windows
+    ; If $bIsBootPartition Then
+        ; ConsoleWrite("Disk " & $iDiskNum & ", Partition " & $iPartNum & " identified as BOOT partition." & @CRLF)
+        ; Return True
+    ; EndIf
 
-    ; =================================================================================
+    ; ; =================================================================================
 
-    ; Nếu đã có ký tự, chỉ cần kiểm tra trực tiếp
-    If $sExistingLetter <> "" Then
-        Return _CheckWindowsFiles($sExistingLetter)
-    EndIf
+    ; ; Nếu đã có ký tự, chỉ cần kiểm tra trực tiếp
+    ; If $sExistingLetter <> "" Then
+        ; Return _CheckWindowsFiles($sExistingLetter)
+    ; EndIf
 
-    ; Nếu không có ký tự (trường hợp trong WinPE), thực hiện gán tạm thời như cũ
-    Local $sDriveLetter = ""
-    For $i = 90 To 68 Step -1 ; Z -> D
-        $sDriveLetter = Chr($i)
-        If DriveStatus($sDriveLetter & ":\") = 'INVALID' Then ExitLoop
-        $sDriveLetter = ""
-    Next
+    ; ; Nếu không có ký tự (trường hợp trong WinPE), thực hiện gán tạm thời như cũ
+    ; Local $sDriveLetter = ""
+    ; For $i = 90 To 68 Step -1 ; Z -> D
+        ; $sDriveLetter = Chr($i)
+        ; If DriveStatus($sDriveLetter & ":\") = 'INVALID' Then ExitLoop
+        ; $sDriveLetter = ""
+    ; Next
 
+    ; If $sDriveLetter = "" Then
+        ; ConsoleWrite("Error: Không tìm thấy ký tự ổ đĩa trống để kiểm tra phân vùng." & @CRLF)
+        ; Return False
+    ; EndIf
+
+    ; Local $sAssignScript = $sTempDir & "\assign_letter.txt"
+    ; $hFile = FileOpen($sAssignScript, 2)
+    ; FileWriteLine($hFile, "select disk " & $iDiskNum)
+    ; FileWriteLine($hFile, "select partition " & $iPartNum)
+    ; FileWriteLine($hFile, "assign letter=" & $sDriveLetter)
+    ; FileWriteLine($hFile, "exit")
+    ; FileClose($hFile)
+    ; RunWait(@ComSpec & ' /c diskpart /s "' & $sAssignScript & '"', "", @SW_HIDE)
+    ; FileDelete($sAssignScript)
+    ; Local $hTimer = TimerInit()
+    ; While Not FileExists($sDriveLetter & ":\")
+        ; If TimerDiff($hTimer) > 5000 Then ExitLoop ; Chờ tối đa 5 giây
+        ; Sleep(250)
+    ; WEnd
+	; ; Kiểm tra chuyên sâu
+    ; Local $bIsWindows = _CheckWindowsFiles($sDriveLetter)
+
+    ; Local $sRemoveScript = $sTempDir & "\remove_letter.txt"
+    ; $hFile = FileOpen($sRemoveScript, 2)
+    ; FileWriteLine($hFile, "select disk " & $iDiskNum)
+    ; FileWriteLine($hFile, "select partition " & $iPartNum)
+    ; FileWriteLine($hFile, "remove letter=" & $sDriveLetter)
+    ; FileWriteLine($hFile, "exit")
+    ; FileClose($hFile)
+    ; RunWait(@ComSpec & ' /c diskpart /s "' & $sRemoveScript & '"', "", @SW_HIDE)
+    ; FileDelete($sRemoveScript)
+
+    ; Return $bIsWindows
+; EndFunc
+
+Func _IsWindowsPartition($oWMIService, $iDiskIndex, $iPartitionIndex)
+    ; Lấy DeviceID của Partition
+    Local $oPartition = $oWMIService.Get("Win32_DiskPartition.DeviceID='Disk #" & $iDiskIndex & ", Partition #" & $iPartitionIndex & "'")
+    If Not IsObj($oPartition) Then Return False
+
+    ; Dùng hàm hỗ trợ để lấy ký tự ổ đĩa từ Partition
+    Local $sDriveLetter = _GetDriveLetterFromPartition($oWMIService, $oPartition.DeviceID)
+
+    ; Nếu không có ký tự ổ đĩa (ví dụ: phân vùng EFI, Recovery...) thì chắc chắn không phải phân vùng Windows chính
     If $sDriveLetter = "" Then
-        ConsoleWrite("Error: Không tìm thấy ký tự ổ đĩa trống để kiểm tra phân vùng." & @CRLF)
         Return False
     EndIf
 
-    Local $sAssignScript = $sTempDir & "\assign_letter.txt"
-    $hFile = FileOpen($sAssignScript, 2)
-    FileWriteLine($hFile, "select disk " & $iDiskNum)
-    FileWriteLine($hFile, "select partition " & $iPartNum)
-    FileWriteLine($hFile, "assign letter=" & $sDriveLetter)
-    FileWriteLine($hFile, "exit")
-    FileClose($hFile)
-    RunWait(@ComSpec & ' /c diskpart /s "' & $sAssignScript & '"', "", @SW_HIDE)
-    FileDelete($sAssignScript)
-    Local $hTimer = TimerInit()
-    While Not FileExists($sDriveLetter & ":\")
-        If TimerDiff($hTimer) > 5000 Then ExitLoop ; Chờ tối đa 5 giây
-        Sleep(250)
-    WEnd
-	; Kiểm tra chuyên sâu
-    Local $bIsWindows = _CheckWindowsFiles($sDriveLetter)
-
-    Local $sRemoveScript = $sTempDir & "\remove_letter.txt"
-    $hFile = FileOpen($sRemoveScript, 2)
-    FileWriteLine($hFile, "select disk " & $iDiskNum)
-    FileWriteLine($hFile, "select partition " & $iPartNum)
-    FileWriteLine($hFile, "remove letter=" & $sDriveLetter)
-    FileWriteLine($hFile, "exit")
-    FileClose($hFile)
-    RunWait(@ComSpec & ' /c diskpart /s "' & $sRemoveScript & '"', "", @SW_HIDE)
-    FileDelete($sRemoveScript)
-
-    Return $bIsWindows
+    ; Gọi hàm kiểm tra file (hàm này vốn đã an toàn về ngôn ngữ)
+    Return _CheckWindowsFiles($sDriveLetter)
 EndFunc
 
 ;===============================================================================
@@ -1687,7 +1683,7 @@ Func _ShowFatalErrorAndReboot()
     ; Đăng ký hàm _ForceReboot sẽ được gọi khi script này bị tắt đột ngột
     OnAutoItExitRegister("_ForceReboot")
 
-    Local $sMsg = "LỖI BẢN QUYỀN" & @CRLF & @CRLF & "USB không hợp lệ hoặc đã bị sao chép." & @CRLF & _
+    Local $sMsg = "LỖI" & @CRLF & @CRLF & "USB không hợp lệ hoặc đã bị sao chép." & @CRLF & _
                    "Vui lòng sử dụng công cụ TekDT BMC để tạo USB chính thức." & @CRLF & @CRLF & _
                    "Hệ thống sẽ khởi động lại sau khi bạn nhấn OK."
 

@@ -704,13 +704,31 @@ def create_usb_task(main_app):
             worker.status.emit("Cảnh báo: Không thể ghi dấu bản quyền.")
             time.sleep(2)
         
+        # --- GIAI ĐOẠN 5: ĐỔI TÊN Ổ ĐĨA (VOLUME LABEL) ---
+        worker.status.emit("Đang đổi tên ổ đĩa...")
+        try:
+            drive_letter = usb_mount_point[0]  # Lấy ký tự ổ đĩa, ví dụ 'E' từ 'E:\\'
+            new_label = "TekDT BMC BOOT DEVICE"
+            success = ctypes.windll.kernel32.SetVolumeLabelW(
+                f"{drive_letter}:\\",
+                new_label
+            )
+            if not success:
+                error_code = ctypes.windll.kernel32.GetLastError()
+                raise OSError(f"Không thể đổi tên ổ đĩa. Mã lỗi: {error_code}")
+            worker.status.emit("Đã đổi tên ổ đĩa thành công.")
+            print("Đã đổi tên ổ đĩa thành 'TekDT BMC BOOT DEVICE'.")
+        except Exception as label_error:
+            print(f"Cảnh báo: Không thể đổi tên ổ đĩa. Lỗi: {label_error}")
+            worker.status.emit(f"Cảnh báo: Không thể đổi tên ổ đĩa. Lỗi: {label_error}")
+            time.sleep(2)
+        
         worker.progress.emit(100)
         worker.status.emit("Hoàn tất! USB đã sẵn sàng.")
 
     except Exception as e:
         traceback.print_exc()
         raise e
-
 
 def _get_drive_mount_point(main_app, device_path):
     """
