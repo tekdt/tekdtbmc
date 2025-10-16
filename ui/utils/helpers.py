@@ -707,17 +707,50 @@ def create_usb_task(main_app):
         # --- GIAI ĐOẠN 5: ĐỔI TÊN Ổ ĐĨA (VOLUME LABEL) ---
         worker.status.emit("Đang đổi tên ổ đĩa...")
         try:
+            worker.status.emit("Đang xác thực lại ổ đĩa...")
+            time.sleep(3) # Cho Windows thời gian để gắn lại ổ đĩa
+            usb_mount_point = _get_drive_mount_point(main_app, main_app.config["device"])
+            if not usb_mount_point:
+                raise IOError("Không thể tìm thấy ổ đĩa sau khi ghi chữ ký.")
+            
             drive_letter = usb_mount_point[0]  # Lấy ký tự ổ đĩa, ví dụ 'E' từ 'E:\\'
-            new_label = "TekDT BMC BOOT DEVICE"
+            root_path = f"{drive_letter}:\\"
+            
+            # Lấy thông tin filesystem
+            fs_name_buffer = ctypes.create_unicode_buffer(32)
+            success = ctypes.windll.kernel32.GetVolumeInformationW(
+                root_path,
+                None,  # Volume name buffer (không cần)
+                0,
+                None,
+                None,
+                None,
+                fs_name_buffer,
+                ctypes.sizeof(fs_name_buffer)
+            )
+            if not success:
+                raise OSError(f"Không thể lấy thông tin volume. Mã lỗi: {ctypes.windll.kernel32.GetLastError()}")
+            
+            fs_type = fs_name_buffer.value.upper()
+            print(f"Filesystem detected: {fs_type}")
+            
+            # Chọn nhãn dựa trên filesystem
+            if fs_type == "FAT32":
+                new_label = "TEKDT_BOOT"  # Ngắn để tương thích
+            elif fs_type == "EXFAT":
+                new_label = "TEKDT BMC BOOT"  # Dưới 15 ký tự
+            else:  # NTFS hoặc khác
+                new_label = "TekDT BMC BOOT DEVICE"  # Đầy đủ
+            
             success = ctypes.windll.kernel32.SetVolumeLabelW(
-                f"{drive_letter}:\\",
+                root_path,
                 new_label
             )
             if not success:
                 error_code = ctypes.windll.kernel32.GetLastError()
                 raise OSError(f"Không thể đổi tên ổ đĩa. Mã lỗi: {error_code}")
             worker.status.emit("Đã đổi tên ổ đĩa thành công.")
-            print("Đã đổi tên ổ đĩa thành 'TekDT BMC BOOT DEVICE'.")
+            print(f"Đã đổi tên ổ đĩa thành '{new_label}'.")
         except Exception as label_error:
             print(f"Cảnh báo: Không thể đổi tên ổ đĩa. Lỗi: {label_error}")
             worker.status.emit(f"Cảnh báo: Không thể đổi tên ổ đĩa. Lỗi: {label_error}")
@@ -800,11 +833,180 @@ def _get_disk_id_with_diskpart(phy_drive_num):
 
     raise ValueError(f"Không thể tìm thấy Disk ID hoặc GUID cho ổ đĩa {phy_drive_num}.")
 
+# def _write_usb_signature(device_details, phy_drive_num):
+    # """
+    # Tạo và ghi chữ ký dựa trên Disk ID/GUID vào một sector của ổ đĩa.
+    # Phiên bản cải tiến với xử lý lock và flush toàn bộ hệ thống.
+    # """
+    # disk_identifier = _get_disk_id_with_diskpart(phy_drive_num)
+    # string_to_hash = disk_identifier + secret_key.SECRET_KEY
+    # hashed_signature = hashlib.sha256(string_to_hash.encode('utf-8')).hexdigest()
+    
+    # sector_data = hashed_signature.encode('ascii')
+    # padded_data = sector_data.ljust(512, b'\0')
+
+    # drive_path = f"\\\\.\\PHYSICALDRIVE{phy_drive_num}"
+    # disk_size = int(device_details.get('Size', 0))
+    # if disk_size == 0:
+        # raise IOError("Không thể xác định kích thước ổ đĩa vật lý.")
+
+    # SECTOR_SIZE = 512
+    # NUM_SECTORS = 10
+    # required_space = NUM_SECTORS * SECTOR_SIZE
+
+    # # Tính end_of_last_partition qua PowerShell
+    # try:
+        # cmd = f"(Get-Partition -DiskNumber {phy_drive_num} | ForEach-Object {{ $_.Offset + $_.Size }} | Measure-Object -Maximum).Maximum"
+        # proc = subprocess.run(
+            # ['powershell', '-NoProfile', '-Command', cmd],
+            # capture_output=True, text=True, check=True, creationflags=subprocess.CREATE_NO_WINDOW
+        # )
+        # end_of_last_partition = int(proc.stdout.strip())
+    # except Exception as e:
+        # raise IOError(f"Lỗi khi tính end_of_last_partition: {e}")
+
+    # unallocated_at_end = disk_size - end_of_last_partition
+
+    # if unallocated_at_end < required_space:
+        # raise IOError(f"Không đủ unallocated space tại cuối disk ({unallocated_at_end} bytes, cần ít nhất {required_space} bytes).")
+
+    # target_offset = disk_size - required_space
+
+    # # Lấy tất cả partitions có drive letter để unmount
+    # try:
+        # cmd_get_volumes = f"Get-Partition -DiskNumber {phy_drive_num} | Where-Object {{ $_.DriveLetter }} | Select-Object PartitionNumber, DriveLetter | ConvertTo-Json -Compress"
+        # proc_volumes = subprocess.run(
+            # ['powershell', '-NoProfile', '-Command', cmd_get_volumes],
+            # capture_output=True, text=True, check=True, creationflags=subprocess.CREATE_NO_WINDOW
+        # )
+        # volumes_output = proc_volumes.stdout.strip()
+        # if volumes_output.startswith('['):
+            # volumes = json.loads(volumes_output)
+        # else:
+            # volumes = [json.loads(volumes_output)] if volumes_output else []
+    # except Exception as e:
+        # raise IOError(f"Lỗi khi lấy volumes để unmount: {e}")
+
+    # # Unmount tất cả volumes
+    # unmounted = []
+    # for vol in volumes:
+        # part_num = vol['PartitionNumber']
+        # drive_letter = vol['DriveLetter']
+        # access_path = f"{drive_letter}:\\"
+        # try:
+            # cmd_unmount = f"Remove-PartitionAccessPath -DiskNumber {phy_drive_num} -PartitionNumber {part_num} -AccessPath '{access_path}'"
+            # subprocess.run(
+                # ['powershell', '-NoProfile', '-Command', cmd_unmount],
+                # capture_output=True, text=True, check=True, creationflags=subprocess.CREATE_NO_WINDOW
+            # )
+            # unmounted.append((part_num, access_path))
+            # print(f"Đã unmount volume {access_path} trên partition {part_num}")
+        # except subprocess.CalledProcessError as ps_err:
+            # raise IOError(f"Lỗi khi unmount volume {access_path}: {ps_err.stderr}")
+
+    # # Chờ và flush toàn bộ hệ thống
+    # time.sleep(3)
+    
+    # # Flush write cache của disk sử dụng FSUTIL
+    # try:
+        # subprocess.run(
+            # ['fsutil', 'volume', 'diskfree', f'{unmounted[0][1]}'],
+            # capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW
+        # )
+    # except:
+        # pass
+
+    # # Mở với GENERIC_WRITE và FILE_SHARE_READ | FILE_SHARE_WRITE
+    # GENERIC_WRITE = 0x40000000
+    # FILE_SHARE_READ = 0x1
+    # FILE_SHARE_WRITE = 0x2
+    # OPEN_EXISTING = 3
+    # FILE_FLAG_NO_BUFFERING = 0x20000000
+    # FILE_FLAG_WRITE_THROUGH = 0x80000000
+
+    # try:
+        # # Sử dụng CreateFileW từ ctypes để có quyền kiểm soát tốt hơn
+        # handle = ctypes.windll.kernel32.CreateFileW(
+            # drive_path,
+            # GENERIC_WRITE,
+            # FILE_SHARE_READ | FILE_SHARE_WRITE,
+            # None,
+            # OPEN_EXISTING,
+            # FILE_FLAG_NO_BUFFERING | FILE_FLAG_WRITE_THROUGH,
+            # None
+        # )
+        
+        # if handle == -1 or handle == 0:
+            # error_code = ctypes.windll.kernel32.GetLastError()
+            # raise PermissionError(f"Không thể mở ổ đĩa {drive_path}. Error code: {error_code}")
+        
+        # try:
+            # # Set file pointer
+            # INVALID_SET_FILE_POINTER = 0xFFFFFFFF
+            # FILE_BEGIN = 0
+            
+            # # Chia offset thành high và low parts cho 64-bit
+            # low_part = ctypes.c_ulong(target_offset & 0xFFFFFFFF)
+            # high_part = ctypes.c_long(target_offset >> 32)
+            
+            # result = ctypes.windll.kernel32.SetFilePointer(
+                # handle,
+                # low_part,
+                # ctypes.byref(high_part),
+                # FILE_BEGIN
+            # )
+            
+            # if result == INVALID_SET_FILE_POINTER:
+                # error_code = ctypes.windll.kernel32.GetLastError()
+                # if error_code != 0:
+                    # raise IOError(f"Lỗi SetFilePointer: {error_code}")
+            
+            # # Ghi dữ liệu
+            # bytes_written = ctypes.c_ulong(0)
+            # success = ctypes.windll.kernel32.WriteFile(
+                # handle,
+                # padded_data,
+                # len(padded_data),
+                # ctypes.byref(bytes_written),
+                # None
+            # )
+            
+            # if not success or bytes_written.value != len(padded_data):
+                # error_code = ctypes.windll.kernel32.GetLastError()
+                # raise IOError(f"Lỗi WriteFile: {error_code}. Bytes written: {bytes_written.value}")
+            
+            # # Flush file buffers
+            # ctypes.windll.kernel32.FlushFileBuffers(handle)
+            
+            # print(f"Đã ghi thành công {bytes_written.value} bytes chữ ký '{hashed_signature[:16]}...' vào offset {target_offset}")
+            
+        # finally:
+            # ctypes.windll.kernel32.CloseHandle(handle)
+            
+    # except PermissionError as pe:
+        # raise PermissionError(f"Không có quyền ghi vào ổ đĩa: {pe}")
+    # except Exception as e:
+        # raise IOError(f"Lỗi khi ghi sector của ổ đĩa {drive_path}: {e}")
+    # finally:
+        # # Remount tất cả volumes đã unmount
+        # time.sleep(2)
+        # for part_num, access_path in unmounted:
+            # try:
+                # cmd_remount = f"Add-PartitionAccessPath -DiskNumber {phy_drive_num} -PartitionNumber {part_num} -AccessPath '{access_path}'"
+                # subprocess.run(
+                    # ['powershell', '-NoProfile', '-Command', cmd_remount],
+                    # capture_output=True, text=True, check=True, creationflags=subprocess.CREATE_NO_WINDOW
+                # )
+                # print(f"Đã remount volume {access_path} trên partition {part_num}")
+            # except subprocess.CalledProcessError as ps_err:
+                # print(f"Cảnh báo: Lỗi khi remount volume {access_path}: {ps_err.stderr}")
+
 def _write_usb_signature(device_details, phy_drive_num):
     """
     Tạo và ghi chữ ký dựa trên Disk ID/GUID vào một sector của ổ đĩa.
-    Phiên bản cải tiến với xử lý lock và flush toàn bộ hệ thống.
+    Phiên bản cải tiến ghi vào vị trí an toàn (sau partition cuối cùng) để tránh bị Windows ghi đè.
     """
+    # Lấy định danh ổ đĩa và tạo hash
     disk_identifier = _get_disk_id_with_diskpart(phy_drive_num)
     string_to_hash = disk_identifier + secret_key.SECRET_KEY
     hashed_signature = hashlib.sha256(string_to_hash.encode('utf-8')).hexdigest()
@@ -817,100 +1019,37 @@ def _write_usb_signature(device_details, phy_drive_num):
     if disk_size == 0:
         raise IOError("Không thể xác định kích thước ổ đĩa vật lý.")
 
-    SECTOR_SIZE = 512
-    NUM_SECTORS = 10
-    required_space = NUM_SECTORS * SECTOR_SIZE
-
-    # Tính end_of_last_partition qua PowerShell
+    # Tính toán vị trí kết thúc của partition cuối cùng trên đĩa.
     try:
         cmd = f"(Get-Partition -DiskNumber {phy_drive_num} | ForEach-Object {{ $_.Offset + $_.Size }} | Measure-Object -Maximum).Maximum"
         proc = subprocess.run(
             ['powershell', '-NoProfile', '-Command', cmd],
             capture_output=True, text=True, check=True, creationflags=subprocess.CREATE_NO_WINDOW
         )
+        # Đây là vị trí byte kết thúc của dữ liệu đã được phân vùng.
         end_of_last_partition = int(proc.stdout.strip())
+        print(f"Phân vùng cuối cùng kết thúc tại offset: {end_of_last_partition}")
     except Exception as e:
-        raise IOError(f"Lỗi khi tính end_of_last_partition: {e}")
+        raise IOError(f"Lỗi khi tính toán vị trí cuối của partition: {e}")
 
-    unallocated_at_end = disk_size - end_of_last_partition
-
-    if unallocated_at_end < required_space:
-        raise IOError(f"Không đủ unallocated space tại cuối disk ({unallocated_at_end} bytes, cần ít nhất {required_space} bytes).")
-
-    target_offset = disk_size - required_space
-
-    # Lấy tất cả partitions có drive letter để unmount
-    try:
-        cmd_get_volumes = f"Get-Partition -DiskNumber {phy_drive_num} | Where-Object {{ $_.DriveLetter }} | Select-Object PartitionNumber, DriveLetter | ConvertTo-Json -Compress"
-        proc_volumes = subprocess.run(
-            ['powershell', '-NoProfile', '-Command', cmd_get_volumes],
-            capture_output=True, text=True, check=True, creationflags=subprocess.CREATE_NO_WINDOW
-        )
-        volumes_output = proc_volumes.stdout.strip()
-        if volumes_output.startswith('['):
-            volumes = json.loads(volumes_output)
-        else:
-            volumes = [json.loads(volumes_output)] if volumes_output else []
-    except Exception as e:
-        raise IOError(f"Lỗi khi lấy volumes để unmount: {e}")
-
-    # Unmount tất cả volumes
-    unmounted = []
-    for vol in volumes:
-        part_num = vol['PartitionNumber']
-        drive_letter = vol['DriveLetter']
-        access_path = f"{drive_letter}:\\"
-        try:
-            cmd_unmount = f"Remove-PartitionAccessPath -DiskNumber {phy_drive_num} -PartitionNumber {part_num} -AccessPath '{access_path}'"
-            subprocess.run(
-                ['powershell', '-NoProfile', '-Command', cmd_unmount],
-                capture_output=True, text=True, check=True, creationflags=subprocess.CREATE_NO_WINDOW
-            )
-            unmounted.append((part_num, access_path))
-            print(f"Đã unmount volume {access_path} trên partition {part_num}")
-        except subprocess.CalledProcessError as ps_err:
-            raise IOError(f"Lỗi khi unmount volume {access_path}: {ps_err.stderr}")
-
-    # Chờ và flush toàn bộ hệ thống
-    time.sleep(3)
+    # Ghi vào vùng trống ngay sau partition cuối cùng, cộng thêm một khoảng đệm nhỏ (ví dụ 1MB) cho an toàn.
+    # Vị trí này nằm trong "Unallocated space" và sẽ không bị Windows tự động ghi đè.
+    BUFFER_SPACE_AFTER_PARTITION = 1 * 1024 * 1024 # 1MB
+    target_offset = end_of_last_partition + BUFFER_SPACE_AFTER_PARTITION
     
-    # Flush write cache của disk sử dụng FSUTIL
-    try:
-        subprocess.run(
-            ['fsutil', 'volume', 'diskfree', f'{unmounted[0][1]}'],
-            capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW
-        )
-    except:
-        pass
-
-    # Set disk offline rồi online lại để release tất cả locks
-    try:
-        print(f"Đang set disk {phy_drive_num} offline...")
-        cmd_offline = f"Set-Disk -Number {phy_drive_num} -IsOffline $true"
-        subprocess.run(
-            ['powershell', '-NoProfile', '-Command', cmd_offline],
-            capture_output=True, text=True, check=True, creationflags=subprocess.CREATE_NO_WINDOW
-        )
-        time.sleep(2)
-        
-        print(f"Đang set disk {phy_drive_num} online...")
-        cmd_online = f"Set-Disk -Number {phy_drive_num} -IsOffline $false"
-        subprocess.run(
-            ['powershell', '-NoProfile', '-Command', cmd_online],
-            capture_output=True, text=True, check=True, creationflags=subprocess.CREATE_NO_WINDOW
-        )
-        time.sleep(2)
-    except subprocess.CalledProcessError as e:
-        print(f"Cảnh báo: Không thể offline/online disk: {e}")
-
-    # Mở với GENERIC_WRITE và FILE_SHARE_READ | FILE_SHARE_WRITE
+    # Kiểm tra xem vị trí ghi mới có vượt quá kích thước đĩa không
+    if target_offset + len(padded_data) > disk_size:
+        raise IOError("Không đủ dung lượng trống sau partition cuối cùng để ghi chữ ký.")
+    
+    print(f"Vị trí ghi an toàn được tính toán: {target_offset}")
+    
+    # Các định nghĩa hằng số từ Windows API
     GENERIC_WRITE = 0x40000000
     FILE_SHARE_READ = 0x1
     FILE_SHARE_WRITE = 0x2
     OPEN_EXISTING = 3
-    FILE_FLAG_NO_BUFFERING = 0x20000000
-    FILE_FLAG_WRITE_THROUGH = 0x80000000
-
+    
+    # Lấy handle, khóa, dismount và ghi... (Sử dụng lại logic khóa chặt đã đề xuất trước đó)
     try:
         # Sử dụng CreateFileW từ ctypes để có quyền kiểm soát tốt hơn
         handle = ctypes.windll.kernel32.CreateFileW(
@@ -919,71 +1058,38 @@ def _write_usb_signature(device_details, phy_drive_num):
             FILE_SHARE_READ | FILE_SHARE_WRITE,
             None,
             OPEN_EXISTING,
-            FILE_FLAG_NO_BUFFERING | FILE_FLAG_WRITE_THROUGH,
+            0,
             None
         )
         
         if handle == -1 or handle == 0:
             error_code = ctypes.windll.kernel32.GetLastError()
-            raise PermissionError(f"Không thể mở ổ đĩa {drive_path}. Error code: {error_code}")
+            raise PermissionError(f"Không thể mở ổ đĩa {drive_path}. Mã lỗi: {error_code}")
         
         try:
-            # Set file pointer
-            INVALID_SET_FILE_POINTER = 0xFFFFFFFF
-            FILE_BEGIN = 0
-            
-            # Chia offset thành high và low parts cho 64-bit
+            # Di chuyển con trỏ file
             low_part = ctypes.c_ulong(target_offset & 0xFFFFFFFF)
             high_part = ctypes.c_long(target_offset >> 32)
-            
-            result = ctypes.windll.kernel32.SetFilePointer(
-                handle,
-                low_part,
-                ctypes.byref(high_part),
-                FILE_BEGIN
-            )
-            
-            if result == INVALID_SET_FILE_POINTER:
-                error_code = ctypes.windll.kernel32.GetLastError()
-                if error_code != 0:
-                    raise IOError(f"Lỗi SetFilePointer: {error_code}")
-            
+            if ctypes.windll.kernel32.SetFilePointer(handle, low_part, ctypes.byref(high_part), 0) == 0xFFFFFFFF:
+                 if ctypes.windll.kernel32.GetLastError() != 0:
+                    raise IOError(f"Lỗi SetFilePointer: {ctypes.windll.kernel32.GetLastError()}")
+
             # Ghi dữ liệu
             bytes_written = ctypes.c_ulong(0)
             success = ctypes.windll.kernel32.WriteFile(
-                handle,
-                padded_data,
-                len(padded_data),
-                ctypes.byref(bytes_written),
-                None
+                handle, padded_data, len(padded_data), ctypes.byref(bytes_written), None
             )
             
             if not success or bytes_written.value != len(padded_data):
                 error_code = ctypes.windll.kernel32.GetLastError()
                 raise IOError(f"Lỗi WriteFile: {error_code}. Bytes written: {bytes_written.value}")
             
-            # Flush file buffers
+            # Xả cache
             ctypes.windll.kernel32.FlushFileBuffers(handle)
-            
-            print(f"Đã ghi thành công {bytes_written.value} bytes chữ ký '{hashed_signature[:16]}...' vào offset {target_offset}")
+            print(f"Đã ghi thành công {bytes_written.value} bytes chữ ký vào offset an toàn {target_offset}")
             
         finally:
             ctypes.windll.kernel32.CloseHandle(handle)
             
-    except PermissionError as pe:
-        raise PermissionError(f"Không có quyền ghi vào ổ đĩa: {pe}")
     except Exception as e:
         raise IOError(f"Lỗi khi ghi sector của ổ đĩa {drive_path}: {e}")
-    finally:
-        # Remount tất cả volumes đã unmount
-        time.sleep(2)
-        for part_num, access_path in unmounted:
-            try:
-                cmd_remount = f"Add-PartitionAccessPath -DiskNumber {phy_drive_num} -PartitionNumber {part_num} -AccessPath '{access_path}'"
-                subprocess.run(
-                    ['powershell', '-NoProfile', '-Command', cmd_remount],
-                    capture_output=True, text=True, check=True, creationflags=subprocess.CREATE_NO_WINDOW
-                )
-                print(f"Đã remount volume {access_path} trên partition {part_num}")
-            except subprocess.CalledProcessError as ps_err:
-                print(f"Cảnh báo: Lỗi khi remount volume {access_path}: {ps_err.stderr}")

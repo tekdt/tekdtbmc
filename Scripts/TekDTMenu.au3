@@ -13,7 +13,7 @@
 #include <WinAPISys.au3>
 #include <Memory.au3>
 #include <Crypt.au3>
-#include "secret_key.a3x"
+#include "secret_key.au3"
 
 Opt("WinTitleMatchMode", 2)
 
@@ -1348,10 +1348,11 @@ Func _UpdateVisibleButtons($bHideAll = False)
 EndFunc
 
 ;===============================================================================
+;
 ; Hàm: _VerifyUSBSignature
 ; Mục đích: Kiểm tra xem USB đang chạy có phải là USB gốc được tạo bởi chương trình không.
 ; Trả về: True nếu hợp lệ, False nếu không.
-;===============================================================================
+; ;===============================================================================
 Func _VerifyUSBSignature()
     RecordLogforDebug("--- Start to check the signature ---")
     Local $aDisks = _GetAllPhysicalDiskNumbers()
@@ -1363,7 +1364,7 @@ Func _VerifyUSBSignature()
     For $iPhysicalDriveNum In $aDisks
         RecordLogforDebug("--- Checking on PhysicalDrive" & $iPhysicalDriveNum & " ---")
 
-        ; BƯỚC 1 & 2: Lấy Disk ID và Tổng kích thước đĩa (logic mới, tin cậy cho WinPE)
+        ; BƯỚC 1 & 2: Lấy Disk ID và Tổng kích thước đĩa
         Local $aDiskInfo = _GetDiskInfo_WinPE($iPhysicalDriveNum)
         If @error Then
             RecordLogforDebug("Error: Could not ge the data for PhysicalDrive" & $iPhysicalDriveNum & ". Skipped.")
@@ -1381,32 +1382,55 @@ Func _VerifyUSBSignature()
         RecordLogforDebug("Disk ID: " & $sDiskIdentifier)
         RecordLogforDebug("Disk size (Total): " & $iDiskSize & " bytes")
 
-        ; BƯỚC 3: Tính toán offset GIỐNG HỆT Python
-        Local $SECTOR_SIZE = 512
-        Local $NUM_SECTORS = 10
-        Local $iRequiredSpace = $NUM_SECTORS * $SECTOR_SIZE
-        Local $iTargetOffset = $iDiskSize - $iRequiredSpace
+        ; BƯỚC 3: Tính toán offset AN TOÀN (sau partition cuối cùng), đồng bộ với Python
+        RecordLogforDebug("Calculating safe offset by calling PowerShell...")
+        Local $sTempOutputFile = @TempDir & "\tekdt_part_offset.txt"
+        Local $sPoshCommand = 'powershell -Command "(Get-Partition -DiskNumber ' & $iPhysicalDriveNum & ' | ForEach-Object { $_.Offset + $_.Size } | Measure-Object -Maximum).Maximum"'
+        
+        ; Chạy lệnh PowerShell và lưu kết quả vào file tạm
+        RunWait(@ComSpec & " /c " & $sPoshCommand & ' > "' & $sTempOutputFile & '"', "", @SW_HIDE)
 
-        RecordLogforDebug("Target offset: " & $iTargetOffset & " bytes")
-
-        If $iTargetOffset < 0 Then
-            RecordLogforDebug("Lỗi: Offset âm, skipped this disk.")
+        If Not FileExists($sTempOutputFile) Or FileGetSize($sTempOutputFile) = 0 Then
+            RecordLogforDebug("Error: Failed to run PowerShell to get partition offset.")
+            FileDelete($sTempOutputFile)
             ContinueLoop
         EndIf
 
-        ; BƯỚC 4: Tạo hash mong đợi (giống hệt Python)
+        Local $sEndOfLastPartition = FileRead($sTempOutputFile)
+        FileDelete($sTempOutputFile)
+        
+        Local $iEndOfLastPartition = Number(StringStripWS($sEndOfLastPartition, 3))
+
+        If $iEndOfLastPartition <= 0 Then
+             RecordLogforDebug("Error: Could not get a valid end-of-partition offset from PowerShell.")
+             ContinueLoop
+        EndIf
+        RecordLogforDebug("End of last partition: " & $iEndOfLastPartition & " bytes")
+        
+        Local Const $iBufferSpace = 1 * 1024 * 1024 ; Buffer 1MB giống hệt Python
+        Local $iTargetOffset = $iEndOfLastPartition + $iBufferSpace
+        
+        RecordLogforDebug("Target offset: " & $iTargetOffset & " bytes (Safe position)")
+
+        ; Kiểm tra offset hợp lệ
+        If $iTargetOffset + 512 > $iDiskSize Then
+            RecordLogforDebug("Error: Calculated offset is outside the disk boundaries. Skipped.")
+            ContinueLoop
+        EndIf
+
+        ; BƯỚC 4: Tạo hash mong đợi
         Local $sStringToHash = $sDiskIdentifier & $g_sSecretKey
         Local $sExpectedHash = StringLower(_Crypt_HashData($sStringToHash, $CALG_SHA_256))
         RecordLogforDebug("Expected hash: " & $sExpectedHash)
 
         ; BƯỚC 5: Đọc dữ liệu từ sector tại offset đã tính
-        Local $sStoredData = _ReadSectorData("\\.\PhysicalDrive" & $iPhysicalDriveNum, $iTargetOffset, $SECTOR_SIZE)
+        Local $sStoredData = _ReadSectorData("\\.\PhysicalDrive" & $iPhysicalDriveNum, $iTargetOffset, 512)
         If $sStoredData = "" Then
             RecordLogforDebug("Error: Could not read the data at offset.")
             ContinueLoop
         EndIf
 
-        ; BƯỚC 6: Trích xuất hash từ dữ liệu đọc được (64 ký tự hex đầu tiên)
+        ; BƯỚC 6: Trích xuất hash từ dữ liệu đọc được
         Local $sStoredHash = StringLeft($sStoredData, 64)
         $sStoredHash = "0x"&StringLower(StringRegExpReplace($sStoredHash, "[^a-f0-9]", ""))
         RecordLogforDebug("Stored hash:   " & $sStoredHash)
@@ -1738,8 +1762,9 @@ EndFunc
 ; Mục đích: Hàm được gọi để khởi động lại máy tính.
 ;===============================================================================
 Func _ForceReboot()
-	_RunTool("wpeutil.exe reboot /Y")
-	Shutdown(2) ; 2 = Reboot
+	Exit
+	; _RunTool("wpeutil.exe reboot /Y")
+	; Shutdown(2) ; 2 = Reboot
 EndFunc
 
 ;===============================================================================

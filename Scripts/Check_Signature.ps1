@@ -165,7 +165,7 @@ function Verify-USBSignature {
     
     Write-Host "`n=== Checking PhysicalDrive$DiskNum ===" -ForegroundColor Cyan
     
-    # STEP 1: Get Disk ID/GUID (Correctly implemented)
+    # STEP 1: Get Disk ID/GUID (Giữ nguyên)
     $DiskID = Get-DiskIDViaDiskpart -DiskNum $DiskNum
     if (-not $DiskID) {
         Write-Host "  → ERROR: Cannot get Disk ID. Skipping." -ForegroundColor Red
@@ -173,7 +173,7 @@ function Verify-USBSignature {
     }
     Write-Host "  Disk ID/GUID: $DiskID" -ForegroundColor White
     
-    # STEP 2: Get Disk Size (Using updated, reliable function)
+    # STEP 2: Get Disk Size (Giữ nguyên)
     $DiskSize = Get-DiskSizeViaDiskpart -DiskNum $DiskNum
     if ($DiskSize -le 0) {
         Write-Host "  → ERROR: Cannot get disk size. Skipping." -ForegroundColor Red
@@ -181,20 +181,34 @@ function Verify-USBSignature {
     }
     Write-Host "  Disk Size: $DiskSize bytes ($([math]::Round($DiskSize/1GB, 2)) GB)" -ForegroundColor White
     
-    # STEP 3: Calculate target offset (EXACTLY as Python does)
-    $SECTOR_SIZE = 512
-    $NUM_SECTORS = 10
-    $RequiredSpace = $NUM_SECTORS * $SECTOR_SIZE
-    $TargetOffset = $DiskSize - $RequiredSpace
-    
-    Write-Host "  Target Offset: $TargetOffset bytes (Disk Size - $RequiredSpace)" -ForegroundColor White
-    
-    if ($TargetOffset -lt 0) {
-        Write-Host "  → ERROR: Negative offset. Skipping." -ForegroundColor Red
+    # --- PHẦN THAY ĐỔI ---
+    # STEP 3: Tính toán offset AN TOÀN, đồng bộ 100% với logic ghi của Python
+    Write-Host "  → Calculating safe offset..." -ForegroundColor Cyan
+    try {
+        # Lệnh này lấy tổng (Offset + Size) của tất cả partition và tìm giá trị lớn nhất
+        $EndOfLastPartition = (Get-Partition -DiskNumber $DiskNum | ForEach-Object { $_.Offset + $_.Size } | Measure-Object -Maximum).Maximum
+        if (-not $EndOfLastPartition) { throw "Could not determine end of last partition." }
+        
+        Write-Host "    End of last partition: $EndOfLastPartition bytes"
+
+        $BufferSpace = 1 * 1024 * 1024 # 1MB buffer, matching Python
+        $TargetOffset = $EndOfLastPartition + $BufferSpace
+        
+        Write-Host "  Target Offset: $TargetOffset bytes (Safe position after last partition)" -ForegroundColor White
+
+    } catch {
+        Write-Host "  → ERROR: Could not calculate safe offset. $_" -ForegroundColor Red
         return $false
     }
-    
-    # STEP 4: Generate expected hash (same as Python: SHA256(disk_id + secret_key))
+
+    # Kiểm tra xem offset tính được có hợp lệ không
+    if ($TargetOffset + 512 -gt $DiskSize) {
+        Write-Host "  → ERROR: Calculated offset is outside the disk boundaries. Skipping." -ForegroundColor Red
+        return $false
+    }
+    # --- KẾT THÚC PHẦN THAY ĐỔI ---
+
+    # STEP 4: Generate expected hash (Giữ nguyên)
     $StringToHash = $DiskID + $SECRET_KEY
     $SHA256 = [System.Security.Cryptography.SHA256]::Create()
     $HashBytes = $SHA256.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($StringToHash))
@@ -203,23 +217,23 @@ function Verify-USBSignature {
     
     Write-Host "  Expected Hash: $ExpectedHash" -ForegroundColor Yellow
     
-    # STEP 5: Read stored data from sector
+    # STEP 5: Read stored data from sector (Giữ nguyên)
     $DevicePath = "\\.\PhysicalDrive$DiskNum"
-    $StoredData = Read-SectorData -DevicePath $DevicePath -Offset $TargetOffset -BytesToRead $SECTOR_SIZE
+    $StoredData = Read-SectorData -DevicePath $DevicePath -Offset $TargetOffset -BytesToRead 512
     
-    # STEP 6 (and bug fix): Check if data is null or empty
+    # STEP 6: Check if data is null or empty (Giữ nguyên)
     if ([string]::IsNullOrEmpty($StoredData)) {
         Write-Host "  → ERROR: Cannot read data from offset." -ForegroundColor Red
         return $false
     }
     
-    # Extract stored hash (first 64 hex characters)
+    # Extract stored hash (Giữ nguyên)
     $StoredHash = $StoredData.Substring(0, [Math]::Min(64, $StoredData.Length)).ToLower()
-    $StoredHash = $StoredHash -replace '[^0-9a-f]', ''  # Remove non-hex chars
+    $StoredHash = $StoredHash -replace '[^0-9a-f]', ''
     
     Write-Host "  Stored Hash:   $StoredHash" -ForegroundColor Yellow
     
-    # STEP 7: Compare
+    # STEP 7: Compare (Giữ nguyên)
     if ($ExpectedHash -eq $StoredHash -and $StoredHash.Length -eq 64) {
         Write-Host "`n VERIFICATION SUCCESS on PhysicalDrive$DiskNum `n" -ForegroundColor Green
         return $true
