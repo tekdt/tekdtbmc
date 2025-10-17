@@ -1384,7 +1384,7 @@ Func _VerifyUSBSignature()
 
         ; BƯỚC 3: Lấy offset của phân vùng ẩn (LOGIC MỚI)
         RecordLogforDebug("Đang tìm kiếm offset của phân vùng 16MB dành riêng...")
-        Local $iTargetOffset = _GetReservedPartitionOffset_WMI($iPhysicalDriveNum)
+        Local $iTargetOffset = _GetReservedPartitionOffset($iPhysicalDriveNum)
 
         If @error Or $iTargetOffset <= 0 Then
             RecordLogforDebug("Lỗi: Không tìm thấy phân vùng chữ ký hợp lệ. Đã bỏ qua.")
@@ -1429,59 +1429,128 @@ Func _VerifyUSBSignature()
     Return False
 EndFunc
 
-;===============================================================================
-; HÀM: _GetReservedPartitionOffset_WMI
-; Mục đích: Lấy offset (vị trí bắt đầu) của phân vùng 16MB ẩn đã được
-;           tạo để chứa chữ ký.
-; Trả về: Offset (byte) nếu thành công. SetError nếu thất bại.
-;===============================================================================
-Func _GetReservedPartitionOffset_WMI($iDiskNum)
+; ;===============================================================================
+; ; HÀM: _GetReservedPartitionOffset
+; ; Mục đích: Lấy offset (vị trí bắt đầu) của phân vùng 16MB ẩn đã được
+; ;           tạo để chứa chữ ký.
+; ; Trả về: Offset (byte) nếu thành công. SetError nếu thất bại.
+; ;===============================================================================
+; Func _GetReservedPartitionOffset($iDiskNum)
+    ; Local $oWMI = ObjGet("winmgmts:\\.\root\cimv2")
+    ; If Not IsObj($oWMI) Then
+        ; RecordLogforDebug("Lỗi WMI: Không thể kết nối dịch vụ.")
+        ; Return SetError(1, 0, 0)
+    ; EndIf
+
+    ; ; Tương tự như Python, tìm trong một khoảng cho phép để tránh sai số
+    ; Local Const $LOWER_BOUND_BYTES = 15 * 1024 * 1024 ; 15MB
+    ; Local Const $UPPER_BOUND_BYTES = 17 * 1024 * 1024 ; 17MB
+
+    ; Local $sQuery = "SELECT * FROM Win32_DiskPartition WHERE DiskIndex = " & $iDiskNum
+    ; Local $colPartitions = $oWMI.ExecQuery($sQuery)
+
+    ; If Not IsObj($colPartitions) Or $colPartitions.Count = 0 Then
+        ; RecordLogforDebug("Lỗi WMI: Không tìm thấy phân vùng nào cho Disk " & $iDiskNum)
+        ; Return SetError(2, 0, 0)
+    ; EndIf
+
+    ; Local $iTargetOffset = -1
+    ; Local $iMaxOffsetFound = -1 ; Dùng để tìm phân vùng có offset lớn nhất (phân vùng cuối cùng)
+
+    ; For $oPartition In $colPartitions
+        ; Local $iCurrentSize = Number($oPartition.Size)
+        ; Local $iCurrentOffset = Number($oPartition.StartingOffset)
+
+        ; ; Kiểm tra xem kích thước có nằm trong khoảng 15-17MB không
+        ; If $iCurrentSize >= $LOWER_BOUND_BYTES And $iCurrentSize <= $UPPER_BOUND_BYTES Then
+            ; ; Nếu đúng, kiểm tra xem nó có ký tự ổ đĩa không
+            ; Local $sDriveLetter = _GetDriveLetterFromPartition($oWMI, $oPartition.DeviceID)
+            ; If $sDriveLetter = "" Then
+                ; ; Nếu không có ký tự ổ đĩa và offset của nó lớn hơn cái đã tìm thấy
+                ; ; thì đây là ứng cử viên mới cho phân vùng ẩn (phân vùng cuối cùng)
+                ; If $iCurrentOffset > $iMaxOffsetFound Then
+                    ; $iMaxOffsetFound = $iCurrentOffset
+                    ; $iTargetOffset = $iCurrentOffset
+                ; EndIf
+            ; EndIf
+        ; EndIf
+    ; Next
+
+    ; If $iTargetOffset = -1 Then
+        ; RecordLogforDebug("! Lỗi: Không tìm thấy phân vùng 16MB dành riêng trên Disk " & $iDiskNum)
+        ; Return SetError(3, 0, 0) ; Không tìm thấy phân vùng phù hợp
+    ; EndIf
+
+    ; Return $iTargetOffset
+; EndFunc
+
+Func _GetReservedPartitionOffset($iDiskNum)
+    Local Const $LOWER_BOUND_BYTES = 15 * 1024 * 1024
+    Local Const $UPPER_BOUND_BYTES = 17 * 1024 * 1024
+
     Local $oWMI = ObjGet("winmgmts:\\.\root\cimv2")
     If Not IsObj($oWMI) Then
-        RecordLogforDebug("Lỗi WMI: Không thể kết nối dịch vụ.")
+        RecordLogforDebug("! Lỗi: Không thể kết nối tới WMI.")
         Return SetError(1, 0, 0)
     EndIf
 
-    ; Tương tự như Python, tìm trong một khoảng cho phép để tránh sai số
-    Local Const $LOWER_BOUND_BYTES = 15 * 1024 * 1024 ; 15MB
-    Local Const $UPPER_BOUND_BYTES = 17 * 1024 * 1024 ; 17MB
-
     Local $sQuery = "SELECT * FROM Win32_DiskPartition WHERE DiskIndex = " & $iDiskNum
     Local $colPartitions = $oWMI.ExecQuery($sQuery)
-
-    If Not IsObj($colPartitions) Or $colPartitions.Count = 0 Then
-        RecordLogforDebug("Lỗi WMI: Không tìm thấy phân vùng nào cho Disk " & $iDiskNum)
+    If Not IsObj($colPartitions) Then
+        RecordLogforDebug("! Lỗi: Truy vấn partitions thất bại.")
         Return SetError(2, 0, 0)
     EndIf
 
-    Local $iTargetOffset = -1
-    Local $iMaxOffsetFound = -1 ; Dùng để tìm phân vùng có offset lớn nhất (phân vùng cuối cùng)
-
+    Local $aPartitions[0][2] ; [0]: StartingOffset (Number), [1]: Partition Object
     For $oPartition In $colPartitions
-        Local $iCurrentSize = Number($oPartition.Size)
-        Local $iCurrentOffset = Number($oPartition.StartingOffset)
-
-        ; Kiểm tra xem kích thước có nằm trong khoảng 15-17MB không
-        If $iCurrentSize >= $LOWER_BOUND_BYTES And $iCurrentSize <= $UPPER_BOUND_BYTES Then
-            ; Nếu đúng, kiểm tra xem nó có ký tự ổ đĩa không
-            Local $sDriveLetter = _GetDriveLetterFromPartition($oWMI, $oPartition.DeviceID)
-            If $sDriveLetter = "" Then
-                ; Nếu không có ký tự ổ đĩa và offset của nó lớn hơn cái đã tìm thấy
-                ; thì đây là ứng cử viên mới cho phân vùng ẩn (phân vùng cuối cùng)
-                If $iCurrentOffset > $iMaxOffsetFound Then
-                    $iMaxOffsetFound = $iCurrentOffset
-                    $iTargetOffset = $iCurrentOffset
-                EndIf
-            EndIf
-        EndIf
+        Local $iIndex = UBound($aPartitions)
+        ReDim $aPartitions[$iIndex + 1][2]
+        $aPartitions[$iIndex][0] = Number($oPartition.StartingOffset)
+        $aPartitions[$iIndex][1] = $oPartition
     Next
 
-    If $iTargetOffset = -1 Then
-        RecordLogforDebug("! Lỗi: Không tìm thấy phân vùng 16MB dành riêng trên Disk " & $iDiskNum)
-        Return SetError(3, 0, 0) ; Không tìm thấy phân vùng phù hợp
+    If UBound($aPartitions) = 0 Then
+        RecordLogforDebug("! Lỗi: Không tìm thấy partition nào trên Disk " & $iDiskNum)
+        Return SetError(3, 0, 0)
     EndIf
 
-    Return $iTargetOffset
+    ; Sắp xếp descending theo StartingOffset
+    _ArraySort($aPartitions, 1, 0, 0, 0)
+
+    ; Lấy partition cuối cùng (offset lớn nhất)
+    Local $oLastPartition = $aPartitions[0][1]
+    Local $iSize = Number($oLastPartition.Size)
+
+    If $iSize < $LOWER_BOUND_BYTES Or $iSize > $UPPER_BOUND_BYTES Then
+        RecordLogforDebug("! Lỗi: Kích thước partition cuối không nằm trong khoảng 15-17MB: " & $iSize & " bytes")
+        Return SetError(4, 0, 0)
+    EndIf
+
+    ; Kiểm tra không có DriveLetter (không liên kết với LogicalDisk)
+    Local $sPartID = $oLastPartition.DeviceID
+    Local $sAssocQuery = "ASSOCIATORS OF {Win32_DiskPartition.DeviceID='" & $sPartID & "'} WHERE AssocClass=Win32_LogicalDiskToPartition ResultClass=Win32_LogicalDisk"
+    Local $colLogical = $oWMI.ExecQuery($sAssocQuery)
+
+    If Not IsObj($colLogical) Then
+        RecordLogforDebug("! Lỗi: Truy vấn associators thất bại.")
+        Return SetError(5, 0, 0)
+    EndIf
+
+    If $colLogical.Count > 0 Then
+        RecordLogforDebug("! Lỗi: Partition cuối có DriveLetter (đã mount).")
+        Return SetError(6, 0, 0)
+    EndIf
+
+    ; Kiểm tra Type nếu cần (optional, để tăng độ chính xác)
+    Local $sType = $oLastPartition.Type
+    If Not (StringInStr($sType, "Reserved") Or StringInStr($sType, "MSR")) Then
+        RecordLogforDebug("! Cảnh báo: Type partition không phải Reserved/MSR: " & $sType)
+        ; Có thể return error nếu strict, nhưng tạm bỏ qua vì WinPE có thể khác
+    EndIf
+
+    Local $iOffset = Number($oLastPartition.StartingOffset)
+    RecordLogforDebug("* Tìm thấy offset phân vùng chữ ký: " & $iOffset & " bytes")
+    Return $iOffset
 EndFunc
 
 ;===============================================================================
@@ -1633,28 +1702,6 @@ Func _GetDiskSizeViaAPI($iDiskNum)
 EndFunc
 
 ;===============================================================================
-; HÀM: _GetDiskSizeViaWMI
-;===============================================================================
-Func _GetDiskSizeViaWMI($iDiskNum)
-    Local $oWMI = ObjGet("winmgmts:\\.\root\cimv2")
-    If Not IsObj($oWMI) Then Return SetError(1, 0, 0)
-
-    Local $sQuery = "SELECT Size FROM Win32_DiskDrive WHERE Index = " & $iDiskNum
-    Local $colDisks = $oWMI.ExecQuery($sQuery)
-    If Not IsObj($colDisks) Then Return SetError(2, 0, 0)
-
-    For $oDisk In $colDisks
-        Local $iDiskSize = Number($oDisk.Size)
-        If $iDiskSize > 0 Then
-            RecordLogforDebug("Disk Size từ WMI: " & $iDiskSize & " bytes")
-            Return $iDiskSize
-        EndIf
-    Next
-
-    Return SetError(3, 0, 0)
-EndFunc
-
-;===============================================================================
 ; HÀM: _GetAllPhysicalDiskNumbers
 ;===============================================================================
 Func _GetAllPhysicalDiskNumbers()
@@ -1798,9 +1845,9 @@ EndFunc
 ; Mục đích: Hàm được gọi để khởi động lại máy tính.
 ;===============================================================================
 Func _ForceReboot()
-	; Exit
-	_RunTool("wpeutil.exe reboot /Y")
-	Shutdown(2) ; 2 = Reboot
+	Exit
+	; _RunTool("wpeutil.exe reboot /Y")
+	; Shutdown(2) ; 2 = Reboot
 EndFunc
 
 ;===============================================================================
