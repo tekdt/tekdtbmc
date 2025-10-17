@@ -1354,20 +1354,20 @@ EndFunc
 ; Trả về: True nếu hợp lệ, False nếu không.
 ; ;===============================================================================
 Func _VerifyUSBSignature()
-    RecordLogforDebug("--- Start to check the signature ---")
+    RecordLogforDebug("--- Bắt đầu kiểm tra chữ ký (phương pháp WMI) ---")
     Local $aDisks = _GetAllPhysicalDiskNumbers()
     If @error Then
-        RecordLogforDebug("Error: Could not list all physical drive.")
+        RecordLogforDebug("Lỗi: Không thể liệt kê các ổ đĩa vật lý.")
         Return False
     EndIf
 
     For $iPhysicalDriveNum In $aDisks
-        RecordLogforDebug("--- Checking on PhysicalDrive" & $iPhysicalDriveNum & " ---")
+        RecordLogforDebug("--- Đang kiểm tra trên PhysicalDrive" & $iPhysicalDriveNum & " ---")
 
-        ; BƯỚC 1 & 2: Lấy Disk ID và Tổng kích thước đĩa
+        ; BƯỚC 1 & 2: Lấy Disk ID và Tổng kích thước đĩa (giữ nguyên)
         Local $aDiskInfo = _GetDiskInfo_WinPE($iPhysicalDriveNum)
         If @error Then
-            RecordLogforDebug("Error: Could not ge the data for PhysicalDrive" & $iPhysicalDriveNum & ". Skipped.")
+            RecordLogforDebug("Lỗi: Không thể lấy dữ liệu cho PhysicalDrive" & $iPhysicalDriveNum & ". Đã bỏ qua.")
             ContinueLoop
         EndIf
 
@@ -1375,77 +1375,113 @@ Func _VerifyUSBSignature()
         Local $iDiskSize = $aDiskInfo[1]        ; Tổng kích thước disk (bytes)
 
         If $sDiskIdentifier = "" Or $iDiskSize <= 0 Then
-            RecordLogforDebug("Eror: Disk ID or disk size is invalid. Skipped.")
+            RecordLogforDebug("Lỗi: Disk ID hoặc kích thước đĩa không hợp lệ. Đã bỏ qua.")
             ContinueLoop
         EndIf
 
         RecordLogforDebug("Disk ID: " & $sDiskIdentifier)
-        RecordLogforDebug("Disk size (Total): " & $iDiskSize & " bytes")
+        RecordLogforDebug("Kích thước đĩa (Tổng): " & $iDiskSize & " bytes")
 
-        ; BƯỚC 3: Tính toán offset AN TOÀN (sau partition cuối cùng), đồng bộ với Python
-        RecordLogforDebug("Calculating safe offset by calling PowerShell...")
-        Local $sTempOutputFile = @TempDir & "\tekdt_part_offset.txt"
-        Local $sPoshCommand = 'powershell -Command "(Get-Partition -DiskNumber ' & $iPhysicalDriveNum & ' | ForEach-Object { $_.Offset + $_.Size } | Measure-Object -Maximum).Maximum"'
-        
-        ; Chạy lệnh PowerShell và lưu kết quả vào file tạm
-        RunWait(@ComSpec & " /c " & $sPoshCommand & ' > "' & $sTempOutputFile & '"', "", @SW_HIDE)
+        ; BƯỚC 3: Lấy offset của phân vùng ẩn (LOGIC MỚI)
+        RecordLogforDebug("Đang tìm kiếm offset của phân vùng 16MB dành riêng...")
+        Local $iTargetOffset = _GetReservedPartitionOffset_WMI($iPhysicalDriveNum)
 
-        If Not FileExists($sTempOutputFile) Or FileGetSize($sTempOutputFile) = 0 Then
-            RecordLogforDebug("Error: Failed to run PowerShell to get partition offset.")
-            FileDelete($sTempOutputFile)
+        If @error Or $iTargetOffset <= 0 Then
+            RecordLogforDebug("Lỗi: Không tìm thấy phân vùng chữ ký hợp lệ. Đã bỏ qua.")
             ContinueLoop
         EndIf
 
-        Local $sEndOfLastPartition = FileRead($sTempOutputFile)
-        FileDelete($sTempOutputFile)
-        
-        Local $iEndOfLastPartition = Number(StringStripWS($sEndOfLastPartition, 3))
+        RecordLogforDebug("Đã tìm thấy phân vùng chữ ký tại offset: " & $iTargetOffset & " bytes")
 
-        If $iEndOfLastPartition <= 0 Then
-             RecordLogforDebug("Error: Could not get a valid end-of-partition offset from PowerShell.")
-             ContinueLoop
-        EndIf
-        RecordLogforDebug("End of last partition: " & $iEndOfLastPartition & " bytes")
-        
-        Local Const $iBufferSpace = 1 * 1024 * 1024 ; Buffer 1MB giống hệt Python
-        Local $iTargetOffset = $iEndOfLastPartition + $iBufferSpace
-        
-        RecordLogforDebug("Target offset: " & $iTargetOffset & " bytes (Safe position)")
-
-        ; Kiểm tra offset hợp lệ
+        ; Kiểm tra xem offset tính được có hợp lệ không
         If $iTargetOffset + 512 > $iDiskSize Then
-            RecordLogforDebug("Error: Calculated offset is outside the disk boundaries. Skipped.")
+            RecordLogforDebug("Lỗi: Offset được tính toán nằm ngoài ranh giới ổ đĩa. Đã bỏ qua.")
             ContinueLoop
         EndIf
 
-        ; BƯỚC 4: Tạo hash mong đợi
+        ; BƯỚC 4: Tạo hash mong đợi (giữ nguyên)
         Local $sStringToHash = $sDiskIdentifier & $g_sSecretKey
         Local $sExpectedHash = StringLower(_Crypt_HashData($sStringToHash, $CALG_SHA_256))
-        RecordLogforDebug("Expected hash: " & $sExpectedHash)
+        RecordLogforDebug("Hash mong đợi: " & $sExpectedHash)
 
-        ; BƯỚC 5: Đọc dữ liệu từ sector tại offset đã tính
+        ; BƯỚC 5: Đọc dữ liệu từ sector tại offset đã tính (giữ nguyên)
         Local $sStoredData = _ReadSectorData("\\.\PhysicalDrive" & $iPhysicalDriveNum, $iTargetOffset, 512)
         If $sStoredData = "" Then
-            RecordLogforDebug("Error: Could not read the data at offset.")
+            RecordLogforDebug("Lỗi: Không thể đọc dữ liệu tại offset.")
             ContinueLoop
         EndIf
 
-        ; BƯỚC 6: Trích xuất hash từ dữ liệu đọc được
+        ; BƯỚC 6: Trích xuất hash từ dữ liệu đọc được (giữ nguyên)
         Local $sStoredHash = StringLeft($sStoredData, 64)
-        $sStoredHash = "0x"&StringLower(StringRegExpReplace($sStoredHash, "[^a-f0-9]", ""))
-        RecordLogforDebug("Stored hash:   " & $sStoredHash)
+        $sStoredHash = "0x" & StringLower(StringRegExpReplace($sStoredHash, "[^a-f0-9]", ""))
+        RecordLogforDebug("Hash lưu trữ:   " & $sStoredHash)
 
-        ; BƯỚC 7: So sánh
+        ; BƯỚC 7: So sánh (giữ nguyên)
         If $sExpectedHash = $sStoredHash And StringLen($sStoredHash) = 66 Then
-            RecordLogforDebug(">>>  SUCCESSFULLY CHECK on PhysicalDrive" & $iPhysicalDriveNum & " <<<")
+            RecordLogforDebug(">>> KIỂM TRA THÀNH CÔNG trên PhysicalDrive" & $iPhysicalDriveNum & " <<<")
             Return True
         Else
-            RecordLogforDebug("Hash is not match on PhysicalDrive" & $iPhysicalDriveNum)
+            RecordLogforDebug("Hash không khớp trên PhysicalDrive" & $iPhysicalDriveNum)
         EndIf
     Next
 
-    RecordLogforDebug("--- FAILED CHECK on all drives ---")
+    RecordLogforDebug("--- KIỂM TRA THẤT BẠI trên tất cả các ổ đĩa ---")
     Return False
+EndFunc
+
+;===============================================================================
+; HÀM: _GetReservedPartitionOffset_WMI
+; Mục đích: Lấy offset (vị trí bắt đầu) của phân vùng 16MB ẩn đã được
+;           tạo để chứa chữ ký.
+; Trả về: Offset (byte) nếu thành công. SetError nếu thất bại.
+;===============================================================================
+Func _GetReservedPartitionOffset_WMI($iDiskNum)
+    Local $oWMI = ObjGet("winmgmts:\\.\root\cimv2")
+    If Not IsObj($oWMI) Then
+        RecordLogforDebug("Lỗi WMI: Không thể kết nối dịch vụ.")
+        Return SetError(1, 0, 0)
+    EndIf
+
+    ; Tương tự như Python, tìm trong một khoảng cho phép để tránh sai số
+    Local Const $LOWER_BOUND_BYTES = 15 * 1024 * 1024 ; 15MB
+    Local Const $UPPER_BOUND_BYTES = 17 * 1024 * 1024 ; 17MB
+
+    Local $sQuery = "SELECT * FROM Win32_DiskPartition WHERE DiskIndex = " & $iDiskNum
+    Local $colPartitions = $oWMI.ExecQuery($sQuery)
+
+    If Not IsObj($colPartitions) Or $colPartitions.Count = 0 Then
+        RecordLogforDebug("Lỗi WMI: Không tìm thấy phân vùng nào cho Disk " & $iDiskNum)
+        Return SetError(2, 0, 0)
+    EndIf
+
+    Local $iTargetOffset = -1
+    Local $iMaxOffsetFound = -1 ; Dùng để tìm phân vùng có offset lớn nhất (phân vùng cuối cùng)
+
+    For $oPartition In $colPartitions
+        Local $iCurrentSize = Number($oPartition.Size)
+        Local $iCurrentOffset = Number($oPartition.StartingOffset)
+
+        ; Kiểm tra xem kích thước có nằm trong khoảng 15-17MB không
+        If $iCurrentSize >= $LOWER_BOUND_BYTES And $iCurrentSize <= $UPPER_BOUND_BYTES Then
+            ; Nếu đúng, kiểm tra xem nó có ký tự ổ đĩa không
+            Local $sDriveLetter = _GetDriveLetterFromPartition($oWMI, $oPartition.DeviceID)
+            If $sDriveLetter = "" Then
+                ; Nếu không có ký tự ổ đĩa và offset của nó lớn hơn cái đã tìm thấy
+                ; thì đây là ứng cử viên mới cho phân vùng ẩn (phân vùng cuối cùng)
+                If $iCurrentOffset > $iMaxOffsetFound Then
+                    $iMaxOffsetFound = $iCurrentOffset
+                    $iTargetOffset = $iCurrentOffset
+                EndIf
+            EndIf
+        EndIf
+    Next
+
+    If $iTargetOffset = -1 Then
+        RecordLogforDebug("! Lỗi: Không tìm thấy phân vùng 16MB dành riêng trên Disk " & $iDiskNum)
+        Return SetError(3, 0, 0) ; Không tìm thấy phân vùng phù hợp
+    EndIf
+
+    Return $iTargetOffset
 EndFunc
 
 ;===============================================================================
@@ -1762,9 +1798,9 @@ EndFunc
 ; Mục đích: Hàm được gọi để khởi động lại máy tính.
 ;===============================================================================
 Func _ForceReboot()
-	Exit
-	; _RunTool("wpeutil.exe reboot /Y")
-	; Shutdown(2) ; 2 = Reboot
+	; Exit
+	_RunTool("wpeutil.exe reboot /Y")
+	Shutdown(2) ; 2 = Reboot
 EndFunc
 
 ;===============================================================================

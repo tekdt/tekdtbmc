@@ -64,11 +64,11 @@ function Get-DiskSizeViaDiskpart {
         # Method 1: Get-Disk (Modern and most accurate)
         $Disk = Get-Disk -Number $DiskNum
         if ($Disk -and $Disk.Size) {
-            Write-Host "  → Disk size from Get-Disk: $($Disk.Size) bytes" -ForegroundColor Cyan
+            Write-Host "  -> Disk size from Get-Disk: $($Disk.Size) bytes" -ForegroundColor Cyan
             return [int64]$Disk.Size
         }
     } catch {
-        Write-Host "  → Get-Disk failed, trying diskpart..." -ForegroundColor Yellow
+        Write-Host "  -> Get-Disk failed, trying diskpart..." -ForegroundColor Yellow
     }
     
     # Method 2: Fallback to parsing 'diskpart detail disk'
@@ -100,7 +100,7 @@ exit
         }
         
         $finalSize = [int64]$SizeBytes
-        Write-Host "  → Disk size from diskpart: $finalSize bytes" -ForegroundColor Cyan
+        Write-Host "  -> Disk size from diskpart: $finalSize bytes" -ForegroundColor Cyan
         return $finalSize
     }
     
@@ -138,11 +138,11 @@ function Read-SectorData {
         $FileStream.Dispose()
         
         if ($BytesRead -eq 0) {
-            Write-Host "  → ERROR: 0 bytes read from offset" -ForegroundColor Red
+            Write-Host "  -> ERROR: 0 bytes read from offset" -ForegroundColor Red
             return ""
         }
         
-        Write-Host "  → Successfully read $BytesRead bytes from offset $Offset" -ForegroundColor Green
+        Write-Host "  -> Successfully read $BytesRead bytes from offset $Offset" -ForegroundColor Green
         
         # Convert to ASCII string (same as Python: decode as ASCII)
         $Result = [System.Text.Encoding]::ASCII.GetString($Buffer)
@@ -151,7 +151,7 @@ function Read-SectorData {
         return $Result.TrimEnd([char]0)
         
     } catch {
-        Write-Host "  → ERROR reading sector: $_" -ForegroundColor Red
+        Write-Host "  -> ERROR reading sector: $_" -ForegroundColor Red
         return ""
     }
 }
@@ -165,50 +165,56 @@ function Verify-USBSignature {
     
     Write-Host "`n=== Checking PhysicalDrive$DiskNum ===" -ForegroundColor Cyan
     
-    # STEP 1: Get Disk ID/GUID (Giữ nguyên)
+    # STEP 1: Get Disk ID/GUID
     $DiskID = Get-DiskIDViaDiskpart -DiskNum $DiskNum
     if (-not $DiskID) {
-        Write-Host "  → ERROR: Cannot get Disk ID. Skipping." -ForegroundColor Red
+        Write-Host "  -> ERROR: Cannot get Disk ID. Skipping." -ForegroundColor Red
         return $false
     }
     Write-Host "  Disk ID/GUID: $DiskID" -ForegroundColor White
     
-    # STEP 2: Get Disk Size (Giữ nguyên)
+    # STEP 2: Get Disk Size
     $DiskSize = Get-DiskSizeViaDiskpart -DiskNum $DiskNum
     if ($DiskSize -le 0) {
-        Write-Host "  → ERROR: Cannot get disk size. Skipping." -ForegroundColor Red
+        Write-Host "  -> ERROR: Cannot get disk size. Skipping." -ForegroundColor Red
         return $false
     }
     Write-Host "  Disk Size: $DiskSize bytes ($([math]::Round($DiskSize/1GB, 2)) GB)" -ForegroundColor White
     
-    # --- PHẦN THAY ĐỔI ---
-    # STEP 3: Tính toán offset AN TOÀN, đồng bộ 100% với logic ghi của Python
-    Write-Host "  → Calculating safe offset..." -ForegroundColor Cyan
+    # STEP 3: TÌM OFFSET CỦA PHÂN VÙNG ẨN (LOGIC MỚI)
+    # Logic này tìm phân vùng cuối cùng trên đĩa có kích thước khoảng 16MB và không có ký tự ổ đĩa.
+    Write-Host "  -> Finding reserved signature partition..." -ForegroundColor Cyan
+    $TargetOffset = 0
     try {
-        # Lệnh này lấy tổng (Offset + Size) của tất cả partition và tìm giá trị lớn nhất
-        $EndOfLastPartition = (Get-Partition -DiskNumber $DiskNum | ForEach-Object { $_.Offset + $_.Size } | Measure-Object -Maximum).Maximum
-        if (-not $EndOfLastPartition) { throw "Could not determine end of last partition." }
-        
-        Write-Host "    End of last partition: $EndOfLastPartition bytes"
+        $LOWER_BOUND_BYTES = 15 * 1024 * 1024 # 15MB
+        $UPPER_BOUND_BYTES = 17 * 1024 * 1024 # 17MB
 
-        $BufferSpace = 1 * 1024 * 1024 # 1MB buffer, matching Python
-        $TargetOffset = $EndOfLastPartition + $BufferSpace
-        
-        Write-Host "  Target Offset: $TargetOffset bytes (Safe position after last partition)" -ForegroundColor White
+        # Lấy phân vùng cuối cùng trên đĩa
+        $LastPartition = Get-Partition -DiskNumber $DiskNum | Sort-Object -Property Offset -Descending | Select-Object -First 1
 
+        # Kiểm tra xem nó có khớp với tiêu chí của phân vùng ẩn không
+        if ($LastPartition -and 
+            ($LastPartition.Size -ge $LOWER_BOUND_BYTES) -and 
+            ($LastPartition.Size -le $UPPER_BOUND_BYTES) -and 
+            (-not $LastPartition.DriveLetter)) {
+            
+            $TargetOffset = $LastPartition.Offset
+            Write-Host "  Found reserved partition at offset: $TargetOffset bytes" -ForegroundColor White
+        } else {
+            throw "Could not find the 16MB reserved signature partition."
+        }
     } catch {
-        Write-Host "  → ERROR: Could not calculate safe offset. $_" -ForegroundColor Red
+        Write-Host "  -> ERROR: Could not find signature partition. $_" -ForegroundColor Red
         return $false
     }
 
     # Kiểm tra xem offset tính được có hợp lệ không
-    if ($TargetOffset + 512 -gt $DiskSize) {
-        Write-Host "  → ERROR: Calculated offset is outside the disk boundaries. Skipping." -ForegroundColor Red
+    if ($TargetOffset -le 0 -or ($TargetOffset + 512 -gt $DiskSize)) {
+        Write-Host "  -> ERROR: Calculated offset is invalid or outside disk boundaries. Skipping." -ForegroundColor Red
         return $false
     }
-    # --- KẾT THÚC PHẦN THAY ĐỔI ---
 
-    # STEP 4: Generate expected hash (Giữ nguyên)
+    # STEP 4: Generate expected hash
     $StringToHash = $DiskID + $SECRET_KEY
     $SHA256 = [System.Security.Cryptography.SHA256]::Create()
     $HashBytes = $SHA256.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($StringToHash))
@@ -217,28 +223,28 @@ function Verify-USBSignature {
     
     Write-Host "  Expected Hash: $ExpectedHash" -ForegroundColor Yellow
     
-    # STEP 5: Read stored data from sector (Giữ nguyên)
+    # STEP 5: Read stored data from sector
     $DevicePath = "\\.\PhysicalDrive$DiskNum"
     $StoredData = Read-SectorData -DevicePath $DevicePath -Offset $TargetOffset -BytesToRead 512
     
-    # STEP 6: Check if data is null or empty (Giữ nguyên)
+    # STEP 6: Check if data is null or empty
     if ([string]::IsNullOrEmpty($StoredData)) {
-        Write-Host "  → ERROR: Cannot read data from offset." -ForegroundColor Red
+        Write-Host " -> ERROR: Cannot read data from offset." -ForegroundColor Red
         return $false
     }
     
-    # Extract stored hash (Giữ nguyên)
+    # Extract stored hash
     $StoredHash = $StoredData.Substring(0, [Math]::Min(64, $StoredData.Length)).ToLower()
     $StoredHash = $StoredHash -replace '[^0-9a-f]', ''
     
     Write-Host "  Stored Hash:   $StoredHash" -ForegroundColor Yellow
     
-    # STEP 7: Compare (Giữ nguyên)
+    # STEP 7: Compare
     if ($ExpectedHash -eq $StoredHash -and $StoredHash.Length -eq 64) {
         Write-Host "`n VERIFICATION SUCCESS on PhysicalDrive$DiskNum `n" -ForegroundColor Green
         return $true
     } else {
-        Write-Host "  → Hash mismatch! USB may be cloned." -ForegroundColor Red
+        Write-Host " -> Hash mismatch! USB may be cloned." -ForegroundColor Red
         if ($StoredHash.Length -ne 64) {
             Write-Host "    (Stored hash length: $($StoredHash.Length), expected: 64)" -ForegroundColor Red
         }
