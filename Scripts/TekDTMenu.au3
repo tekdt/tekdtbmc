@@ -312,9 +312,9 @@ Func _HandleButtonPress($iCtrlID)
 					If StringInStr($CPU, "AMD") AND StringInStr($sAction, "%ScriptDir%\Tools\SDIO%ARCH%\SDIO_R816.exe") Then Return
 					_RunTool($sAction)
 					If WinExists("Setup","") = 1 Then
-						; ControlClick("Setup","","[CLASS:Button; INSTANCE:1]")
-						; ControlSend("Setup","","[CLASS:Button; INSTANCE:1]","!r")
-						Send('!r')
+						ControlClick("Setup","","[CLASS:Button; INSTANCE:1]")
+						ControlSend("Setup","","[CLASS:Button; INSTANCE:1]","!r")
+						; Send('!r')
 					EndIf
             EndSwitch
 
@@ -637,9 +637,9 @@ Func _AutoCleanPartitions()
     RunWait('diskpart /s "' & $sCleanScriptFile & '"', "", @SW_HIDE)
     FileDelete($sCleanScriptFile)
 	If WinExists("Setup","") = 1 Then
-		; ControlClick("Setup","","[CLASS:Button; INSTANCE:1]")
-		; ControlSend("Setup","","[CLASS:Button; INSTANCE:1]","!r")
-		Send('!r')
+		ControlClick("Setup","","[CLASS:Button; INSTANCE:1]")
+		ControlSend("Setup","","[CLASS:Button; INSTANCE:1]","!r")
+		;Send('!r')
 	EndIf
     MsgBox(64, "Hoàn Tất", "Đã xoá " & UBound($aToDelete) & " phân vùng.")
 EndFunc
