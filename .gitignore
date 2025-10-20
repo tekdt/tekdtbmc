@@ -1,7 +1,6 @@
 *.iso
 *.wim
 *.aria2
-*.7z
 ISOs
 secret_key.py
 secret_key.au3
