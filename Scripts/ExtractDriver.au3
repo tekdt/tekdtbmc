@@ -98,6 +98,32 @@ Func _AutoExtractDrivers()
         Return False
     EndIf
 
+    ; --- Lấy thông tin HĐH (WinPE) đang chạy ---
+    Local $sOSVer
+    Select
+        Case @OSVersion = "WIN_11"
+            $sOSVer = "10.0" ; Win 11 vẫn dùng nhân 10.0
+        Case @OSVersion = "WIN_10"
+            $sOSVer = "10.0"
+        Case @OSVersion = "WIN_81"
+            $sOSVer = "6.3"
+        Case @OSVersion = "WIN_8"
+            $sOSVer = "6.2"
+        Case @OSVersion = "WIN_7"
+            $sOSVer = "6.1"
+        Case Else
+            RecordLogforDebug("! Lỗi: Không nhận dạng được @OSVersion: " & @OSVersion & ". Giả định là '10.0'.")
+            $sOSVer = "10.0" ; Giá trị dự phòng an toàn nhất
+    EndSelect
+
+    ; Sửa lại định dạng chuỗi HĐH thành "10.0x64" cho khớp với CSDL
+    Local $sSystemID = $sOSVer & StringLower(@OSArch)
+    Local $iOSBuild = @OSBuild ; Lấy số build hiện tại, ví dụ: 19041, 22000, 22621
+    Local $sEscSystemID = _SQLite_FastEscape($sSystemID) ; Escape chuỗi này
+
+    RecordLogforDebug("* Thông tin: Sẽ lọc driver cho HĐH: " & $sSystemID & " (Build <= " & $iOSBuild & ")")
+
+
     ; --- Bước 4: Lặp qua HWIDs và truy vấn CSDL ---
     Local $aPathsToExtract[0]
 	RecordLogforDebug("* Thông tin: Đang so khớp " & UBound($aMissingHWIDs) & " thiết bị thiếu với CSDL...")
@@ -105,17 +131,20 @@ Func _AutoExtractDrivers()
 	For $sMissingHWID In $aMissingHWIDs
 		If $sMissingHWID = "" Or StringIsDigit($sMissingHWID) Or StringLen($sMissingHWID) < 5 Then ContinueLoop
 
-		; escape giá trị HWID an toàn (FastEscape bao gồm cả dấu nháy đơn)
+		; escape giá trị HWID an toàn
 		Local $sEscHWID = _SQLite_FastEscape($sMissingHWID)
 
-		; Tạo câu truy vấn với HWID đã escape
+		; Tạo câu truy vấn với HWID đã escape VÀ LỌC THEO HĐH
+        ; Logic mới: Ưu tiên RANK, sau đó ưu tiên BUILD GẦN NHẤT, sau đó mới tới NGÀY MỚI NHẤT
 		Local $sQueryHWID = "SELECT T_Driver.pack, T_Driver.directory " & _
 			"FROM Devices AS T_Device " & _
 			"INNER JOIN Usable AS T_Usable ON T_Device.id = T_Usable.deviceId " & _
 			"INNER JOIN Sections AS T_Section ON T_Usable.sectionId = T_Section.id " & _
 			"INNER JOIN Drivers AS T_Driver ON T_Section.driverId = T_Driver.id " & _
 			"WHERE T_Device.deviceId = " & $sEscHWID & " " & _
-			"ORDER BY T_Usable.rank DESC " & _
+			  "AND T_Usable.system = " & $sEscSystemID & " " & _ ; <-- Lọc HĐH (ví dụ: "10.0x64")
+			  "AND T_Section.build <= " & $iOSBuild & " " & _ ; <-- Lọc Build (loại bỏ driver mới hơn HĐH)
+			"ORDER BY T_Usable.rank DESC, T_Section.build DESC, T_Driver.date DESC " & _ ; <-- ƯU TIÊN BUILD
 			"LIMIT 1"
 
 		Local $hQuery, $aRow[0]
