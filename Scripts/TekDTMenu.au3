@@ -13,7 +13,12 @@
 #include <WinAPISys.au3>
 #include <Memory.au3>
 #include <Crypt.au3>
-#include "secret_key.a3x"
+#include <GuiListView.au3>
+#include <SQLite.au3>
+#include "secret_key.au3"
+
+FileInstall("sqlite3.dll",@ScriptDir&'\sqlite3.dll')
+FileInstall("sqlite3_x64.dll",@ScriptDir&'\sqlite3_x64.dll')
 
 Opt("WinTitleMatchMode", 2)
 
@@ -41,6 +46,7 @@ Global $g_hGUI, $g_hShrinkLabel, $hTitleBar, $hTitleText, $g_hFooterLabel
 Global $g_hScrollUp, $g_hScrollDown
 Global $g_iScrollOffset = 0 ; Vị trí cuộn hiện tại (index của nút đầu tiên)
 Global $CPU = RegRead("HKEY_LOCAL_MACHINE\HARDWARE\DESCRIPTION\System\CentralProcessor\0", "ProcessorNameString")
+Global $exclusion_keywords[9] = ["USB", "FLASH", "CARD READER", "SD", "MMC", "VIRTUAL", "CD-ROM", "DVD", "REMOVABLE"]
 
 Global $g_bIsShrunken = False
 Global $g_bIsAnimating = False
@@ -60,47 +66,41 @@ _Main()
 
 Func _Main()
 	Local $SplashInfo = SplashTextOn('Thông tin', 'Cập nhật tác vụ thực hiện...', @DesktopWidth, @DesktopHeight, default, default, 33, '', 15)
-	If $SplashInfo Then ControlSetText($SplashInfo, '', 'Static1', 'Trích xuất trình điều khiển...')
-	_AutoExtractDrivers()
-	
+
 	If $SplashInfo Then ControlSetText($SplashInfo, '', 'Static1', 'Đọc cấu hình cho TekDT Menu...')
 	_ReadButtonsInfoFromINI()
-	
+
 	If $SplashInfo Then ControlSetText($SplashInfo, '', 'Static1', 'Tạo giao diện...')
     _CreateGUI()
-	
+
 	If $SplashInfo Then ControlSetText($SplashInfo, '', 'Static1', 'Tạo các nút nhấn cho giao diện TekDT Menu...')
 	_CreateButtons()
-	
+
 	If $SplashInfo Then ControlSetText($SplashInfo, '', 'Static1', 'Hiển thị hoàn tất...')
     _UpdateVisibleButtons() ; Hiển thị các nút ban đầu
-	
+
     GUISetState(@SW_SHOW, $g_hGUI)
     AdlibRegister("_CheckMousePosition", 100)
     AdlibRegister("_InitialShrink", 2000) ; Thu nhỏ sau 2 giây
-	
+
 	FileWrite("Done.txt","Done")
-	
+
 	If $SplashInfo Then ControlSetText($SplashInfo, '', 'Static1', 'Chờ hệ thống khởi động đầy đủ...')
 	_WaitForWinPEBootComplete()
-	
+
 	ControlSetText($SplashInfo, '', 'Static1', 'Xác nhận thiết bị hợp lệ...')
 	If Not _VerifyUSBSignature() Then
 		If $SplashInfo Then SplashOff()
         _ShowFatalErrorAndReboot() ; Gọi màn hình lỗi và reboot
         Exit
     EndIf
-	
+
+	If $SplashInfo Then ControlSetText($SplashInfo, '', 'Static1', 'Trích xuất trình điều khiển...')
+	_AutoExtractDrivers()
+
 	ControlSetText($SplashInfo, '', 'Static1', 'Chạy các tính năng được cấu hình sẵn')
-	DirCreate('Driver_Installed_Logs')
 	_RunAutoRunButtons() ; Chạy các button AutoRun
-	
-	ControlSetText($SplashInfo, '', 'Static1', 'Đang lọc driver tốt nhất cho hệ điều hành...')
-	Do
-		Sleep(1000); Chờ cho đến khi tiến trình SDIO biến mất, mục đích là để chắc chắn có file .log bên trong thư mục X:\Driver_Installed_Logs
-	Until ProcessExists("SDIO_R816.exe") = 0
-	SDIO_FilterDriversByLog("X:\Drivers", "X:\Driver_Installed_Logs", False)
-	
+
 	If $SplashInfo Then SplashOff()
 
 	Local $iLastCheck = TimerInit()
@@ -155,7 +155,7 @@ Func _CreateGUI()
 
     $g_hGUI = GUICreate($g_sTitle, $g_iMainWidth, $g_iMainHeight, 0, 0, $WS_POPUP, BitOR($WS_EX_TOPMOST, $WS_EX_WINDOWEDGE))
     GUISetBkColor(0xFFFFFF)
-	
+
 	; Set icon default AutoIt (từ EXE hoặc file icon nếu có)
     GUISetIcon(@AutoItExe)  ; Sử dụng icon của chính script/EXE (AutoIt default nếu không custom)
     ; Nếu có file icon riêng: GUISetIcon(@ScriptDir & "\autoit.ico")  ; Thêm icon file nếu cần
@@ -309,12 +309,10 @@ Func _HandleButtonPress($iCtrlID)
                 Case "AUTO_CLEAN_PARTITIONS"
                     _AutoCleanPartitions()
 				Case Else
-					If StringInStr($CPU, "AMD") AND StringInStr($sAction, "%ScriptDir%\Tools\SDIO%ARCH%\SDIO_R816.exe") Then Return
 					_RunTool($sAction)
 					If WinExists("Setup","") = 1 Then
 						ControlClick("Setup","","[CLASS:Button; INSTANCE:1]")
 						ControlSend("Setup","","[CLASS:Button; INSTANCE:1]","!r")
-						; Send('!r')
 					EndIf
             EndSwitch
 
@@ -376,7 +374,7 @@ Func _RunTool($sTool)
         Return
     EndIf
 
-    ; Xử lý các lệnh đặc biệt (giữ nguyên)
+    ; Xử lý các lệnh đặc biệt
     Switch StringLower($sTool)
         Case "cmd", "command", "commandprompt"
             Run(@ComSpec & " /k echo Công cụ Command Prompt", "", @SW_SHOW)
@@ -389,7 +387,7 @@ Func _RunTool($sTool)
             Return
     EndSwitch
 
-    ; Xử lý lệnh shutdown với xác nhận (giữ nguyên)
+    ; Xử lý lệnh shutdown với xác nhận
     If StringInStr($sTool, "wpeutil.exe") OR StringInStr($sTool, "dism.exe") Then
 		If StringInStr($sTool, "/Y") Then
 			Run(@ComSpec & " /c " & StringReplace($sTool," /Y",""), "", @SW_HIDE)
@@ -402,11 +400,11 @@ Func _RunTool($sTool)
         Return
     EndIf
 
-    ; Thay thế %ScriptDir% và %ARCH% (giữ nguyên)
+    ; Thay thế %ScriptDir% và %ARCH%
     $sTool = StringReplace($sTool, "%ScriptDir%", @ScriptDir)
     $sTool = StringReplace($sTool, "%ARCH%", @OSArch = "X64" ? "64" : "32")
 
-    ; Tách đường dẫn chính và tham số (giữ nguyên)
+    ; Tách đường dẫn chính và tham số
     Local $sExePath, $sParams = ""
     If StringLeft($sTool, 1) = '"' Then
         Local $iEndQuote = StringInStr($sTool, '"', 0, 2)
@@ -484,11 +482,11 @@ EndFunc
 Func _IniReadUTF8($sFile, $sSection, $sKey, $sDefault)
     Local $sValue = IniRead($sFile, $sSection, $sKey, $sDefault)
     If $sValue = $sDefault Then
-        RecordLogforDebug("IniRead: Section=" & $sSection & ", Key=" & $sKey & ", Value=" & $sValue & " (default)")
+        ;RecordLogforDebug("IniRead: Section=" & $sSection & ", Key=" & $sKey & ", Value=" & $sValue & " (default)")
         Return $sValue
     EndIf
     Local $sConverted = BinaryToString(StringToBinary($sValue, 1), 4) ; ANSI sang Unicode
-    RecordLogforDebug("IniRead: Section=" & $sSection & ", Key=" & $sKey & ", Original=" & $sValue & ", Converted=" & $sConverted)
+    ;RecordLogforDebug("IniRead: Section=" & $sSection & ", Key=" & $sKey & ", Original=" & $sValue & ", Converted=" & $sConverted)
     Return $sConverted
 EndFunc
 
@@ -500,7 +498,7 @@ Func _Scale($iValue, $sAxis = "y")
         $fScale = @DesktopWidth / 1920
     EndIf
     Local $iScaledValue = Round($iValue * $fScale)
-    RecordLogforDebug("Scaling: Input=" & $iValue & ", Axis=" & $sAxis & ", ScaleFactor=" & $fScale & ", Output=" & $iScaledValue)
+    ;RecordLogforDebug("Scaling: Input=" & $iValue & ", Axis=" & $sAxis & ", ScaleFactor=" & $fScale & ", Output=" & $iScaledValue)
     Return $iScaledValue
 EndFunc
 
@@ -508,109 +506,234 @@ Func StringToBool($sString)
     Return StringLower($sString) = "true"
 EndFunc
 
+;===============================================================================
+; HÀM: _AdjustPopupLayout
+; Mục đích: Tự động điều chỉnh kích thước ListView và vị trí các nút
+;         để vừa khít với cửa sổ cha khi cửa sổ được tạo hoặc thay đổi kích thước.
+;===============================================================================
+Func _AdjustPopupLayout($hGUI, $hList, $aButtons)
+    Local $aClientSize = WinGetClientSize($hGUI)
+    Local $iClientHeight = $aClientSize[1]
+    Local $iClientWidth = $aClientSize[0]
+
+    ; 1. Điều chỉnh ListView
+    ; Vị trí: 10, 10
+    ; Rộng: Chiều rộng cửa sổ - 20 (padding)
+    ; Cao: Chiều cao cửa sổ - 60 (để chừa 50px cho nút và padding)
+    GUICtrlSetPos($hList, 10, 10, $iClientWidth - 20, $iClientHeight - 60)
+
+    ; 2. Điều chỉnh các nút
+    Local $iButtonY = $iClientHeight - 40 ; Vị trí Y (cách đáy 40px)
+    Local $iTotalButtons = UBound($aButtons)
+
+    If $iTotalButtons = 1 Then
+        ; Căn giữa 1 nút
+        Local $hButton = $aButtons[0]
+        ; *** SỬA LỖI: Dùng GUICtrlGetHandle và WinGetPos thay vì GUICtrlRead ***
+        Local $hButtonWnd = GUICtrlGetHandle($hButton)
+        If $hButtonWnd = 0 Then Return ; Thoát nếu không lấy được handle
+        Local $aPos = WinGetPos($hButtonWnd)
+        If Not IsArray($aPos) Then Return ; Thoát nếu không lấy được vị trí
+        Local $iBtnWidth = $aPos[2] ; Lấy chiều rộng từ mảng $aPos
+        ; *** KẾT THÚC SỬA LỖI ***
+
+        Local $iButtonX = ($iClientWidth - $iBtnWidth) / 2
+        GUICtrlSetPos($hButton, $iButtonX, $iButtonY)
+
+    ElseIf $iTotalButtons = 2 Then
+        ; Căn giữa 2 nút
+        Local $hButton1 = $aButtons[0]
+        Local $hButton2 = $aButtons[1]
+
+        ; *** SỬA LỖI: Dùng GUICtrlGetHandle và WinGetPos ***
+        Local $hButton1Wnd = GUICtrlGetHandle($hButton1)
+        Local $hButton2Wnd = GUICtrlGetHandle($hButton2)
+        If $hButton1Wnd = 0 Or $hButton2Wnd = 0 Then Return
+        Local $aPos1 = WinGetPos($hButton1Wnd)
+        Local $aPos2 = WinGetPos($hButton2Wnd)
+        If Not IsArray($aPos1) Or Not IsArray($aPos2) Then Return
+
+        Local $iBtnWidth1 = $aPos1[2]
+        Local $iBtnWidth2 = $aPos2[2]
+        ; *** KẾT THÚC SỬA LỖI ***
+
+        Local $iGap = 10 ; Khoảng cách giữa 2 nút
+        Local $iTotalWidth = $iBtnWidth1 + $iBtnWidth2 + $iGap
+        Local $iButton1X = ($iClientWidth - $iTotalWidth) / 2
+        Local $iButton2X = $iButton1X + $iBtnWidth1 + $iGap
+
+        GUICtrlSetPos($hButton1, $iButton1X, $iButtonY)
+        GUICtrlSetPos($hButton2, $iButton2X, $iButtonY)
+    EndIf
+EndFunc
+
 Func _AnalyzePartitions()
+    ; Khởi động WMI nếu cần (đặc biệt trong WinPE)
+    RunWait(@ComSpec & " /c net start winmgmt", "", @SW_HIDE)
+    Sleep(500)
+
     Local $oWMI = ObjGet("winmgmts:\\.\root\cimv2")
     If Not IsObj($oWMI) Then
         MsgBox(16, "Lỗi WMI", "Không thể kết nối tới dịch vụ Windows Management Instrumentation.")
         Return
     EndIf
 
-    Local $sMsg = "Các phân vùng hiện có (Phân tích bằng WMI):" & @CRLF & @CRLF
-    Local $bFoundBitLocker = False
-
     Local $colDisks = $oWMI.ExecQuery("SELECT * FROM Win32_DiskDrive")
     If Not IsObj($colDisks) Or $colDisks.Count = 0 Then Return
 
-    For $oDisk In $colDisks
-        $sMsg &= StringFormat("Disk %i (%s GB - %s):\n", $oDisk.Index, Round($oDisk.Size / (1024^3), 2), $oDisk.Model)
+    Local $aPartitions[0][5]  ; [0]: Disk Info, [1]: Partition, [2]: Type, [3]: Size, [4]: Notes
 
-        ; === SỬA LỖI TẠI ĐÂY: Truy vấn trực tiếp Partition bằng DiskIndex ===
-        Local $sQuery = "SELECT * FROM Win32_DiskPartition WHERE DiskIndex = " & $oDisk.Index
+    For $oDisk In $colDisks
+        ; Bỏ qua ổ đĩa ngoài dựa trên InterfaceType
+        If _ArraySearch($exclusion_keywords, $oDisk.InterfaceType) <> -1 Then ContinueLoop
+
+        Local $sDiskInfo = StringFormat("Disk %i (%s GB - %s)", $oDisk.Index, Round($oDisk.Size / (1024^3), 2), $oDisk.Model)
+        Local $sQuery = "SELECT * FROM Win32_DiskPartition WHERE DiskIndex = " & $oDisk.Index ;
         Local $colPartitions = $oWMI.ExecQuery($sQuery)
 
         If IsObj($colPartitions) And $colPartitions.Count > 0 Then
             For $oPartition In $colPartitions
                 Local $iSizeMB = Round($oPartition.Size / (1024^2))
-                Local $sUnit = "MB"
+                Local $sUnit = "MB"  ;
                 Local $iDisplaySize = $iSizeMB
                 If $iSizeMB >= 1024 Then
                     $sUnit = "GB"
                     $iDisplaySize = Round($iSizeMB / 1024, 2)
-                EndIf
+                EndIf  ;
 
                 Local $sNotes = ""
                 If $oPartition.BootPartition Then $sNotes &= " 🚀 Khởi động"
-                If $oPartition.Type = "EFI System Partition" Or StringInStr($oPartition.Type, "Recovery") Or StringInStr($oPartition.Type, "MSR") Then $sNotes &= " ⚠️ Hệ thống"
-                If $iSizeMB < 1000 Then $sNotes &= " ⚠️ Nhỏ (<1GB)"
+                If $oPartition.Type = "EFI System Partition" Or StringInStr($oPartition.Type, "Recovery") Or StringInStr($oPartition.Type, "MSR") Then $sNotes &= " ⚠️ Hệ thống" ;
+                If $iSizeMB < 1000 Then $sNotes &= " ⚠️ Nhỏ (<1GB)"  ;
 
-                ; === SỬ DỤNG HÀM _IsWindowsPartition PHIÊN BẢN WMI ===
-                If _IsWindowsPartition($oWMI, $oPartition.DiskIndex, $oPartition.Index) Then
-                    $sNotes &= " 💻 Có thể là Windows cũ!"
+                If _IsWindowsPartition($oWMI, $oPartition.DiskIndex, $oPartition.Index) Then ;
+                    $sNotes &= " 💻 Có thể là Windows cũ!"  ;
                 Else
-                    ; Nếu không phải Win cũ và có ký tự -> khả năng là data
-                    If _GetDriveLetterFromPartition($oWMI, $oPartition.DeviceID) <> "" Then
-                         $sNotes &= " 👤 Dữ liệu người dùng?"
+                    If _GetDriveLetterFromPartition($oWMI, $oPartition.DeviceID) <> "" Then ;
+                         $sNotes &= " 👤 Dữ liệu người dùng"  ;
                     EndIf
                 EndIf
 
-                $sMsg &= StringFormat("  Partition %i (%s, %s %s)%s\n", $oPartition.Index, $oPartition.Type, $iDisplaySize, $sUnit, $sNotes)
+                Local $iIdx = UBound($aPartitions)
+                ReDim $aPartitions[$iIdx + 1][5]
+                $aPartitions[$iIdx][0] = $sDiskInfo
+                $aPartitions[$iIdx][1] = $oPartition.Index
+                $aPartitions[$iIdx][2] = $oPartition.Type  ;
+                $aPartitions[$iIdx][3] = $iDisplaySize & " " & $sUnit
+                $aPartitions[$iIdx][4] = $sNotes
             Next
         Else
-             $sMsg &= "  (Không tìm thấy phân vùng nào trên ổ đĩa này)\n"
+            Local $iIdx = UBound($aPartitions) ;
+            ReDim $aPartitions[$iIdx + 1][5]
+            $aPartitions[$iIdx][0] = $sDiskInfo
+            $aPartitions[$iIdx][1] = "-"
+            $aPartitions[$iIdx][2] = "-"
+            $aPartitions[$iIdx][3] = "-"
+            $aPartitions[$iIdx][4] = "(Không tìm thấy phân vùng nào trên ổ đĩa này)"  ;
         EndIf
-        $sMsg &= @CRLF
     Next
-    MsgBox(64, "Phân Tích Phân Vùng", $sMsg)
+
+    ; Tạo GUI
+    Local $iTotalItems = UBound($aPartitions)
+    Local $iNewHeight = 150 + ($iTotalItems * 20)  ;
+    If $iNewHeight < 200 Then $iNewHeight = 200  ;
+    If $iNewHeight > 500 Then $iNewHeight = 500  ;
+    Local $hGUI = GUICreate("Phân Tích Phân Vùng", 600, $iNewHeight, -1, -1, BitOR($WS_SIZEBOX, $WS_SYSMENU))
+    Local $hList = GUICtrlCreateListView("Disk|Partition|Type|Size|Notes", 10, 10, 580, $iNewHeight - 60) ;
+    _GUICtrlListView_SetExtendedListViewStyle($hList, $LVS_EX_FULLROWSELECT)
+    Local $hClose = GUICtrlCreateButton("Đóng", 250, $iNewHeight - 40, 100, 30) ;
+    Local $aButtons[1] = [$hClose] ; Mảng chứa nút Đóng
+    GUISetState(@SW_SHOW, $hGUI)
+
+    For $i = 0 To $iTotalItems - 1
+        GUICtrlCreateListViewItem($aPartitions[$i][0] & "|" & $aPartitions[$i][1] & "|" & $aPartitions[$i][2] & "|" & $aPartitions[$i][3] & "|" & $aPartitions[$i][4], $hList)
+    Next
+
+    ; Tự động điều chỉnh chiều rộng các cột
+    For $i = 0 To 4  ;
+        _GUICtrlListView_SetColumnWidth($hList, $i, $LVSCW_AUTOSIZE)
+    Next
+
+    ; *** Gọi hàm điều chỉnh layout ngay sau khi tạo ***
+    _AdjustPopupLayout($hGUI, $hList, $aButtons)
+
+    ; Vòng lặp sự kiện
+    While 1
+        Local $iMsg = GUIGetMsg()
+        Switch $iMsg
+            Case $GUI_EVENT_CLOSE, $hClose
+                GUIDelete($hGUI)
+                ExitLoop
+            Case $GUI_EVENT_RESIZED
+                ; *** Gọi lại hàm điều chỉnh khi resize ***
+                _AdjustPopupLayout($hGUI, $hList, $aButtons)
+        EndSwitch
+    WEnd
 EndFunc
 
 Func _AutoCleanPartitions()
-    Local $iConfirm = MsgBox(36, "Cảnh Báo Nâng Cao", "Tính năng này sẽ tự động xoá các phân vùng không cần thiết." & @CRLF & "BẠN CÓ CHẮC CHẮN MUỐN TIẾP TỤC KHÔNG?")
+    Local $iDataThresholdMB = 1500 ; Ngưỡng 1.5GB
+    Local $sMsg = "Tính năng này sẽ tự động *xoá* các phân vùng hệ thống và Windows cũ." & @CRLF & _
+                   "Các phân vùng nhỏ hơn " & $iDataThresholdMB & " MB (EFI, MSR, Recovery, OEM...) sẽ bị xoá." & @CRLF & _
+                   "Các phân vùng lớn hơn " & $iDataThresholdMB & " MB (giả định là Data) sẽ được giữ lại." & @CRLF & @CRLF & _
+                   "BẠN CÓ CHẮC CHẮN MUỐN TIẾP TỤC KHÔNG?"
+
+    Local $iConfirm = MsgBox(36, "Cảnh Báo Nâng Cao", $sMsg)
     If $iConfirm <> 6 Then Return
+
+    RunWait(@ComSpec & " /c net start winmgmt", "", @SW_HIDE) ;
+    Sleep(500)
 
     Local $oWMI = ObjGet("winmgmts:\\.\root\cimv2")
     If Not IsObj($oWMI) Then Return
 
-    Local $aToDelete[0][5] ; [DiskIndex, PartIndex, Type, SizeStr, Reason]
-    Local $sConfirmMsg = "Các phân vùng sau sẽ bị xóa:" & @CRLF & @CRLF
-
+    Local $aToDelete[0][5] ;
     Local $colDisks = $oWMI.ExecQuery("SELECT * FROM Win32_DiskDrive")
     If Not IsObj($colDisks) Then Return
 
     For $oDisk In $colDisks
-        ; === SỬA LỖI TẠI ĐÂY: Truy vấn trực tiếp Partition bằng DiskIndex ===
-        Local $sQuery = "SELECT * FROM Win32_DiskPartition WHERE DiskIndex = " & $oDisk.Index
+        If _ArraySearch($exclusion_keywords, $oDisk.InterfaceType) <> -1 Then ContinueLoop ;
+
+        Local $sQuery = "SELECT * FROM Win32_DiskPartition WHERE DiskIndex = " & $oDisk.Index ;
         Local $colPartitions = $oWMI.ExecQuery($sQuery)
 
         If IsObj($colPartitions) And $colPartitions.Count > 0 Then
             For $oPartition In $colPartitions
-                Local $iSizeMB = Round($oPartition.Size / (1024^2))
-                Local $bIsSmall = ($iSizeMB < 1000)
-                Local $bIsSystem = ($oPartition.Type = "EFI System Partition" Or StringInStr($oPartition.Type, "Recovery") Or StringInStr($oPartition.Type, "MSR"))
-                Local $bIsOldWindows = _IsWindowsPartition($oWMI, $oPartition.DiskIndex, $oPartition.Index)
 
+                ; --- LOGIC LỌC MỚI (DỰA TRÊN KÍCH THƯỚC) ---
+                Local $iSizeMB = Round($oPartition.Size / (1024^2)) ;
+                Local $sSizeStr = Round($iSizeMB, 2) & " MB"
+                If $iSizeMB >= 1024 Then $sSizeStr = Round($iSizeMB / 1024, 2) & " GB"
+
+                Local $bIsOldWindows = _IsWindowsPartition($oWMI, $oPartition.DiskIndex, $oPartition.Index) ;
                 Local $sReason = ""
                 Local $bShouldDelete = False
 
                 If $bIsOldWindows Then
-                    $sReason = "Chứa hệ điều hành cũ"
+                    ; 1. Luôn XÓA nếu là Windows cũ
+                    $sReason = "Chứa hệ điều hành cũ" ;
                     $bShouldDelete = True
-                ElseIf ($bIsSmall Or $bIsSystem) And Not $oPartition.BootPartition Then
-                    $sReason = $bIsSmall ? "Phân vùng nhỏ không cần thiết" : "Phân vùng hệ thống"
-                    $bShouldDelete = True
+                Else
+                    ; 2. Nếu không phải Windows cũ, kiểm tra kích thước
+                    If $iSizeMB > $iDataThresholdMB Then
+                        ; Lớn hơn 1.5GB -> Giả định là DATA -> GIỮ LẠI
+                        $bShouldDelete = False
+                    Else
+                        ; Nhỏ hơn 1.5GB -> Giả định là System/EFI/Recovery/MSR/OEM... -> XÓA
+                        $sReason = "Phân vùng hệ thống/nhỏ (< " & $iDataThresholdMB & " MB)"
+                        $bShouldDelete = True
+                    EndIf
                 EndIf
+                ; --- KẾT THÚC LOGIC LỌC MỚI ---
 
                 If $bShouldDelete Then
-                    Local $sSizeStr = Round($iSizeMB, 2) & " MB"
-                    If $iSizeMB >= 1024 Then $sSizeStr = Round($iSizeMB / 1024, 2) & " GB"
                     Local $iIdx = UBound($aToDelete)
-                    ReDim $aToDelete[$iIdx + 1][5]
+                    ReDim $aToDelete[$iIdx + 1][5] ;
                     $aToDelete[$iIdx][0] = $oPartition.DiskIndex
                     $aToDelete[$iIdx][1] = $oPartition.Index
-                    $aToDelete[$iIdx][2] = $oPartition.Type
+                    $aToDelete[$iIdx][2] = $oPartition.Type ;
                     $aToDelete[$iIdx][3] = $sSizeStr
-                    $aToDelete[$iIdx][4] = $sReason
-                    $sConfirmMsg &= StringFormat("- Disk %s, Partition %s: %s (%s) - Lý do: %s", _
-                        $oPartition.DiskIndex, $oPartition.Index, $oPartition.Type, $sSizeStr, $sReason) & @CRLF
+                    $aToDelete[$iIdx][4] = $sReason ;
                 EndIf
             Next
         EndIf
@@ -621,11 +744,44 @@ Func _AutoCleanPartitions()
         Return
     EndIf
 
-    $sConfirmMsg &= @CRLF & "BẠN CÓ CHẮC CHẮN MUỐN XÓA CÁC PHÂN VÙNG TRÊN?"
-    $iConfirm = MsgBox(52, "XÁC NHẬN LẦN CUỐI", $sConfirmMsg)
-    If $iConfirm <> 6 Then Return
+    ; Tạo GUI
+    Local $iTotalItems = UBound($aToDelete)
+    Local $iNewHeight = 150 + ($iTotalItems * 20)  ;
+    If $iNewHeight < 200 Then $iNewHeight = 200  ;
+    If $iNewHeight > 400 Then $iNewHeight = 400  ;
+    Local $hGUI = GUICreate("Xác Nhận Xóa Phân Vùng", 600, $iNewHeight, -1, -1, BitOR($WS_SIZEBOX, $WS_SYSMENU))
+    Local $hList = GUICtrlCreateListView("Disk|Partition|Type|Size|Reason", 10, 10, 580, $iNewHeight - 60)
+    _GUICtrlListView_SetExtendedListViewStyle($hList, $LVS_EX_FULLROWSELECT)
+    Local $hYes = GUICtrlCreateButton("Xóa", 195, $iNewHeight - 40, 100, 30)
+    Local $hNo = GUICtrlCreateButton("Hủy", 305, $iNewHeight - 40, 100, 30)
+    Local $aButtons[2] = [$hYes, $hNo]
+    GUISetState(@SW_SHOW, $hGUI)
 
-    ; Tạo và thực thi script DiskPart để xóa
+    For $i = 0 To $iTotalItems - 1
+        GUICtrlCreateListViewItem($aToDelete[$i][0] & "|" & $aToDelete[$i][1] & "|" & $aToDelete[$i][2] & "|" & $aToDelete[$i][3] & "|" & $aToDelete[$i][4], $hList) ;
+    Next
+
+    For $i = 0 To 4  ;
+        _GUICtrlListView_SetColumnWidth($hList, $i, $LVSCW_AUTOSIZE)
+    Next
+
+    _AdjustPopupLayout($hGUI, $hList, $aButtons)
+
+    While 1
+        Local $iMsg = GUIGetMsg()
+        Switch $iMsg
+            Case $GUI_EVENT_CLOSE, $hNo
+                GUIDelete($hGUI)
+                Return
+            Case $hYes
+                ExitLoop ;
+            Case $GUI_EVENT_RESIZED
+                _AdjustPopupLayout($hGUI, $hList, $aButtons)
+        EndSwitch
+    WEnd
+    GUIDelete($hGUI)
+
+    ; Tạo và thực thi script DiskPart
     Local $sCleanScriptFile = @TempDir & "\cleanpart.txt"
     Local $hFile = FileOpen($sCleanScriptFile, 2)
     For $i = 0 To UBound($aToDelete) - 1
@@ -636,11 +792,10 @@ Func _AutoCleanPartitions()
     FileClose($hFile)
     RunWait('diskpart /s "' & $sCleanScriptFile & '"', "", @SW_HIDE)
     FileDelete($sCleanScriptFile)
-	If WinExists("Setup","") = 1 Then
-		ControlClick("Setup","","[CLASS:Button; INSTANCE:1]")
-		ControlSend("Setup","","[CLASS:Button; INSTANCE:1]","!r")
-		;Send('!r')
-	EndIf
+    If WinExists("Setup","") = 1 Then ;
+        ControlClick("Setup","","[CLASS:Button; INSTANCE:1]")
+        ControlSend("Setup","","[CLASS:Button; INSTANCE:1]","!r")
+    EndIf
     MsgBox(64, "Hoàn Tất", "Đã xoá " & UBound($aToDelete) & " phân vùng.")
 EndFunc
 
@@ -916,17 +1071,17 @@ EndFunc
 
 Func _UpdateVisibleButtons($bHideAll = False)
     Local $iTotalButtons = UBound($g_aButtons_All) ; Use UBound directly
-    RecordLogforDebug("Total buttons: " & $iTotalButtons & ", ScrollOffset: " & $g_iScrollOffset)
+    ;RecordLogforDebug("Total buttons: " & $iTotalButtons & ", ScrollOffset: " & $g_iScrollOffset)
 
     For $i = 0 To $iTotalButtons - 1
         If $bHideAll Or $i < $g_iScrollOffset Or $i >= ($g_iScrollOffset + $g_iMaxButtonsVisible) Then
             GUICtrlSetState($g_aButtons_All[$i][0], $GUI_HIDE)
-            RecordLogforDebug("Button " & $i & " (" & $g_aButtons_All[$i][1] & ") set to HIDE")
+            ;RecordLogforDebug("Button " & $i & " (" & $g_aButtons_All[$i][1] & ") set to HIDE")
         Else
             Local $yPos = $g_iTitleHeight + (($i - $g_iScrollOffset) * $g_iButtonHeight)
             GUICtrlSetPos($g_aButtons_All[$i][0], -1, $yPos)
             GUICtrlSetState($g_aButtons_All[$i][0], $GUI_SHOW)
-            RecordLogforDebug("Button " & $i & " (" & $g_aButtons_All[$i][1] & ") set to SHOW at yPos: " & $yPos)
+           ;RecordLogforDebug("Button " & $i & " (" & $g_aButtons_All[$i][1] & ") set to SHOW at yPos: " & $yPos)
         EndIf
     Next
 
@@ -935,35 +1090,35 @@ Func _UpdateVisibleButtons($bHideAll = False)
         If $iTotalButtons > $g_iMaxButtonsVisible Then
             If $g_iScrollOffset > 0 Then
                 GUICtrlSetState($g_hScrollUp, $GUI_SHOW)
-                RecordLogforDebug("ScrollUp button set to SHOW")
+                ;RecordLogforDebug("ScrollUp button set to SHOW")
             Else
                 GUICtrlSetState($g_hScrollUp, $GUI_HIDE)
-                RecordLogforDebug("ScrollUp button set to HIDE")
+                ;RecordLogforDebug("ScrollUp button set to HIDE")
             EndIf
 
             If $g_iScrollOffset + $g_iMaxButtonsVisible < $iTotalButtons Then
                 GUICtrlSetState($g_hScrollDown, $GUI_SHOW)
-                RecordLogforDebug("ScrollDown button set to SHOW")
+                ;RecordLogforDebug("ScrollDown button set to SHOW")
             Else
                 GUICtrlSetState($g_hScrollDown, $GUI_HIDE)
-                RecordLogforDebug("ScrollDown button set to HIDE")
+                ;RecordLogforDebug("ScrollDown button set to HIDE")
             EndIf
         Else
             GUICtrlSetState($g_hScrollUp, $GUI_HIDE)
             GUICtrlSetState($g_hScrollDown, $GUI_HIDE)
-            RecordLogforDebug("Scroll buttons hidden (not enough buttons)")
+            ;RecordLogforDebug("Scroll buttons hidden (not enough buttons)")
         EndIf
     Else
-        RecordLogforDebug("Scroll buttons not created or hidden due to bHideAll")
+        ;RecordLogforDebug("Scroll buttons not created or hidden due to bHideAll")
     EndIf
 
     If IsHWnd($g_hFooterLabel) And Not $bHideAll Then
         If $iTotalButtons > $g_iMaxButtonsVisible Then
             GUICtrlSetState($g_hFooterLabel, $GUI_SHOW)
-            RecordLogforDebug("Footer label set to SHOW")
+            ;RecordLogforDebug("Footer label set to SHOW")
         Else
             GUICtrlSetState($g_hFooterLabel, $GUI_HIDE)
-            RecordLogforDebug("Footer label set to HIDE")
+            ;RecordLogforDebug("Footer label set to HIDE")
         EndIf
     EndIf
 EndFunc
@@ -975,6 +1130,7 @@ EndFunc
 ; Trả về: True nếu hợp lệ, False nếu không.
 ; ;===============================================================================
 Func _VerifyUSBSignature()
+	; Return True
     RecordLogforDebug("--- Bắt đầu kiểm tra chữ ký (phương pháp WMI) ---")
     Local $aDisks = _GetAllPhysicalDiskNumbers()
     If @error Then
@@ -985,7 +1141,7 @@ Func _VerifyUSBSignature()
     For $iPhysicalDriveNum In $aDisks
         RecordLogforDebug("--- Đang kiểm tra trên PhysicalDrive" & $iPhysicalDriveNum & " ---")
 
-        ; BƯỚC 1 & 2: Lấy Disk ID và Tổng kích thước đĩa (giữ nguyên)
+        ; BƯỚC 1 & 2: Lấy Disk ID và Tổng kích thước đĩa
         Local $aDiskInfo = _GetDiskInfo_WinPE($iPhysicalDriveNum)
         If @error Then
             RecordLogforDebug("Lỗi: Không thể lấy dữ liệu cho PhysicalDrive" & $iPhysicalDriveNum & ". Đã bỏ qua.")
@@ -1020,24 +1176,24 @@ Func _VerifyUSBSignature()
             ContinueLoop
         EndIf
 
-        ; BƯỚC 4: Tạo hash mong đợi (giữ nguyên)
+        ; BƯỚC 4: Tạo hash mong đợi
         Local $sStringToHash = $sDiskIdentifier & $g_sSecretKey
         Local $sExpectedHash = StringLower(_Crypt_HashData($sStringToHash, $CALG_SHA_256))
         RecordLogforDebug("Hash mong đợi: " & $sExpectedHash)
 
-        ; BƯỚC 5: Đọc dữ liệu từ sector tại offset đã tính (giữ nguyên)
+        ; BƯỚC 5: Đọc dữ liệu từ sector tại offset đã tính
         Local $sStoredData = _ReadSectorData("\\.\PhysicalDrive" & $iPhysicalDriveNum, $iTargetOffset, 512)
         If $sStoredData = "" Then
             RecordLogforDebug("Lỗi: Không thể đọc dữ liệu tại offset.")
             ContinueLoop
         EndIf
 
-        ; BƯỚC 6: Trích xuất hash từ dữ liệu đọc được (giữ nguyên)
+        ; BƯỚC 6: Trích xuất hash từ dữ liệu đọc được
         Local $sStoredHash = StringLeft($sStoredData, 64)
         $sStoredHash = "0x" & StringLower(StringRegExpReplace($sStoredHash, "[^a-f0-9]", ""))
         RecordLogforDebug("Hash lưu trữ:   " & $sStoredHash)
 
-        ; BƯỚC 7: So sánh (giữ nguyên)
+        ; BƯỚC 7: So sánh
         If $sExpectedHash = $sStoredHash And StringLen($sStoredHash) = 66 Then
             RecordLogforDebug(">>> KIỂM TRA THÀNH CÔNG trên PhysicalDrive" & $iPhysicalDriveNum & " <<<")
             Return True
@@ -1347,99 +1503,175 @@ Func _ForceReboot()
 	Shutdown(2) ; 2 = Reboot
 EndFunc
 
-Func _AutoExtractDrivers()
-    Local Const $sRelativeArchivePath = "\ventoy\Drivers.7z"
-    Local Const $sDestDir = "X:\Drivers"
-    Local Const $sTempDir = "X:\TempExtract"
-    Local $s7zPath = @ScriptDir & "\Tools\7z" & (@OSArch = "X64" ? "64" : "32") & "\7za.exe"
-    Local $sCpuFolder = "", $sOsFolder = "", $sIsoPath = ""
+#include <Array.au3>
 
-    Local $sArchivePath = _FindFileOnDrives($sRelativeArchivePath)
-    If $sArchivePath = "" Or Not FileExists($s7zPath) Then
-        RecordLogforDebug("! Cảnh báo: Không tìm thấy Drivers.7z hoặc 7za.exe. Bỏ qua.")
+; --- HÀM CHÍNH ---
+Func _AutoExtractDrivers()
+    ; --- Bước 1: Khai báo và xác định vị trí file (Sửa lại .7z) ---
+    Local Const $sRelativeArchivePath = "\ventoy\Drivers.7z" ; SỬA LẠI
+    Local Const $sDestDir = "X:\Drivers"
+    Local $s7zPath = StringReplace(@ScriptDir & "\Tools\7z" & (@OSArch = "X64" ? "64" : "32") & "\7za.exe",'\\','\')
+    Local $sArchivePath, $sDbPath
+
+    ; 1a. Tìm file Archive
+    $sArchivePath = _FindFileOnDrives($sRelativeArchivePath)
+    If $sArchivePath = "" Then
+        RecordLogforDebug("! Lỗi: Không tìm thấy " & $sRelativeArchivePath & ". Bỏ qua.")
         Return False
     EndIf
-    If FileExists($sDestDir & "\Intel") Or FileExists($sDestDir & "\AMD") Then
-        RecordLogforDebug("* Thông tin: Thư mục Drivers đã tồn tại. Bỏ qua.")
+    If Not FileExists($s7zPath) Then
+        RecordLogforDebug("! Lỗi: Không tìm thấy " & $s7zPath & ". Bỏ qua.")
+        Return False
+    EndIf
+
+    ; 1b. Tìm file SQLite DB (nằm cùng thư mục với archive)
+    $sDbPath = StringRegExpReplace($sArchivePath, "\\[^\\]+$", "") & "\db.sqlite"
+    If Not FileExists($sDbPath) Then
+        RecordLogforDebug("! Lỗi: Không tìm thấy db.sqlite tại: " & $sDbPath)
+        Return False
+    EndIf
+
+    DirCreate($sDestDir)
+    RecordLogforDebug("* Thông tin: Bắt đầu trích xuất driver theo yêu cầu vào " & $sDestDir)
+
+    ; --- Bước 2: Truy vấn WMI ---
+    Local $aMissingHWIDs[0]
+    RecordLogforDebug("* Thông tin: Đang truy vấn WMI để tìm các thiết bị thiếu driver (ErrorCode 28)...")
+    Local $oWMI = ObjGet("winmgmts:\\.\root\cimv2")
+    If Not IsObj($oWMI) Then
+        RecordLogforDebug("! Lỗi: Không thể kết nối WMI.")
+        Return False
+    EndIf
+
+    Local $colDevices = $oWMI.ExecQuery("SELECT HardwareID FROM Win32_PnPEntity WHERE ConfigManagerErrorCode = 28")
+    If IsObj($colDevices) And $colDevices.Count > 0 Then
+        For $oDevice In $colDevices
+            If IsArray($oDevice.HardwareID) Then
+                For $sHWID In $oDevice.HardwareID
+                    $sHWID = StringUpper(StringStripWS($sHWID, 3))
+                    If StringLen($sHWID) > 5 And Not StringIsDigit($sHWID) Then
+                        _ArrayAdd($aMissingHWIDs, $sHWID)
+                    EndIf
+                Next
+            ElseIf $oDevice.HardwareID <> "" Then
+                Local $sHWID = StringUpper(StringStripWS($oDevice.HardwareID, 3))
+                If StringLen($sHWID) > 5 And Not StringIsDigit($sHWID) Then
+                    _ArrayAdd($aMissingHWIDs, $sHWID)
+                EndIf
+            EndIf
+        Next
+        $aMissingHWIDs = _ArrayUnique($aMissingHWIDs)
+        RecordLogforDebug("* Thông tin: Tìm thấy " & UBound($aMissingHWIDs) & " ID phần cứng thiếu driver.")
+    Else
+        RecordLogforDebug("* Thông tin: Không tìm thấy thiết bị nào thiếu driver. Hoàn tất.")
         Return True
     EndIf
 
-    If StringInStr($CPU, "Intel") Then
-        $sCpuFolder = "Intel"
-    ElseIf StringInStr($CPU, "AMD") Then
-        $sCpuFolder = "AMD"
-    Else
-        $sCpuFolder = "*"
-    EndIf
-    RecordLogforDebug("* Thông tin: Đã xác định CPU là " & $sCpuFolder)
+    ; --- Bước 3: Khởi tạo SQLite và chuẩn bị truy vấn (CẬP NHẬT) ---
+    RecordLogforDebug("* Thông tin: Đang mở " & $sDbPath)
 
-    ; --- Bước 3: Xác định phiên bản Windows từ Ventoy ISO ---
-    $sIsoPath = EnvGet("VTOY_ISO_PATH")
-    If $sIsoPath = "" Then
-        RecordLogforDebug("! Cảnh báo: Không tìm thấy biến VTOY_ISO_PATH. Default OS folder là WIN_10_11.")
-        $sOsFolder = "WIN_10_11"  ; Default phổ biến cho WinPE/Win10/11
-    Else
-        RecordLogforDebug("* Thông tin: Tìm thấy Ventoy ISO tại: " & $sIsoPath)
-        DirCreate($sTempDir)
-        Local $sWimInfoFile = $sTempDir & "\wiminfo.txt"
-        Local $sImagePath = ""
+	If @AutoItX64 = 1 Then
+		_SQLite_Startup('sqlite3_x64.dll', False, 1)
+	Else
+		_SQLite_Startup('sqlite3.dll', False, 1)
+	EndIf
 
-        ; Ưu tiên tìm install.wim, sau đó mới đến install.esd
-        Local $sCheckWim = 'sources\install.wim'
-        RunWait('"' & $s7zPath & '" t "' & $sIsoPath & '" "' & $sCheckWim & '"', "", @SW_HIDE)
-        If @error = 0 Then
-             $sImagePath = $sCheckWim
-        Else
-             $sImagePath = 'sources\install.esd'
-        EndIf
+	If @error Then
+		RecordLogforDebug("SQLite3.dll Can't be Loaded!")
+		Exit -1
+	EndIf
 
-        ; Trích xuất và đọc thông tin
-        RunWait('"' & $s7zPath & '" e "' & $sIsoPath & '" -o"' & $sTempDir & '" "' & $sImagePath & '" -y', "", @SW_HIDE)
-        Local $sExtractedFile = $sTempDir & "\" & StringRegExpReplace($sImagePath, ".+\\", "")
-        If FileExists($sExtractedFile) Then
-            RunWait(@ComSpec & ' /c Dism /Get-WimInfo /WimFile:"' & $sExtractedFile & '" > "' & $sWimInfoFile & '"', "", @SW_HIDE)
-            Local $sWimInfo = FileRead($sWimInfoFile)
-
-            If StringInStr($sWimInfo, "Windows 7") Then
-                $sOsFolder = "WIN_7"
-            ElseIf StringInStr($sWimInfo, "Windows 11") Or StringInStr($sWimInfo, "Windows 10") Then
-                $sOsFolder = "WIN_10_11"
-            ElseIf StringInStr($sWimInfo, "Server") Then
-                $sOsFolder = "WIN_SERVER"
-            Else
-                $sOsFolder = "WIN_10_11"  ; Default nếu parse fail
-            EndIf
-            RecordLogforDebug("* Thông tin: Đã xác định HĐH là " & $sOsFolder)
-        Else
-            $sOsFolder = "WIN_10_11"  ; Default nếu extract fail
-        EndIf
-        DirRemove($sTempDir, 1) ; Dọn dẹp thư mục tạm
-    EndIf
-
-    ; --- Bước 4: Thực thi giải nén ---
-    Local $sExtractPath = $sCpuFolder & "/" & $sOsFolder & "/*"  ; Sửa dùng "/" cho 7z path
-    RecordLogforDebug("* Thông tin: Chuẩn bị giải nén '" & $sExtractPath & "' từ " & $sArchivePath & " vào " & $sDestDir)
-    DirCreate($sDestDir)
-    Local $sCommand = '"' & $s7zPath & '" x "' & $sArchivePath & '" -o"' & $sDestDir & '" "' & $sExtractPath & '" -y -r'  ; Thêm -r recursive
-    Local $iPID = RunWait($sCommand, "", @SW_HIDE, $STDERR_CHILD + $STDOUT_CHILD)  ; Capture output
-    Local $sOutput = "", $sError = ""
-    While 1
-        $sOutput &= StdoutRead($iPID)
-        $sError &= StderrRead($iPID)
-        If @error Then ExitLoop
-        Sleep(10)
-    WEnd
-    ProcessWaitClose($iPID)
-    Local $iRet = @extended  ; Return code
-
-    If $iRet <> 0 Or Not DirGetSize($sDestDir) > 0 Then  ; Check return và folder tồn tại
-        RecordLogforDebug("! Lỗi: 7z fail với code " & $iRet & ". Output: " & $sOutput & " Error: " & $sError & ". Command: " & $sCommand)
+    Local $hDb = _SQLite_Open($sDbPath)
+    If @error Then
+        RecordLogforDebug("! Lỗi: Không thể mở file db.sqlite. Mã lỗi: " & @error)
+        _SQLite_Shutdown()
         Return False
     EndIf
 
-    RecordLogforDebug("* Thành công: Quá trình giải nén driver đã hoàn tất. Output: " & $sOutput)
+    ; Lấy cả T_Driver.pack VÀ T_Driver.directory
+    Local $sQuery = "SELECT T_Driver.pack, T_Driver.directory " & _
+        "FROM Devices AS T_Device " & _
+        "INNER JOIN Usable AS T_Usable ON T_Device.id = T_Usable.deviceId " & _
+        "INNER JOIN Sections AS T_Section ON T_Usable.sectionId = T_Section.id " & _
+        "INNER JOIN Drivers AS T_Driver ON T_Section.driverId = T_Driver.id " & _
+        "ORDER BY T_Usable.rank DESC " & _
+        "LIMIT 1"
+
+
+    Local $hStmt
+    If _SQLite_Query($hDb, $sQuery, $hStmt) <> $SQLITE_OK Then
+        RecordLogforDebug("! Lỗi: Chuẩn bị câu lệnh SQL thất bại. Lỗi: " & _SQLite_ErrMsg($hDb))
+        _SQLite_Close($hDb)
+        _SQLite_Shutdown()
+        Return False
+    EndIf
+
+    ; --- Bước 4: Lặp qua HWIDs và truy vấn CSDL ---
+    Local $aPathsToExtract[0]
+	RecordLogforDebug("* Thông tin: Đang so khớp " & UBound($aMissingHWIDs) & " thiết bị thiếu với CSDL...")
+
+	For $sMissingHWID In $aMissingHWIDs
+		If $sMissingHWID = "" Or StringIsDigit($sMissingHWID) Or StringLen($sMissingHWID) < 5 Then ContinueLoop
+
+		; escape giá trị HWID an toàn (FastEscape bao gồm cả dấu nháy đơn)
+		Local $sEscHWID = _SQLite_FastEscape($sMissingHWID)
+
+		; Tạo câu truy vấn với HWID đã escape
+		Local $sQueryHWID = "SELECT T_Driver.pack, T_Driver.directory " & _
+			"FROM Devices AS T_Device " & _
+			"INNER JOIN Usable AS T_Usable ON T_Device.id = T_Usable.deviceId " & _
+			"INNER JOIN Sections AS T_Section ON T_Usable.sectionId = T_Section.id " & _
+			"INNER JOIN Drivers AS T_Driver ON T_Section.driverId = T_Driver.id " & _
+			"WHERE T_Device.deviceId = " & $sEscHWID & " " & _
+			"ORDER BY T_Usable.rank DESC, T_Driver.date DESC " & _
+			"LIMIT 1"
+
+		Local $hQuery, $aRow[0]
+
+		; Chuẩn bị và thực thi câu truy vấn
+		If _SQLite_Query($hDb, $sQueryHWID, $hQuery) = $SQLITE_OK Then
+			; Lấy 1 hàng (nếu có)
+			If _SQLite_FetchData($hQuery, $aRow) = $SQLITE_OK Then
+				Local $sPack = $aRow[0]
+				Local $sDirectory = $aRow[1]
+				Local $sExtractPath = $sPack & "\" & StringReplace($sDirectory,'/','\')
+				RecordLogforDebug("==> TRÙNG KHỚP! Thiết bị: " & $sMissingHWID & " | Driver: " & $sExtractPath)
+				_ArrayAdd($aPathsToExtract, $sExtractPath)
+			EndIf
+
+			; Giải phóng query handle
+			_SQLite_QueryFinalize($hQuery)
+		Else
+			RecordLogforDebug("! Lỗi: chuẩn bị/thi hành query thất bại cho HWID " & $sMissingHWID & ". Lỗi: " & _SQLite_ErrMsg($hDb))
+		EndIf
+	Next
+
+    ; --- Bước 5: Dọn dẹp SQLite ---
+    _SQLite_Close($hDb)
+    _SQLite_Shutdown()
+    RecordLogforDebug("* Thông tin: Đã đóng CSDL.")
+
+    ; --- Bước 6: Thực hiện trích xuất ---
+    If UBound($aPathsToExtract) = 0 Then
+        RecordLogforDebug("* Thông tin: Đã tìm kiếm xong nhưng không tìm thấy driver nào phù hợp trong " & $sRelativeArchivePath)
+        Return True
+    EndIf
+
+    Local $aUniquePaths = _ArrayUnique($aPathsToExtract)
+    RecordLogforDebug("* Thông tin: Chuẩn bị trích xuất " & UBound($aUniquePaths)-1 & " thư mục driver duy nhất...")
+
+    For $sPathToExtract In $aUniquePaths
+        If $sPathToExtract = "" OR StringInStr($sPathToExtract,'\') = 0 Then ContinueLoop
+
+        ; Lệnh 7z này giờ sẽ hoạt động chính xác với đường dẫn (ví dụ: "Chipset\Intel\FORCED...")
+        Local $sCommand = '"' & $s7zPath & '" x "' & $sArchivePath & '" -o"' & $sDestDir & '" "' & $sPathToExtract & '*" -y -r'
+        RecordLogforDebug("* Thông tin: Đang chạy: " & StringLeft($sCommand, 200) & "...")
+        RunWait($sCommand, "", @SW_HIDE)
+    Next
+
+    RecordLogforDebug("* Thành công: Quá trình giải nén driver đã hoàn tất.")
     Return True
-EndFunc
+EndFunc   ;==>_AutoExtractDrivers
 
 ;===============================================================================
 ; Hàm: _FindFileOnDrives
@@ -1482,7 +1714,7 @@ EndFunc
 
 Func _GetReservedPartitionOffset($iDiskNum)
     RecordLogforDebug("Bắt đầu tìm offset partition reserved cho Disk " & $iDiskNum)
-    
+
     ; Khởi động WMI dependencies (cần cho WinPE)
     RunWait(@ComSpec & " /c net start rpcss & net start winmgmt", "", @SW_HIDE)
     Sleep(500)  ; Đợi khởi động
@@ -1500,7 +1732,7 @@ Func _GetReservedPartitionOffset($iDiskNum)
     EndIf
 
     RecordLogforDebug("Partitions found: " & $colPartitions.Count)
-    
+
     ; Thu thập tất cả partitions vào array để sort bằng offset descending (tìm cuối cùng)
     Local $aPartitions[0][5]  ; [0]: Offset, [1]: Size, [2]: Type, [3]: DeviceID, [4]: HasDriveLetter (log only)
     For $oPartition In $colPartitions
@@ -1508,17 +1740,17 @@ Func _GetReservedPartitionOffset($iDiskNum)
         Local $iSize = Number($oPartition.Size)
         Local $sType = $oPartition.Type
         Local $sDeviceID = $oPartition.DeviceID
-        
+
         ; Kiểm tra drive letter (chỉ để log, không dùng để filter nữa)
         Local $colLogical = $oWMIService.ExecQuery("ASSOCIATORS OF {Win32_DiskPartition.DeviceID='" & $sDeviceID & "'} WHERE AssocClass=Win32_LogicalDiskToPartition")
         Local $bHasDriveLetter = False
         For $oLogical In $colLogical
             If StringLen($oLogical.DeviceID) > 0 Then $bHasDriveLetter = True
         Next
-        
+
         ; Log chi tiết partition
         RecordLogforDebug("Partition: Offset=" & $iOffset & ", Size=" & $iSize & " (" & Round($iSize / 1048576, 2) & " MB), Type=" & $sType & ", DeviceID=" & $sDeviceID & ", HasDriveLetter=" & $bHasDriveLetter)
-        
+
         ; Thêm vào array nếu size hợp lệ (15-17MB) – bỏ check drive letter và type
         If $iSize >= 15*1048576 And $iSize <= 17*1048576 Then
             Local $iIndex = UBound($aPartitions)
@@ -1548,21 +1780,21 @@ EndFunc
 Func _GetReservedPartitionOffset_DiskPart($iDiskNum)
     Local $sScriptFile = @TempDir & "\diskpart_list.txt"
     Local $sOutputFile = @TempDir & "\partition_out.txt"
-    
+
     FileWrite($sScriptFile, "select disk " & $iDiskNum & @CRLF & "list partition" & @CRLF & "exit")
     RunWait(@ComSpec & ' /c diskpart /s "' & $sScriptFile & '" > "' & $sOutputFile & '"', "", @SW_HIDE)
-    
+
     Local $sOutput = FileRead($sOutputFile)
     FileDelete($sScriptFile)
     FileDelete($sOutputFile)
-    
-    If $sOutput = "" Then 
+
+    If $sOutput = "" Then
         RecordLogforDebug("! Lỗi: Diskpart output rỗng.")
         Return SetError(1, 0, 0)
     EndIf
-    
+
     RecordLogforDebug("Diskpart output: " & @CRLF & $sOutput)
-    
+
     Local $aLines = StringSplit($sOutput, @CRLF, 1)
     Local $aCandidates[0][2]  ; [0]: Offset bytes, [1]: Size bytes
     For $i = 1 To $aLines[0]
@@ -1579,7 +1811,7 @@ Func _GetReservedPartitionOffset_DiskPart($iDiskNum)
                     $sUnit = "MB" ? 1048576 : _
                     $sUnit = "KB" ? 1024 : 1 _
                 )
-                
+
                 ; Kiểm tra size ~15-17MB (bỏ check drive letter)
                 If $iSizeBytes >= 15*1048576 And $iSizeBytes <= 17*1048576 Then
                     ; Extract offset: Thường ở cuối line
@@ -1603,7 +1835,7 @@ Func _GetReservedPartitionOffset_DiskPart($iDiskNum)
             EndIf
         EndIf
     Next
-    
+
     If UBound($aCandidates) > 0 Then
         ; Sort candidates descending offset, lấy cái cuối
         _ArraySort($aCandidates, 1, 0, 0, 0)
@@ -1615,144 +1847,4 @@ Func _GetReservedPartitionOffset_DiskPart($iDiskNum)
         RecordLogforDebug("! Lỗi: Không tìm thấy partition size hợp lệ qua diskpart.")
         Return SetError(2, 0, 0)
     EndIf
-EndFunc
-
-; SDIO_FilterDriversByLog
-; $sDriversRoot  - ví dụ "X:\Drivers"
-; $sLogDir       - ví dụ "X:\Driver_Installed_Logs"
-; $bDryRun       - True = chỉ liệt kê (mặc định), False = xóa thật
-; Trả về mảng: [ keptArray, deletedArray, errorsArray ]
-Func SDIO_FilterDriversByLog($sDriversRoot, $sLogDir, $bDryRun = False)
-    ; Normalize paths
-    If StringRight($sDriversRoot, 1) <> "\" Then $sDriversRoot &= "\"
-    If StringRight($sLogDir, 1) <> "\" Then $sLogDir &= "\"
-    If Not FileExists($sDriversRoot) Then Return SetError(1, 0, "Drivers root not found")
-    If Not FileExists($sLogDir) Then Return SetError(2, 0, "Log dir not found")
-
-    ; Read all .log files into one string using _FileListToArrayRec (non-recursive)
-    Local $aLogFiles = _FileListToArrayRec($sLogDir, "*.log", 1, 0, 0, 2) ; 1=files, 0=non-recursive, 0=no sort, 2=full path
-    If @error Then Return SetError(3, 0, "No .log files found")
-    Local $sAll = ""
-    For $i = 1 To $aLogFiles[0]
-        Local $sContent = FileRead($aLogFiles[$i])
-        $sAll &= $sContent & @CRLF & "----LOGSEP----" & @CRLF
-    Next
-
-    ; Extract "drivers\..." occurrences ending with .inf (case-insensitive, allow spaces, dots, etc. in path)
-    Local $aMatches = StringRegExp($sAll, '(?i)drivers[\\ /][^\r\n"]+\.inf', 3)
-    If Not IsArray($aMatches) Then $aMatches = []
-    RecordLogforDebug("Matches: " & _ArrayToString($aMatches, "|"))
-
-    ; Collect leaf directories (parents of .inf files) to keep all files in them, and ancestors for directories
-    Local $aKeepLeafDirs[0], $aAllAncestors[0]
-    For $i = 0 To UBound($aMatches) - 1
-        Local $m = $aMatches[$i]
-        Local $rel = StringRegExpReplace($m, '(?i)^drivers[\\ /]', '')
-        $rel = StringReplace($rel, "/", "\")
-        Local $fullInf = $sDriversRoot & $rel
-        If FileExists($fullInf) Then
-            ; Get parent dir of .inf
-            Local $sParent = StringRegExpReplace($fullInf, '[^\\]+$', '')
-            If StringRight($sParent, 1) = "\" Then $sParent = StringTrimRight($sParent, 1) ; Trim trailing \
-            If _InArray($aKeepLeafDirs, $sParent) = -1 Then
-                _ArrayAdd($aKeepLeafDirs, $sParent)
-            EndIf
-            ; Get all ancestors
-            Local $sDir = $sParent
-            While StringLen($sDir) > StringLen($sDriversRoot) And $sDir <> ""
-                If _InArray($aAllAncestors, $sDir) = -1 Then
-                    _ArrayAdd($aAllAncestors, $sDir)
-                EndIf
-                $sDir = StringRegExpReplace($sDir, '[^\\]+$', '')
-                If StringRight($sDir, 1) = "\" Then $sDir = StringTrimRight($sDir, 1)
-            WEnd
-        EndIf
-    Next
-    ; Add root if needed
-    If UBound($aKeepLeafDirs) > 0 And _InArray($aAllAncestors, $sDriversRoot) = -1 Then
-        _ArrayAdd($aAllAncestors, $sDriversRoot)
-    EndIf
-    Local $aKeepDirs = _ArrayUnique($aAllAncestors) ; Remove duplicates
-    RecordLogforDebug("Keep Leaf Dirs (keep all files in these): " & _ArrayToString($aKeepLeafDirs, "|"))
-    RecordLogforDebug("Keep Ancestor Dirs: " & _ArrayToString($aKeepDirs, "|"))
-
-    ; Get all files and folders recursively under $sDriversRoot
-    Local $aAllFiles = _FileListToArrayRec($sDriversRoot, "*.*", 1, 1, 0, 2) ; 1=files, 1=recursive, 0=no sort, 2=full path
-    Local $aAllDirs = _FileListToArrayRec($sDriversRoot, "*", 2, 1, 0, 2) ; 2=folders, 1=recursive, 2=full path
-
-    ; Prepare results
-    Local $aKept[0], $aDeleted[0], $aErrors[0]
-
-    ; Delete unnecessary files (only if not in a keep leaf dir)
-    If IsArray($aAllFiles) Then
-        For $i = 1 To $aAllFiles[0]
-            Local $sFile = $aAllFiles[$i]
-            ; Get parent dir of file
-            Local $sFileParent = StringRegExpReplace($sFile, '[^\\]+$', '')
-            If StringRight($sFileParent, 1) = "\" Then $sFileParent = StringTrimRight($sFileParent, 1)
-            If _InArray($aKeepLeafDirs, $sFileParent) <> -1 Then
-                _ArrayAdd($aKept, $sFile)
-            Else
-                RecordLogforDebug("Attempting to delete file: " & $sFile)
-                If $bDryRun Then
-                    _ArrayAdd($aDeleted, $sFile & " (DRYRUN)")
-                Else
-                    If FileDelete($sFile) Then
-                        _ArrayAdd($aDeleted, $sFile)
-                    Else
-                        _ArrayAdd($aErrors, $sFile & " (failed)")
-                    EndIf
-                EndIf
-            EndIf
-        Next
-    EndIf
-
-    ; Delete empty directories from bottom-up (reverse order to handle nested)
-    If IsArray($aAllDirs) Then
-        _ArrayReverse($aAllDirs, 1, $aAllDirs[0]) ; Reverse to start from deepest
-        For $i = 1 To $aAllDirs[0]
-            Local $sDir = $aAllDirs[$i]
-            If _InArray($aKeepDirs, $sDir) = -1 And _InArray($aKeepLeafDirs, $sDir) = -1 Then ; Not a keep dir or leaf dir
-                ; Check if empty
-                Local $aContents = _FileListToArrayRec($sDir, "*", 0, 0, 0, 0) ; 0=files+folders, 0=non-recursive
-                If @error Or $aContents[0] = 0 Then ; Empty or error (assume empty if not accessible)
-                    RecordLogforDebug("Attempting to delete dir: " & $sDir)
-                    If $bDryRun Then
-                        _ArrayAdd($aDeleted, $sDir & " (DRYRUN)")
-                    Else
-                        If DirRemove($sDir, 0) Then ; 0 = remove only if empty
-                            _ArrayAdd($aDeleted, $sDir)
-                        Else
-                            _ArrayAdd($aErrors, $sDir & " (failed)")
-                        EndIf
-                    EndIf
-                Else
-                    _ArrayAdd($aKept, $sDir) ; Has contents, keep for now
-                EndIf
-            Else
-                _ArrayAdd($aKept, $sDir)
-            EndIf
-        Next
-    EndIf
-
-    ; Sort results for readability
-    _ArraySort($aKept)
-    _ArraySort($aDeleted)
-    _ArraySort($aErrors)
-
-    ; Return [kept, deleted, errors]
-    Local $aResult[3]
-    $aResult[0] = $aKept
-    $aResult[1] = $aDeleted
-    $aResult[2] = $aErrors
-    Return $aResult
-EndFunc
-
-; Helper: return index or -1 (case-insensitive)
-Func _InArray(ByRef $aArray, $sVal)
-    If Not IsArray($aArray) Then Return -1
-    For $i = 0 To UBound($aArray) - 1
-        If StringLower($aArray[$i]) = StringLower($sVal) Then Return $i
-    Next
-    Return -1
 EndFunc

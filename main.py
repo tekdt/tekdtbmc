@@ -743,12 +743,25 @@ class USBBootCreator(QMainWindow):
                 return
 
         # 2. Dung lượng Drivers
-        drivers_part1 = config.DRIVERS_DIR / "Drivers.7z.001"
-        drivers_part2 = config.DRIVERS_DIR / "Drivers.7z.002"
-        if drivers_part1.exists() and drivers_part2.exists():
-            total_required_size += os.path.getsize(drivers_part1)
-            total_required_size += os.path.getsize(drivers_part2)
-
+        # Quét tất cả các file split .001, .002, ... .101, etc.
+        drivers_dir = config.DRIVERS_DIR
+        if drivers_dir.exists():
+            # Sử dụng glob để tìm tất cả các file bắt đầu bằng "Drivers.7z."
+            # Sau đó lọc lại để đảm bảo phần mở rộng là số (ví dụ: .001, .102)
+            driver_files = [
+                f for f in drivers_dir.glob("Drivers.7z.*") 
+                if f.is_file() and f.suffix[1:].isdigit() # f.suffix[1:] để bỏ dấu '.'
+            ]
+            
+            if driver_files:
+                # print(f"Tìm thấy {len(driver_files)} file Drivers, đang tính dung lượng...")
+                for f in driver_files:
+                    try:
+                        total_required_size += os.path.getsize(f)
+                    except Exception as e:
+                        # Bỏ qua nếu có lỗi đọc file (ví dụ: file bị khóa)
+                        print(f"Lỗi khi lấy kích thước file driver {f}: {e}")
+        
         # 3. Dung lượng Theme
         if self.config.get('theme'):
             theme_path = config.THEMES_DIR / self.config['theme']

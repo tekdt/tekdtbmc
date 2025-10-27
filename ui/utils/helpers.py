@@ -46,67 +46,122 @@ def _copy_with_progress(worker, src, dst, total_copy_size, copied_so_far, base_p
     except Exception as e:
         raise IOError(f"Lỗi khi sao chép file '{src}' tới '{dst}': {e}")
 
-
 def _process_driver_archive(main_app, usb_mount_point):
     """
-    Gộp các file Drivers.7z.001 và .002, sao chép vào thư mục ventoy trên USB.
-    Hàm này được giữ nguyên logic từ file gốc của bạn.
+    Xử lý kho driver và công cụ TekDT_PE:
+    - Nếu có sẵn Drivers.7z -> copy thẳng.
+    - Nếu không -> gộp các file Drivers.7z.001, .002, .003, ... thành Drivers.7z rồi copy.
+    - Cuối cùng sao chép TekDT_PE.7z.
     """
     main_app.creation_worker.status.emit("Đang xử lý kho driver và công cụ TekDT_PE...")
-    
-    tekdt_pe = config.DRIVERS_DIR / "TekDT_PE.7z"
-    drivers_part1 = config.DRIVERS_DIR / "Drivers.7z.001"
-    drivers_part2 = config.DRIVERS_DIR / "Drivers.7z.002"
-    usb_ventoy_dir = os.path.join(usb_mount_point, "ventoy")
-    final_archive_path = os.path.join(usb_ventoy_dir, "Drivers.7z")
-    tekdt_pe_archive_path = os.path.join(usb_ventoy_dir, "TekDT_PE.7z")
-    
-    if not config.DRIVERS_DIR.exists():
-        main_app.creation_worker.status.emit("Thư mục Drivers không tồn tại. Bỏ qua.")
-        print("Thư mục Drivers không tồn tại cạnh ứng dụng.")
+
+    drivers_dir = config.DRIVERS_DIR
+    tekdt_pe = drivers_dir / "TekDT_PE.7z"
+    usb_ventoy_dir = Path(usb_mount_point) / "ventoy"
+    final_archive_path = usb_ventoy_dir / "Drivers.7z"
+    tekdt_pe_archive_path = usb_ventoy_dir / "TekDT_PE.7z"
+
+    if not drivers_dir.exists():
+        msg = "Thư mục Drivers không tồn tại. Bỏ qua."
+        main_app.creation_worker.status.emit(msg)
+        print(msg)
         return
 
-    if not (os.path.exists(drivers_part1) and os.path.exists(drivers_part2)):
-        main_app.creation_worker.status.emit("Không tìm thấy Drivers.7z.001/.002. Bỏ qua.")
-        print("Không tìm thấy file driver phân mảnh, bỏ qua bước này.")
-        return
+    os.makedirs(usb_ventoy_dir, exist_ok=True)
 
-    if not os.path.exists(tekdt_pe):
-        main_app.creation_worker.status.emit("Không tìm thấy TekDT_PE.7z. Bỏ qua.")
-        print("Không tìm thấy file TekDT_PE.7z, bỏ qua bước này.")
-        return
+    # --- Xử lý Drivers.7z ---
+    # try:
+        # direct_drivers = drivers_dir / "Drivers.7z"
+        # if direct_drivers.exists():
+            # main_app.creation_worker.status.emit("Đang sao chép Drivers.7z vào USB...")
+            # shutil.copy(direct_drivers, final_archive_path)
+            # print("Đã sao chép Drivers.7z thành công.")
+        # else:
+            # # Tìm tất cả file dạng Drivers.7z.00*
+            # parts = sorted(drivers_dir.glob("Drivers.7z.00*"))
+            # if not parts:
+                # msg = "Không tìm thấy Drivers.7z hoặc các phần phân mảnh. Bỏ qua."
+                # main_app.creation_worker.status.emit(msg)
+                # print(msg)
+                # return
 
-    try:
-        os.makedirs(usb_ventoy_dir, exist_ok=True)
-        main_app.creation_worker.status.emit("Đang gộp và sao chép Drivers.7z vào USB...")
-        print(f"Bắt đầu gộp file vào: {final_archive_path}")
+            # main_app.creation_worker.status.emit("Đang gộp các phần Drivers.7z.00*...")
+            # print(f"Bắt đầu gộp {len(parts)} phần thành {final_archive_path}")
 
-        with open(final_archive_path, "wb") as outfile:
-            with open(drivers_part1, "rb") as infile:
-                shutil.copyfileobj(infile, outfile)
-            with open(drivers_part2, "rb") as infile:
-                shutil.copyfileobj(infile, outfile)
+            # with open(final_archive_path, "wb") as outfile:
+                # for part in parts:
+                    # with open(part, "rb") as infile:
+                        # shutil.copyfileobj(infile, outfile)
+
+            # main_app.creation_worker.status.emit("Đã gộp và sao chép Drivers.7z vào USB thành công.")
+            # print("Gộp và sao chép Drivers.7z hoàn tất.")
+    # except Exception as e:
+        # msg = f"Lỗi khi xử lý Drivers.7z: {e}"
+        # main_app.creation_worker.status.emit(msg)
+        # print(msg)
+        # raise
         
-        main_app.creation_worker.status.emit("Đã sao chép Drivers.7z vào USB thành công.")
-        print("Gộp và sao chép Drivers.7z hoàn tất.")
-    except Exception as e:
-        error_message = f"Lỗi khi gộp và sao chép Drivers.7z: {e}"
-        main_app.creation_worker.status.emit(error_message)
-        print(error_message)
-        raise Exception(error_message)
-
     try:
-        os.makedirs(usb_ventoy_dir, exist_ok=True)
-        main_app.creation_worker.status.emit("Đang sao chép TekDT_PE.7z vào USB...")
-        print(f"Bắt đầu sao chép file vào: {tekdt_pe_archive_path}")
-        shutil.copy(tekdt_pe, tekdt_pe_archive_path)
-        main_app.creation_worker.status.emit("Đã sao chép TekDT_PE.7z vào USB thành công.")
-        print("Sao chép TekDT_PE.7z hoàn tất.")
+        direct_drivers = drivers_dir / "Drivers.7z"
+        if direct_drivers.exists():
+            main_app.creation_worker.status.emit("Đang sao chép Drivers.7z vào USB...")
+            shutil.copy(direct_drivers, final_archive_path)
+            print("Đã sao chép Drivers.7z thành công.")
+        else:
+            # Tìm mọi file dạng Drivers.7z.*
+            candidates = [p for p in drivers_dir.glob("Drivers.7z.*") if p.is_file()]
+
+            # Lọc chỉ giữ các file có phần đuôi hoàn toàn là chữ số (ví dụ .001, .010, .123)
+            parts_with_index = []
+            pattern = re.compile(r"^Drivers\.7z\.(\d+)$")
+            for p in candidates:
+                m = pattern.match(p.name)
+                if m:
+                    idx = int(m.group(1))
+                    parts_with_index.append((idx, p))
+
+            if not parts_with_index:
+                msg = "Không tìm thấy Drivers.7z hoặc các phần phân mảnh có định dạng số. Bỏ qua."
+                main_app.creation_worker.status.emit(msg)
+                print(msg)
+                return
+
+            # Sắp xếp theo chỉ số (numeric) để đảm bảo thứ tự đúng: 000, 001, ..., 009, 010, 011,...
+            parts_with_index.sort(key=lambda t: t[0])
+            parts = [p for _, p in parts_with_index]
+
+            main_app.creation_worker.status.emit("Đang gộp các phần Drivers.7z.*...")
+            print(f"Bắt đầu gộp {len(parts)} phần thành {final_archive_path}")
+
+            with open(final_archive_path, "wb") as outfile:
+                for part in parts:
+                    with open(part, "rb") as infile:
+                        shutil.copyfileobj(infile, outfile)
+
+            main_app.creation_worker.status.emit("Đã gộp và sao chép Drivers.7z vào USB thành công.")
+            print("Gộp và sao chép Drivers.7z hoàn tất.")
     except Exception as e:
-        error_message = f"Lỗi khi gộp và sao chép TekDT_PE.7z: {e}"
-        main_app.creation_worker.status.emit(error_message)
-        print(error_message)
-        raise Exception(error_message)
+        msg = f"Lỗi khi xử lý Drivers.7z: {e}"
+        main_app.creation_worker.status.emit(msg)
+        print(msg)
+        raise
+
+    # --- Xử lý TekDT_PE.7z ---
+    try:
+        if tekdt_pe.exists():
+            main_app.creation_worker.status.emit("Đang sao chép TekDT_PE.7z vào USB...")
+            shutil.copy(tekdt_pe, tekdt_pe_archive_path)
+            main_app.creation_worker.status.emit("Đã sao chép TekDT_PE.7z vào USB thành công.")
+            print("Sao chép TekDT_PE.7z hoàn tất.")
+        else:
+            msg = "Không tìm thấy TekDT_PE.7z. Bỏ qua."
+            main_app.creation_worker.status.emit(msg)
+            print(msg)
+    except Exception as e:
+        msg = f"Lỗi khi sao chép TekDT_PE.7z: {e}"
+        main_app.creation_worker.status.emit(msg)
+        print(msg)
+        raise
 
 def _generate_ventoy_json(main_app):
     """
@@ -386,8 +441,6 @@ def _create_fill_file(main_app, file_path, size_in_bytes, total_fill_target, spa
             except OSError: pass
         raise IOError(f"Không thể ghi vào file '{file_path}'. Đĩa có thể đã đầy. Lỗi: {e}")
 
-# helpers.py
-
 def _process_and_copy_iso(worker, main_app, iso_info, usb_mount_point, total_copy_size, copied_so_far, base_progress, progress_range):
     """
     Xử lý và sao chép một file ISO.
@@ -412,10 +465,19 @@ def _process_and_copy_iso(worker, main_app, iso_info, usb_mount_point, total_cop
         for root, dirs, files in os.walk(path):
             for name in files:
                 filepath = os.path.join(root, name)
-                os.chmod(filepath, 0o777) # stat.S_IWRITE
+                os.chmod(filepath, 0o777)  # stat.S_IWRITE
             for name in dirs:
                 dirpath = os.path.join(root, name)
                 os.chmod(dirpath, 0o777)
+
+    def get_short_path(long_path):
+        """Trả về đường dẫn dạng 8.3 để tránh lỗi oscdimg."""
+        buffer = ctypes.create_unicode_buffer(260)
+        get_short_path_name = ctypes.windll.kernel32.GetShortPathNameW
+        if get_short_path_name(long_path, buffer, 260) > 0:
+            return buffer.value
+        return long_path  # Nếu fail, giữ nguyên nhưng log
+        print(f"Cảnh báo: Không thể lấy short path cho {long_path}")
 
     try:
         worker.status.emit(f"Mounting {iso_info['filename']}...")
@@ -437,7 +499,7 @@ def _process_and_copy_iso(worker, main_app, iso_info, usb_mount_point, total_cop
         # Unmount ISO ngay sau khi đã sao chép xong để giải phóng tài nguyên
         unmount_cmd = ['powershell', '-NoProfile', '-Command', f'Dismount-DiskImage -ImagePath "{iso_info["path"]}"']
         subprocess.run(unmount_cmd, capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW)
-        mounted_drive = None # Đánh dấu là đã unmount
+        mounted_drive = None  # Đánh dấu là đã unmount
         print("Đã unmount ISO gốc để tiếp tục xử lý.")
 
         wim_path_original = None
@@ -446,55 +508,85 @@ def _process_and_copy_iso(worker, main_app, iso_info, usb_mount_point, total_cop
             p = Path(temp_iso_content_dir) / "sources" / f"install{ext}"
             if p.exists():
                 wim_path_original = str(p)
-                wim_path_temp = str(Path(tempfile.gettempdir()) / f"slim_install{ext}")
+                wim_path_temp = str(Path(tempfile.gettempdir()) / f"slim_install_{iso_info['filename']}{ext}")  # Unique để tránh overwrite
                 break
         
         if not wim_path_original: raise Exception("Không tìm thấy install.wim/esd trong ISO.")
-
+        
+        original_ext = Path(wim_path_original).suffix.lower()
+        compression_method = "--compress=LZX" if original_ext == ".wim" else "--compress=LZMS"
         worker.status.emit(f"Trích xuất phiên bản: {iso_info['windows_edition_name']}...")
         export_cmd = [
-            str(config.WIMLIB_EXE), "export", wim_path_original, iso_info["windows_edition_index"],
-            wim_path_temp, "--compress=LZMS"
+            str(config.WIMLIB_EXE),
+            "export",
+            wim_path_original,
+            iso_info["windows_edition_index"],  # Index nguồn
+            wim_path_temp,
+            compression_method,  # Dùng kiểu nén phù hợp
+            "--check"            # Thêm cờ kiểm tra tính toàn vẹn
+            # KHÔNG DÙNG "--boot" ở đây
         ]
         print(f"Đang chạy lệnh wimlib: {' '.join(export_cmd)}")
-        subprocess.run(export_cmd, check=True, capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW)
+        proc = subprocess.run(export_cmd, capture_output=True, check=True, creationflags=subprocess.CREATE_NO_WINDOW)
+        if proc.returncode != 0:
+            print(f"Lỗi wimlib: {proc.stderr}")
 
         os.remove(wim_path_original)
         shutil.move(wim_path_temp, wim_path_original)
         print("Đã thay thế file WIM/ESD thành công.")
+        
+        ei_cfg = Path(temp_iso_content_dir) / "sources" / "ei.cfg"
+        if ei_cfg.exists():
+            try:
+                os.remove(ei_cfg)
+                print("Đã xoá ei.cfg để tránh xung đột edition (sử dụng autounattend.xml với key tự động).")
+            except Exception as e:
+                print(f"⚠️ Không thể xoá ei.cfg: {e}. Có thể bỏ qua nếu autounattend override.")
 
         worker.status.emit(f"Đang tạo lại file ISO tối ưu...")
         if not config.OSCDIMG_EXE.exists():
             raise FileNotFoundError(f"Không tìm thấy công cụ tạo ISO tại: {config.OSCDIMG_EXE}")
         
         temp_new_iso_path = os.path.join(tempfile.gettempdir(), iso_info['filename'])
-        # Xác định đường dẫn bootloader
-        bootloader_path = os.path.join(temp_iso_content_dir, "boot", "etfsboot.com")
-        efi_boot_path = os.path.join(temp_iso_content_dir, "efi", "microsoft", "boot", "efisys.bin")
+        
+        # Lấy short path cho tất cả
+        short_temp_iso_content_dir = get_short_path(temp_iso_content_dir)
+        short_temp_new_iso_path = get_short_path(temp_new_iso_path)
+        bootloader_path = get_short_path(os.path.join(temp_iso_content_dir, "boot", "etfsboot.com"))
+        efi_boot_path = get_short_path(os.path.join(temp_iso_content_dir, "efi", "microsoft", "boot", "efisys.bin"))
+        
         if not os.path.exists(bootloader_path):
-             raise FileNotFoundError(f"Không tìm thấy bootloader tại: {bootloader_path}")
+            raise FileNotFoundError(f"Không tìm thấy bootloader tại: {bootloader_path}")
         if not os.path.exists(efi_boot_path):
             raise FileNotFoundError(f"Không tìm thấy EFI boot file tại: {efi_boot_path}")
-
+        
+        # Cải thiện volume label: replace space/special bằng _, upper case, giới hạn 32
+        volume_label = Path(iso_info["filename"]).stem.replace(" ", "_").replace("-", "_")[:32].upper()
+        
         rebuild_cmd = [
             str(config.OSCDIMG_EXE),
-            "-m", "-o", "-u2",
+            "-m", "-o", "-u2", "-udfver102",
             f"-bootdata:2#p0,e,b{bootloader_path}#pEF,e,b{efi_boot_path}",
-            temp_iso_content_dir,
-            temp_new_iso_path
+            f"-l{volume_label}",
+            short_temp_iso_content_dir,
+            short_temp_new_iso_path
         ]
         print(f"Đang chạy lệnh oscdimg: {' '.join(rebuild_cmd)}")
-        subprocess.run(rebuild_cmd, check=True, capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW)
+        try:
+            proc = subprocess.run(rebuild_cmd, capture_output=True, check=True, creationflags=subprocess.CREATE_NO_WINDOW)
+        except subprocess.CalledProcessError as e:
+            print(f"Lỗi oscdimg: Return code {e.returncode}\nStdout: {e.stdout}\nStderr: {e.stderr}")
+            raise
         
         worker.status.emit(f"Sao chép ISO đã tối ưu vào USB...")
         copied_bytes = _copy_with_progress(worker, temp_new_iso_path, dest_iso_path, total_copy_size, copied_so_far, base_progress, progress_range)
-        
+
         os.remove(temp_new_iso_path)
         
         return copied_bytes
 
     finally:
-        if mounted_drive: # Chỉ chạy nếu việc unmount ở trên thất bại
+        if mounted_drive:  # Chỉ chạy nếu việc unmount ở trên thất bại
             unmount_cmd = ['powershell', '-NoProfile', '-Command', f'Dismount-DiskImage -ImagePath "{iso_info["path"]}"']
             subprocess.run(unmount_cmd, capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW)
         if os.path.exists(temp_iso_content_dir):
