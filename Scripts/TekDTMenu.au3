@@ -1644,27 +1644,27 @@ Func _AutoExtractDrivers()
 
 		; Tạo câu truy vấn với HWID đã escape VÀ LỌC THEO HĐH
         ; Logic mới: Ưu tiên RANK, sau đó ưu tiên BUILD GẦN NHẤT, sau đó mới tới NGÀY MỚI NHẤT
-		Local $sQueryHWID = "SELECT T_Driver.pack, T_Driver.directory" & _
+        Local $sQueryHWID = "SELECT T_Driver.pack, T_Driver.directory" & _
             " FROM Devices AS T_Device" & _
             " INNER JOIN Usable AS T_Usable" & _
-                " ON T_Usable.deviceId = CAST(T_Device.id AS TEXT)" & _
+                " ON T_Usable.deviceId = T_Device.id" & _  ; <-- SỬA LỖI: Bỏ CAST
             " INNER JOIN Sections AS T_Section" & _
-                " ON T_Section.id = CAST(T_Usable.sectionId AS TEXT)" & _
+                " ON T_Section.id = T_Usable.sectionId" & _ ; <-- SỬA LỖI: Bỏ CAST
             " INNER JOIN Drivers AS T_Driver" & _
-                " ON CAST(T_Section.driverId AS TEXT) = CAST(T_Driver.id AS TEXT)" & _
+                " ON T_Driver.id = T_Section.driverId" & _ ; <-- SỬA LỖI: Bỏ CAST
             " WHERE" & _
-                " T_Device.deviceId = " & $sEscHWID & _
-                " AND T_Usable.system = " & $sEscSystemID & _
-                " AND T_Section.build <= " & $iOSBuild & _
-                " AND T_Section.sign <> 0" & _
-                " AND (" & _
-                    " T_Driver.installationHooks IS NULL" & _
-                    " OR T_Driver.installationHooks NOT LIKE '%""instead"":[%""%'" & _
-                " )" & _
+            " T_Device.deviceId = " & $sEscHWID & _
+            " AND T_Usable.system = " & $sEscSystemID & _
+            " AND T_Section.build <= " & $iOSBuild & _
+            " AND T_Section.sign <> 0" & _
+            " AND (" & _
+                " T_Driver.installationHooks IS NULL" & _
+                " OR T_Driver.installationHooks NOT LIKE '%""instead"":[%""%'" & _
+            " )" & _
             " ORDER BY" & _
-                " T_Usable.rank DESC," & _
-                " T_Section.build DESC," & _
-                " T_Driver.date DESC" & _
+            " T_Usable.rank DESC," & _
+            " T_Section.build DESC," & _
+            " T_Driver.date DESC" & _
             " LIMIT 1"
 
 		Local $hQuery, $aRow[0]

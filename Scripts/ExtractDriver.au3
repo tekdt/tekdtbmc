@@ -136,16 +136,28 @@ Func _AutoExtractDrivers()
 
 		; Tạo câu truy vấn với HWID đã escape VÀ LỌC THEO HĐH
         ; Logic mới: Ưu tiên RANK, sau đó ưu tiên BUILD GẦN NHẤT, sau đó mới tới NGÀY MỚI NHẤT
-		Local $sQueryHWID = "SELECT T_Driver.pack, T_Driver.directory " & _
-			"FROM Devices AS T_Device " & _
-			"INNER JOIN Usable AS T_Usable ON T_Device.id = T_Usable.deviceId " & _
-			"INNER JOIN Sections AS T_Section ON T_Usable.sectionId = T_Section.id " & _
-			"INNER JOIN Drivers AS T_Driver ON T_Section.driverId = T_Driver.id " & _
-			"WHERE T_Device.deviceId = " & $sEscHWID & " " & _
-			  "AND T_Usable.system = " & $sEscSystemID & " " & _ ; <-- Lọc HĐH (ví dụ: "10.0x64")
-			  "AND T_Section.build <= " & $iOSBuild & " " & _ ; <-- Lọc Build (loại bỏ driver mới hơn HĐH)
-			"ORDER BY T_Usable.rank DESC, T_Section.build DESC, T_Driver.date DESC " & _ ; <-- ƯU TIÊN BUILD
-			"LIMIT 1"
+		Local $sQueryHWID = "SELECT T_Driver.pack, T_Driver.directory" & _
+            " FROM Devices AS T_Device" & _
+            " INNER JOIN Usable AS T_Usable" & _
+                " ON T_Usable.deviceId = CAST(T_Device.id AS TEXT)" & _
+            " INNER JOIN Sections AS T_Section" & _
+                " ON T_Section.id = CAST(T_Usable.sectionId AS TEXT)" & _
+            " INNER JOIN Drivers AS T_Driver" & _
+                " ON CAST(T_Section.driverId AS TEXT) = CAST(T_Driver.id AS TEXT)" & _
+            " WHERE" & _
+                " T_Device.deviceId = " & $sEscHWID & _
+                " AND T_Usable.system = " & $sEscSystemID & _
+                " AND T_Section.build <= " & $iOSBuild & _
+                " AND T_Section.sign <> 0" & _
+                " AND (" & _
+                    " T_Driver.installationHooks IS NULL" & _
+                    " OR T_Driver.installationHooks NOT LIKE '%""instead"":[%""%'" & _
+                " )" & _
+            " ORDER BY" & _
+                " T_Usable.rank DESC," & _
+                " T_Section.build DESC," & _
+                " T_Driver.date DESC" & _
+            " LIMIT 1"
 
 		Local $hQuery, $aRow[0]
 
