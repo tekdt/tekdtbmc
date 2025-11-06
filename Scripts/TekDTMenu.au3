@@ -451,12 +451,17 @@ Func _RunTool($sTool)
 
     ; Kiểm tra và chạy tệp thực thi (kiểm tra lại sau khi đã giải nén)
     If FileExists($sExePath) Then
-        Run('"' & $sExePath & '" ' & $sParams, "", @SW_SHOW)
+		If StringInStr($sParams,'SDIO') <> 0 Then
+			RunWait('"' & $sExePath & '" ' & $sParams, "", @SW_HIDE)
+			ControlClick("Setup","","[CLASS:Button; INSTANCE:1]")
+		Else
+			Run('"' & $sExePath & '" ' & $sParams, "", @SW_SHOW)
+		EndIf
     Else
         ; Thử tìm trong System32 nếu không phải đường dẫn tương đối
         Local $sSystemPath = @WindowsDir & "\System32\" & $sTool
         If FileExists($sSystemPath) Then
-            Run($sSystemPath, $sParams, @SW_SHOW)
+			Run($sSystemPath, $sParams, @SW_SHOW)
         Else
             MsgBox(16, "Lỗi", "Không tìm thấy tệp: " & @CRLF & $sExePath & @CRLF & "Vui lòng kiểm tra thư mục Tools trong thư mục chứa script.")
         EndIf
@@ -545,7 +550,7 @@ Func _AdjustPopupLayout($hGUI, $hList, $aButtons)
         Local $hButton1 = $aButtons[0]
         Local $hButton2 = $aButtons[1]
 
-        ; *** SỬA LỖI: Dùng GUICtrlGetHandle và WinGetPos ***
+        ; *** Dùng GUICtrlGetHandle và WinGetPos ***
         Local $hButton1Wnd = GUICtrlGetHandle($hButton1)
         Local $hButton2Wnd = GUICtrlGetHandle($hButton2)
         If $hButton1Wnd = 0 Or $hButton2Wnd = 0 Then Return
@@ -555,7 +560,6 @@ Func _AdjustPopupLayout($hGUI, $hList, $aButtons)
 
         Local $iBtnWidth1 = $aPos1[2]
         Local $iBtnWidth2 = $aPos2[2]
-        ; *** KẾT THÚC SỬA LỖI ***
 
         Local $iGap = 10 ; Khoảng cách giữa 2 nút
         Local $iTotalWidth = $iBtnWidth1 + $iBtnWidth2 + $iGap
@@ -1643,8 +1647,7 @@ Func _AutoExtractDrivers()
 		Local $sEscHWID = _SQLite_FastEscape($sMissingHWID)
 
 		; Tạo câu truy vấn với HWID đã escape VÀ LỌC THEO HĐH
-        ; Logic mới: Ưu tiên RANK, sau đó ưu tiên BUILD GẦN NHẤT, sau đó mới tới NGÀY MỚI NHẤT
-        ; Logic mới: Ưu tiên RANK, BUILD, DATE, VÀ ưu tiên driver không có phụ thuộc
+        ; Ưu tiên RANK, BUILD, DATE, VÀ ưu tiên driver không có phụ thuộc
         Local $sQueryHWID = "SELECT T_Driver.pack, T_Driver.directory" & _
             " FROM Devices AS T_Device" & _
             " INNER JOIN Usable AS T_Usable" & _
@@ -1662,11 +1665,9 @@ Func _AutoExtractDrivers()
                 " T_Driver.installationHooks IS NULL" & _
                 " OR T_Driver.installationHooks NOT LIKE '%""instead"":[%""%'" & _
             " )" & _
-            " AND (T_Driver.dependencies IS NULL OR T_Driver.dependencies = '' OR T_Driver.dependencies = '[]')" & _
             " ORDER BY" & _
             " T_Usable.rank DESC," & _
-            " T_Section.build DESC," & _
-            " T_Driver.date DESC" & _
+            " T_Section.build DESC" & _
             " LIMIT 1"
 
 		Local $hQuery, $aRow[0]
