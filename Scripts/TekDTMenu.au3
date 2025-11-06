@@ -1644,23 +1644,25 @@ Func _AutoExtractDrivers()
 
 		; Tạo câu truy vấn với HWID đã escape VÀ LỌC THEO HĐH
         ; Logic mới: Ưu tiên RANK, sau đó ưu tiên BUILD GẦN NHẤT, sau đó mới tới NGÀY MỚI NHẤT
+        ; Logic mới: Ưu tiên RANK, BUILD, DATE, VÀ ưu tiên driver không có phụ thuộc
         Local $sQueryHWID = "SELECT T_Driver.pack, T_Driver.directory" & _
             " FROM Devices AS T_Device" & _
             " INNER JOIN Usable AS T_Usable" & _
-                " ON T_Usable.deviceId = T_Device.id" & _  ; <-- SỬA LỖI: Bỏ CAST
+                " ON T_Usable.deviceId = T_Device.id" & _
             " INNER JOIN Sections AS T_Section" & _
-                " ON T_Section.id = T_Usable.sectionId" & _ ; <-- SỬA LỖI: Bỏ CAST
+                " ON T_Section.id = T_Usable.sectionId" & _
             " INNER JOIN Drivers AS T_Driver" & _
-                " ON T_Driver.id = T_Section.driverId" & _ ; <-- SỬA LỖI: Bỏ CAST
+                " ON T_Driver.id = T_Section.driverId" & _
             " WHERE" & _
             " T_Device.deviceId = " & $sEscHWID & _
             " AND T_Usable.system = " & $sEscSystemID & _
             " AND T_Section.build <= " & $iOSBuild & _
-            " AND T_Section.sign <> 0" & _
+            " AND T_Section.sign = 2" & _
             " AND (" & _
                 " T_Driver.installationHooks IS NULL" & _
                 " OR T_Driver.installationHooks NOT LIKE '%""instead"":[%""%'" & _
             " )" & _
+            " AND (T_Driver.dependencies IS NULL OR T_Driver.dependencies = '' OR T_Driver.dependencies = '[]')" & _
             " ORDER BY" & _
             " T_Usable.rank DESC," & _
             " T_Section.build DESC," & _
