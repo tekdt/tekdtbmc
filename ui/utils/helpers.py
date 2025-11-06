@@ -54,98 +54,108 @@ def _process_driver_archive(main_app, usb_mount_point):
     - Cuối cùng sao chép TekDT_PE.7z.
     """
     main_app.creation_worker.status.emit("Đang xử lý kho driver và công cụ TekDT_PE...")
-
     drivers_dir = config.DRIVERS_DIR
     tekdt_pe = drivers_dir / "TekDT_PE.7z"
     usb_ventoy_dir = Path(usb_mount_point) / "ventoy"
     final_archive_path = usb_ventoy_dir / "Drivers.7z"
     tekdt_pe_archive_path = usb_ventoy_dir / "TekDT_PE.7z"
-
+    final_db_path = usb_ventoy_dir / "db.sqlite"
     if not drivers_dir.exists():
         msg = "Thư mục Drivers không tồn tại. Bỏ qua."
         main_app.creation_worker.status.emit(msg)
         print(msg)
         return
-
     os.makedirs(usb_ventoy_dir, exist_ok=True)
-
     # --- Xử lý Drivers.7z ---
-    # try:
-        # direct_drivers = drivers_dir / "Drivers.7z"
-        # if direct_drivers.exists():
-            # main_app.creation_worker.status.emit("Đang sao chép Drivers.7z vào USB...")
-            # shutil.copy(direct_drivers, final_archive_path)
-            # print("Đã sao chép Drivers.7z thành công.")
-        # else:
-            # # Tìm tất cả file dạng Drivers.7z.00*
-            # parts = sorted(drivers_dir.glob("Drivers.7z.00*"))
-            # if not parts:
-                # msg = "Không tìm thấy Drivers.7z hoặc các phần phân mảnh. Bỏ qua."
-                # main_app.creation_worker.status.emit(msg)
-                # print(msg)
-                # return
-
-            # main_app.creation_worker.status.emit("Đang gộp các phần Drivers.7z.00*...")
-            # print(f"Bắt đầu gộp {len(parts)} phần thành {final_archive_path}")
-
-            # with open(final_archive_path, "wb") as outfile:
-                # for part in parts:
-                    # with open(part, "rb") as infile:
-                        # shutil.copyfileobj(infile, outfile)
-
-            # main_app.creation_worker.status.emit("Đã gộp và sao chép Drivers.7z vào USB thành công.")
-            # print("Gộp và sao chép Drivers.7z hoàn tất.")
-    # except Exception as e:
-        # msg = f"Lỗi khi xử lý Drivers.7z: {e}"
-        # main_app.creation_worker.status.emit(msg)
-        # print(msg)
-        # raise
-        
     try:
-        direct_drivers = drivers_dir / "Drivers.7z"
-        if direct_drivers.exists():
-            main_app.creation_worker.status.emit("Đang sao chép Drivers.7z vào USB...")
-            shutil.copy(direct_drivers, final_archive_path)
-            print("Đã sao chép Drivers.7z thành công.")
+        drivers_subdir = drivers_dir / "Drivers"
+        if not drivers_subdir.exists():
+            msg = "Thư mục Drivers/Drivers không tồn tại. Bỏ qua Drivers.7z."
+            main_app.creation_worker.status.emit(msg)
+            print(msg)
         else:
-            # Tìm mọi file dạng Drivers.7z.*
-            candidates = [p for p in drivers_dir.glob("Drivers.7z.*") if p.is_file()]
-
-            # Lọc chỉ giữ các file có phần đuôi hoàn toàn là chữ số (ví dụ .001, .010, .123)
-            parts_with_index = []
-            pattern = re.compile(r"^Drivers\.7z\.(\d+)$")
-            for p in candidates:
-                m = pattern.match(p.name)
-                if m:
-                    idx = int(m.group(1))
-                    parts_with_index.append((idx, p))
-
-            if not parts_with_index:
-                msg = "Không tìm thấy Drivers.7z hoặc các phần phân mảnh có định dạng số. Bỏ qua."
-                main_app.creation_worker.status.emit(msg)
-                print(msg)
-                return
-
-            # Sắp xếp theo chỉ số (numeric) để đảm bảo thứ tự đúng: 000, 001, ..., 009, 010, 011,...
-            parts_with_index.sort(key=lambda t: t[0])
-            parts = [p for _, p in parts_with_index]
-
-            main_app.creation_worker.status.emit("Đang gộp các phần Drivers.7z.*...")
-            print(f"Bắt đầu gộp {len(parts)} phần thành {final_archive_path}")
-
-            with open(final_archive_path, "wb") as outfile:
-                for part in parts:
-                    with open(part, "rb") as infile:
-                        shutil.copyfileobj(infile, outfile)
-
-            main_app.creation_worker.status.emit("Đã gộp và sao chép Drivers.7z vào USB thành công.")
-            print("Gộp và sao chép Drivers.7z hoàn tất.")
+            direct_drivers = drivers_subdir / "Drivers.7z"
+            if direct_drivers.exists():
+                main_app.creation_worker.status.emit("Đang sao chép Drivers.7z vào USB...")
+                shutil.copy(direct_drivers, final_archive_path)
+                print("Đã sao chép Drivers.7z thành công.")
+            else:
+                # Tìm mọi file dạng Drivers.7z.*
+                candidates = [p for p in drivers_subdir.glob("Drivers.7z.*") if p.is_file()]
+                # Lọc chỉ giữ các file có phần đuôi hoàn toàn là chữ số (ví dụ .001, .010, .123)
+                parts_with_index = []
+                pattern = re.compile(r"^Drivers\.7z\.(\d+)$")
+                for p in candidates:
+                    m = pattern.match(p.name)
+                    if m:
+                        idx = int(m.group(1))
+                        parts_with_index.append((idx, p))
+                if not parts_with_index:
+                    msg = "Không tìm thấy Drivers.7z hoặc các phần phân mảnh có định dạng số. Bỏ qua."
+                    main_app.creation_worker.status.emit(msg)
+                    print(msg)
+                else:
+                    # Sắp xếp theo chỉ số (numeric) để đảm bảo thứ tự đúng: 000, 001, ..., 009, 010, 011,...
+                    parts_with_index.sort(key=lambda t: t[0])
+                    parts = [p for _, p in parts_with_index]
+                    main_app.creation_worker.status.emit("Đang gộp các phần Drivers.7z.*...")
+                    print(f"Bắt đầu gộp {len(parts)} phần thành {final_archive_path}")
+                    with open(final_archive_path, "wb") as outfile:
+                        for part in parts:
+                            with open(part, "rb") as infile:
+                                shutil.copyfileobj(infile, outfile)
+                    main_app.creation_worker.status.emit("Đã gộp và sao chép Drivers.7z vào USB thành công.")
+                    print("Gộp và sao chép Drivers.7z hoàn tất.")
     except Exception as e:
         msg = f"Lỗi khi xử lý Drivers.7z: {e}"
         main_app.creation_worker.status.emit(msg)
         print(msg)
         raise
-
+    # --- Xử lý db.sqlite ---
+    try:
+        db_subdir = drivers_dir / "DB"
+        if not db_subdir.exists():
+            msg = "Thư mục Drivers/DB không tồn tại. Bỏ qua db.sqlite."
+            main_app.creation_worker.status.emit(msg)
+            print(msg)
+        else:
+            direct_db = db_subdir / "db.sqlite"
+            if direct_db.exists():
+                main_app.creation_worker.status.emit("Đang sao chép db.sqlite vào USB...")
+                shutil.copy(direct_db, final_db_path)
+                print("Đã sao chép db.sqlite thành công.")
+            else:
+                # Tìm mọi file dạng db.sqlite.*
+                candidates = [p for p in db_subdir.glob("db.sqlite.*") if p.is_file()]
+                # Lọc chỉ giữ các file có phần đuôi hoàn toàn là chữ số (ví dụ .001, .010, .123)
+                parts_with_index = []
+                pattern = re.compile(r"^db\.sqlite\.(\d+)$")
+                for p in candidates:
+                    m = pattern.match(p.name)
+                    if m:
+                        idx = int(m.group(1))
+                        parts_with_index.append((idx, p))
+                if not parts_with_index:
+                    msg = "Không tìm thấy db.sqlite hoặc các phần phân mảnh có định dạng số. Bỏ qua."
+                    main_app.creation_worker.status.emit(msg)
+                    print(msg)
+                else:
+                    # Sắp xếp theo chỉ số (numeric) để đảm bảo thứ tự đúng: 000, 001, ..., 009, 010, 011,...
+                    parts_with_index.sort(key=lambda t: t[0])
+                    parts = [p for _, p in parts_with_index]
+                    main_app.creation_worker.status.emit("Đang gộp các phần db.sqlite.*...")
+                    print(f"Bắt đầu gộp {len(parts)} phần thành {final_db_path}")
+                    with open(final_db_path, "wb") as outfile:
+                        for part in parts:
+                            with open(part, "rb") as infile:
+                                shutil.copyfileobj(infile, outfile)
+                    main_app.creation_worker.status.emit("Đã gộp và sao chép db.sqlite vào USB thành công.")
+                    print("Gộp và sao chép db.sqlite hoàn tất.")
+    except Exception as e:
+        msg = f"Lỗi khi xử lý db.sqlite: {e}"
+        main_app.creation_worker.status.emit(msg)
+        print(msg)
+        raise
     # --- Xử lý TekDT_PE.7z ---
     try:
         if tekdt_pe.exists():
