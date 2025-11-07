@@ -608,10 +608,12 @@ Func _AnalyzePartitions()
 
                 If $oPartition.BootPartition Then $sNotes &= " 🚀 Khởi động"
 
-                ; --- SỬA ĐỔI MỚI: Dùng logic bắt MSR (15-17MB) ---
+                ; --- SỬA ĐỔI MỚI: Sắp xếp lại logic ưu tiên ---
                 Local $sPartType = $oPartition.Type
+                Local $iSizeBytes = $oPartition.Size
                 Local $bIsSystemType = False
 
+                ; 1. Kiểm tra các loại hệ thống (EFI, Recovery, OEM, MSR) bằng Type
                 If $sPartType = "EFI System Partition" Or _
                    StringInStr($sPartType, "Recovery") Or _
                    StringInStr($sPartType, "MSR") Or _
@@ -620,23 +622,23 @@ Func _AnalyzePartitions()
                     $bIsSystemType = True
                 EndIf
 
-                ; Bắt MSR 15-17MB (giống _GetReservedPartitionOffset) 
-                ; và MSR cho GPT (thường 128MB)
-                If Not $bIsSystemType And _GetDriveLetterFromPartition($oWMI, $oPartition.DeviceID) = "" And _
-                   (($iSizeBytes >= 15*1048576 And $iSizeBytes <= 17*1048576) Or $iSizeMB = 128) Then
+                ; 2. Kiểm tra MSR 16MB/128MB (nếu WMI không báo Type)
+                ; Dùng logic giống _GetReservedPartitionOffset (15-17MB)
+                Local $sExistingLetter = _GetDriveLetterFromPartition($oWMI, $oPartition.DeviceID)
+                If Not $bIsSystemType And $sExistingLetter = "" And _
+                   (($iSizeBytes >= 15*1048576 And $iSizeBytes <= 17*1048576) Or _
+                    ($iSizeBytes >= 128*1048576 And $iSizeBytes <= 130*1048576)) Then
                     $bIsSystemType = True
                 EndIf
 
+                ; 3. Phân loại (Ưu tiên cao nhất: Hệ thống, Kế tiếp: Windows, Cuối cùng: Dữ liệu)
                 If $bIsSystemType Then
                     $sNotes &= " ⚠️ Hệ thống"
-                ElseIf $iSizeMB < 1000 Then
-                     $sNotes &= " ⚠️ Nhỏ (<1GB)" ; Chỉ đánh dấu nhỏ nếu chưa phải là "Hệ thống"
+                ElseIf _IsWindowsPartition($oWMI, $oPartition.DiskIndex, $oPartition.Index) Then ; Hàm này giờ đã tự gán/gỡ ký tự ổ đĩa
+                    $sNotes &= " 💻 Có thể là Windows cũ!"
+                ElseIf $sExistingLetter <> "" Then
+                    $sNotes &= " 👤 Dữ liệu người dùng"
                 EndIf
-                ; --- KẾT THÚC SỬA ĐỔI MỚI ---
-
-                If _IsWindowsPartition($oWMI, $oPartition.DiskIndex, $oPartition.Index) Then ;
-					$sNotes &= " 👤 Dữ liệu người dùng"  ;
-				EndIf
 
                 Local $iIdx = UBound($aPartitions)
                 ReDim $aPartitions[$iIdx + 1][5]
@@ -730,48 +732,47 @@ Func _AutoCleanPartitions()
                 Local $sSizeStr = Round($iSizeMB, 2) & " MB"
                 If $iSizeMB >= 1024 Then $sSizeStr = Round($iSizeMB / 1024, 2) & " GB"
 
-                Local $bIsOldWindows = _IsWindowsPartition($oWMI, $oPartition.DiskIndex, $oPartition.Index) ;
+                Local $bIsOldWindows = False ; Sẽ được kiểm tra sau
                 Local $sReason = ""
                 Local $bShouldDelete = False
                 Local $sPartType = $oPartition.Type
+                Local $bIsKnownSystemType = False
 
-                ; 1. Luôn XÓA nếu là Windows cũ
-                If $bIsOldWindows Then
-                    $sReason = "Chứa hệ điều hành cũ" ;
-                    $bShouldDelete = True ;
+                ; 1. Kiểm tra các loại hệ thống (EFI, Recovery, OEM, MSR) bằng Type
+                If $sPartType = "EFI System Partition" Or _
+                   StringInStr($sPartType, "Recovery") Or _
+                   StringInStr($sPartType, "MSR") Or _
+                   StringInStr($sPartType, "Microsoft reserved") Or _
+                   StringInStr($sPartType, "OEM") Then
+                    $bIsKnownSystemType = True
+                EndIf
+
+                ; 2. Kiểm tra MSR 16MB/128MB (nếu WMI không báo Type)
+                Local $sExistingLetter = _GetDriveLetterFromPartition($oWMI, $oPartition.DeviceID)
+                If Not $bIsKnownSystemType And $sExistingLetter = "" And _
+                   (($iSizeBytes >= 15*1048576 And $iSizeBytes <= 17*1048576) Or _
+                    ($iSizeBytes >= 128*1048576 And $iSizeBytes <= 130*1048576)) Then
+                     $bIsKnownSystemType = True
+                     $sPartType = "Reserved (16/128MB)" ; Gán Type giả để hiển thị lý do
+                EndIf
+
+                ; 3. Quyết định (Ưu tiên Hệ thống -> Windows -> Dữ liệu)
+                If $bIsKnownSystemType Then
+                    ; XÓA: Đây là phân vùng hệ thống (EFI, MSR, Recovery...)
+                    $sReason = "Phân vùng hệ thống (" & $sPartType & ")"
+                    $bShouldDelete = True
+                ElseIf _IsWindowsPartition($oWMI, $oPartition.DiskIndex, $oPartition.Index) Then
+                    ; XÓA: Đây là phân vùng Windows cũ (hàm này đã an toàn về ngôn ngữ)
+                    $sReason = "Chứa hệ điều hành cũ"
+                    $bShouldDelete = True
+                ElseIf $iSizeMB > $iDataThresholdMB Then
+                    ; GIỮ LẠI: Lớn hơn 1.5GB và không phải OS -> Giả định là DATA
+                    $bShouldDelete = False
+                    $sReason = "Dữ liệu (> " & $iDataThresholdMB & " MB)"
                 Else
-                    ; 2. Nếu không phải Windows cũ, kiểm tra các loại phân vùng hệ thống
-                    Local $bIsKnownSystemType = False
-                    If $sPartType = "EFI System Partition" Or _
-                       StringInStr($sPartType, "Recovery") Or _
-                       StringInStr($sPartType, "MSR") Or _
-                       StringInStr($sPartType, "Microsoft reserved") Or _
-                       StringInStr($sPartType, "OEM") Then
-                        $bIsKnownSystemType = True
-                    EndIf
-
-                    ; Bắt MSR 15-17MB (giống _GetReservedPartitionOffset) 
-                    ; và MSR cho GPT (thường 128MB)
-                    If Not $bIsKnownSystemType And _GetDriveLetterFromPartition($oWMI, $oPartition.DeviceID) = "" And _
-                       (($iSizeBytes >= 15*1048576 And $iSizeBytes <= 17*1048576) Or $iSizeMB = 128) Then
-                         $bIsKnownSystemType = True
-                         $sPartType = "Reserved (16/128MB)" ; Gán Type giả để hiển thị lý do
-                    EndIf
-
-                    ; 3. Quyết định dựa trên loại hoặc kích thước
-                    If $iSizeMB > $iDataThresholdMB Then
-                        ; Lớn hơn 1.5GB -> Giả định là DATA -> GIỮ LẠI
-                        $bShouldDelete = False ;
-                        $sReason = "Dữ liệu (> " & $iDataThresholdMB & " MB)"
-                    ElseIf $bIsKnownSystemType Then
-                        ; Là phân vùng hệ thống VÀ nhỏ hơn 1.5GB -> XÓA
-                        $sReason = "Phân vùng hệ thống (" & $sPartType & ")"
-                        $bShouldDelete = True
-                    Else
-                        ; Không phải Windows, không phải loại hệ thống, nhưng nhỏ hơn 1.5GB -> XÓA
-                        $sReason = "Phân vùng nhỏ không rõ (< " & $iDataThresholdMB & " MB)"
-                        $bShouldDelete = True
-                    EndIf
+                    ; XÓA: Nhỏ hơn 1.5GB, không phải OS, không phải hệ thống -> Rác
+                    $sReason = "Phân vùng nhỏ không rõ (< " & $iDataThresholdMB & " MB)"
+                    $bShouldDelete = True
                 EndIf
 
                 If $bShouldDelete Then
@@ -876,20 +877,46 @@ EndFunc
 ;===============================================================================
 
 Func _IsWindowsPartition($oWMIService, $iDiskIndex, $iPartitionIndex)
-    ; Lấy DeviceID của Partition
+    ; Lấy đối tượng WMI cho partition
     Local $oPartition = $oWMIService.Get("Win32_DiskPartition.DeviceID='Disk #" & $iDiskIndex & ", Partition #" & $iPartitionIndex & "'")
     If Not IsObj($oPartition) Then Return False
 
-    ; Dùng hàm hỗ trợ để lấy ký tự ổ đĩa từ Partition
     Local $sDriveLetter = _GetDriveLetterFromPartition($oWMIService, $oPartition.DeviceID)
+    Local $bIsWindows = False
+    Local $bNeedToUnmount = False
+    Local $sTempLetter = "M" ; Sử dụng một ký tự ổ đĩa cao, ít bị trùng
+    Local $iDiskpartPartitionIndex = $iPartitionIndex + 1 ; WMI là 0-based, Diskpart là 1-based
 
-    ; Nếu không có ký tự ổ đĩa (ví dụ: phân vùng EFI, Recovery...) thì chắc chắn không phải phân vùng Windows chính
     If $sDriveLetter = "" Then
-        Return False
+        ; 1. Không có ký tự ổ đĩa -> Gán tạm (Phương pháp Loại 2 - An toàn)
+        Local $sScriptFile = @TempDir & "\_assign_temp.txt"
+        FileWrite($sScriptFile, "select disk " & $iDiskIndex & @CRLF & _
+                              "select partition " & $iDiskpartPartitionIndex & @CRLF & _
+                              "assign letter=" & $sTempLetter & @CRLF & "exit")
+        RunWait('diskpart /s "' & $sScriptFile & '"', "", @SW_HIDE)
+        Sleep(500) ; Đợi hệ thống mount ổ đĩa
+        FileDelete($sScriptFile)
+
+        $sDriveLetter = $sTempLetter & ":"
+        $bNeedToUnmount = True ; Đánh dấu để gỡ ra sau
     EndIf
 
-    ; Gọi hàm kiểm tra file (hàm này vốn đã an toàn về ngôn ngữ)
-    Return _CheckWindowsFiles($sDriveLetter)
+    ; 2. Kiểm tra file hệ thống (dù là ổ có sẵn hay ổ vừa gán)
+    If FileExists($sDriveLetter & "\Windows") Then
+        $bIsWindows = _CheckWindowsFiles($sDriveLetter)
+    EndIf
+
+    ; 3. Gỡ ký tự ổ đĩa nếu chúng ta đã gán tạm (Phương pháp Loại 2 - An toàn)
+    If $bNeedToUnmount Then
+        Local $sScriptFile = @TempDir & "\_remove_temp.txt"
+        FileWrite($sScriptFile, "select disk " & $iDiskIndex & @CRLF & _
+                              "select partition " & $iDiskpartPartitionIndex & @CRLF & _
+                              "remove letter=" & $sTempLetter & @CRLF & "exit")
+        RunWait('diskpart /s "' & $sScriptFile & '"', "", @SW_HIDE)
+        FileDelete($sScriptFile)
+    EndIf
+
+    Return $bIsWindows
 EndFunc
 
 ;===============================================================================
@@ -995,25 +1022,49 @@ Func _CheckBitLockerViaDiskpart($iDiskNum, $iPartNum)
 EndFunc
 
 ; Hàm hỗ trợ lấy sector bắt đầu của partition
+; Func _GetPartitionStartSector($iDiskNum, $iPartNum)
+    ; Local $sOutput = "", $sScript = @TempDir & "\get_offset.txt"
+
+    ; FileWrite($sScript, "select disk " & $iDiskNum & @CRLF & _
+                      ; "select partition " & $iPartNum & @CRLF & _
+                      ; "detail partition" & @CRLF & _
+                      ; "exit")
+
+    ; RunWait('diskpart /s "' & $sScript & '" > "' & @TempDir & '"\part_info.txt"', "", @SW_HIDE)
+    ; $sOutput = FileRead(@TempDir & "\part_info.txt")
+    ; FileDelete($sScript)
+    ; FileDelete(@TempDir & "\part_info.txt")
+
+    ; Local $aMatches = StringRegExp($sOutput, "Offset\s*:\s*(\d+)\s*KB", 1)
+    ; If Not @error Then
+        ; Return Number($aMatches[0]) * 2 ; Convert KB to sectors (512B)
+    ; EndIf
+
+    ; Return 0 ; Mặc định sector 0 nếu không xác định được
+; EndFunc
+
+;===============================================================================
+; HÀM: _GetPartitionStartSector (SỬA ĐỔI - AN TOÀN VỀ NGÔN NGỮ)
+; Mục đích: Lấy offset (sector bắt đầu) của phân vùng bằng WMI.
+; Trả về: Offset (tính bằng byte).
+;===============================================================================
 Func _GetPartitionStartSector($iDiskNum, $iPartNum)
-    Local $sOutput = "", $sScript = @TempDir & "\get_offset.txt"
-
-    FileWrite($sScript, "select disk " & $iDiskNum & @CRLF & _
-                      "select partition " & $iPartNum & @CRLF & _
-                      "detail partition" & @CRLF & _
-                      "exit")
-
-    RunWait('diskpart /s "' & $sScript & '" > "' & @TempDir & '"\part_info.txt"', "", @SW_HIDE)
-    $sOutput = FileRead(@TempDir & "\part_info.txt")
-    FileDelete($sScript)
-    FileDelete(@TempDir & "\part_info.txt")
-
-    Local $aMatches = StringRegExp($sOutput, "Offset\s*:\s*(\d+)\s*KB", 1)
-    If Not @error Then
-        Return Number($aMatches[0]) * 2 ; Convert KB to sectors (512B)
+    ; Sử dụng WMI để lấy thông tin, không phụ thuộc ngôn ngữ
+    Local $oWMI = ObjGet("winmgmts:\\.\root\cimv2")
+    If Not IsObj($oWMI) Then
+        RecordLogforDebug("! Lỗi WMI khi lấy StartingOffset cho Disk" & $iDiskNum & ", Part" & $iPartNum)
+        Return 0
     EndIf
 
-    Return 0 ; Mặc định sector 0 nếu không xác định được
+    ; WMI Index (iPartNum) đã là 0-based
+    Local $oPartition = $oWMI.Get("Win32_DiskPartition.DeviceID='Disk #" & $iDiskNum & ", Partition #" & $iPartNum & "'")
+    If @error Or Not IsObj($oPartition) Then
+        RecordLogforDebug("! Lỗi: Không tìm thấy WMI Object cho Disk" & $iDiskNum & ", Part" & $iPartNum)
+        Return 0
+    EndIf
+
+    ; StartingOffset là thuộc tính WMI, luôn trả về giá trị byte, không phụ thuộc ngôn ngữ
+    Return Number($oPartition.StartingOffset)
 EndFunc
 
 ; --- Các hàm về giao diện và hiệu ứng ---
