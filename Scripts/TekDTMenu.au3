@@ -606,13 +606,30 @@ Func _AnalyzePartitions()
 
                 Local $sNotes = ""
                 If $oPartition.BootPartition Then $sNotes &= " 🚀 Khởi động"
-                If $oPartition.Type = "EFI System Partition" Or StringInStr($oPartition.Type, "Recovery") Or StringInStr($oPartition.Type, "MSR") Then $sNotes &= " ⚠️ Hệ thống" ;
-                If $iSizeMB < 1000 Then $sNotes &= " ⚠️ Nhỏ (<1GB)"  ;
+
+                Local $sPartType = $oPartition.Type
+                Local $bIsSystemType = False
+
+                If $sPartType = "EFI System Partition" Or _
+                   StringInStr($sPartType, "Recovery") Or _
+                   StringInStr($sPartType, "MSR") Or _
+                   StringInStr($sPartType, "Microsoft reserved") Or _
+                   StringInStr($sPartType, "OEM") Then
+                    $bIsSystemType = True
+                EndIf
+
+                ; Bắt MSR 16MB/128MB nếu Type không rõ ràng (ví dụ: "Unknown")
+                If Not $bIsSystemType And ($iSizeMB = 16 Or $iSizeMB = 128) And _GetDriveLetterFromPartition($oWMI, $oPartition.DeviceID) = "" Then
+                    $bIsSystemType = True
+                EndIf
+
+                If $bIsSystemType Then
+                    $sNotes &= " ⚠️ Hệ thống"
+                ElseIf $iSizeMB < 1000 Then
+                     $sNotes &= " ⚠️ Nhỏ (<1GB)" ; Chỉ đánh dấu nhỏ nếu chưa phải là "Hệ thống"
+                EndIf
 
                 If _IsWindowsPartition($oWMI, $oPartition.DiskIndex, $oPartition.Index) Then ;
-                    $sNotes &= " 💻 Có thể là Windows cũ!"  ;
-                Else
-                    If _GetDriveLetterFromPartition($oWMI, $oPartition.DeviceID) <> "" Then ;
                          $sNotes &= " 👤 Dữ liệu người dùng"  ;
                     EndIf
                 EndIf
@@ -703,31 +720,52 @@ Func _AutoCleanPartitions()
         If IsObj($colPartitions) And $colPartitions.Count > 0 Then
             For $oPartition In $colPartitions
 
-                ; --- LOGIC LỌC MỚI (DỰA TRÊN KÍCH THƯỚC) ---
-                Local $iSizeMB = Round($oPartition.Size / (1024^2)) ;
+                ; --- LOGIC LỌC (DỰA TRÊN KÍCH THƯỚC) ---
+                Local $iSizeMB = Round($oPartition.Size / (1024^2)) ; 
                 Local $sSizeStr = Round($iSizeMB, 2) & " MB"
                 If $iSizeMB >= 1024 Then $sSizeStr = Round($iSizeMB / 1024, 2) & " GB"
 
-                Local $bIsOldWindows = _IsWindowsPartition($oWMI, $oPartition.DiskIndex, $oPartition.Index) ;
+                Local $bIsOldWindows = _IsWindowsPartition($oWMI, $oPartition.DiskIndex, $oPartition.Index) ; [cite: 134]
                 Local $sReason = ""
                 Local $bShouldDelete = False
+                Local $sPartType = $oPartition.Type
 
+                ; 1. Luôn XÓA nếu là Windows cũ
                 If $bIsOldWindows Then
-                    ; 1. Luôn XÓA nếu là Windows cũ
-                    $sReason = "Chứa hệ điều hành cũ" ;
-                    $bShouldDelete = True
+                    $sReason = "Chứa hệ điều hành cũ" ; 
+                    $bShouldDelete = True ; [cite: 136]
                 Else
-                    ; 2. Nếu không phải Windows cũ, kiểm tra kích thước
+                    ; 2. Nếu không phải Windows cũ, kiểm tra các loại phân vùng hệ thống
+                    Local $bIsKnownSystemType = False
+                    If $sPartType = "EFI System Partition" Or _
+                       StringInStr($sPartType, "Recovery") Or _
+                       StringInStr($sPartType, "MSR") Or _
+                       StringInStr($sPartType, "Microsoft reserved") Or _
+                       StringInStr($sPartType, "OEM") Then
+                        $bIsKnownSystemType = True
+                    EndIf
+
+                    ; Bắt MSR 16MB/128MB nếu Type không rõ ràng
+                    If Not $bIsKnownSystemType And ($iSizeMB = 16 Or $iSizeMB = 128) And _GetDriveLetterFromPartition($oWMI, $oPartition.DeviceID) = "" Then
+                         $bIsKnownSystemType = True
+                         $sPartType = "Reserved (16/128MB)" ; Gán Type giả để hiển thị lý do
+                    EndIf
+
+                    ; 3. Quyết định dựa trên loại hoặc kích thước
                     If $iSizeMB > $iDataThresholdMB Then
                         ; Lớn hơn 1.5GB -> Giả định là DATA -> GIỮ LẠI
-                        $bShouldDelete = False
+                        $bShouldDelete = False ; 
+                        $sReason = "Dữ liệu (> " & $iDataThresholdMB & " MB)"
+                    ElseIf $bIsKnownSystemType Then
+                        ; Là phân vùng hệ thống VÀ nhỏ hơn 1.5GB -> XÓA
+                        $sReason = "Phân vùng hệ thống (" & $sPartType & ")"
+                        $bShouldDelete = True
                     Else
-                        ; Nhỏ hơn 1.5GB -> Giả định là System/EFI/Recovery/MSR/OEM... -> XÓA
-                        $sReason = "Phân vùng hệ thống/nhỏ (< " & $iDataThresholdMB & " MB)"
+                        ; Không phải Windows, không phải loại hệ thống, nhưng nhỏ hơn 1.5GB -> XÓA
+                        $sReason = "Phân vùng nhỏ không rõ (< " & $iDataThresholdMB & " MB)"
                         $bShouldDelete = True
                     EndIf
                 EndIf
-                ; --- KẾT THÚC LOGIC LỌC MỚI ---
 
                 If $bShouldDelete Then
                     Local $iIdx = UBound($aToDelete)
