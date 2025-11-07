@@ -30,7 +30,7 @@ EndIf
 ; --- Cài đặt và Biến toàn cục ---
 Global Const $g_sIniFile = @ScriptDir & "\TekDTMenu.ini"
 Global $g_sTitle = IniRead($g_sIniFile, "Settings", "Title", "TekDT BMC")
-Global $RecordLog = True
+Global $RecordLog = False
 Global $RootDevice = SearchRootDevice()
 Global $g_iMainWidth = _Scale(260)
 Global $g_iMaxButtonsVisible = 5 ; Số nút tối đa hiển thị cùng lúc
@@ -630,9 +630,8 @@ Func _AnalyzePartitions()
                 EndIf
 
                 If _IsWindowsPartition($oWMI, $oPartition.DiskIndex, $oPartition.Index) Then ;
-                         $sNotes &= " 👤 Dữ liệu người dùng"  ;
-                    EndIf
-                EndIf
+					$sNotes &= " 👤 Dữ liệu người dùng"  ;
+				EndIf
 
                 Local $iIdx = UBound($aPartitions)
                 ReDim $aPartitions[$iIdx + 1][5]
