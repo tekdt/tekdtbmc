@@ -311,8 +311,8 @@ Func _HandleButtonPress($iCtrlID)
 				Case Else
 					_RunTool($sAction)
 					If WinExists("Setup","") = 1 Then
-						ControlClick("Setup","","[CLASS:Button; INSTANCE:1]")
-						; ControlSend("Setup","","[CLASS:Button; INSTANCE:1]","!r")
+						; ControlClick("Setup","","[CLASS:Button; INSTANCE:1]")
+						ControlSend("Setup","","[CLASS:Button; INSTANCE:1]","!r")
 					EndIf
             EndSwitch
 
@@ -451,9 +451,8 @@ Func _RunTool($sTool)
 
     ; Kiểm tra và chạy tệp thực thi (kiểm tra lại sau khi đã giải nén)
     If FileExists($sExePath) Then
-		If StringInStr($sParams,'SDIO') <> 0 Then
+		If StringInStr($sExePath,'SDIO') <> 0 Then
 			RunWait('"' & $sExePath & '" ' & $sParams, "", @SW_HIDE)
-			ControlClick("Setup","","[CLASS:Button; INSTANCE:1]")
 		Else
 			Run('"' & $sExePath & '" ' & $sParams, "", @SW_SHOW)
 		EndIf
