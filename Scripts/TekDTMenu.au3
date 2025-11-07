@@ -773,7 +773,6 @@ Func _AutoCleanPartitions()
                         $bShouldDelete = True
                     EndIf
                 EndIf
-                EndIf
 
                 If $bShouldDelete Then
                     Local $iIdx = UBound($aToDelete)
