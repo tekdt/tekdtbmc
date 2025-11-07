@@ -599,14 +599,16 @@ Func _AnalyzePartitions()
                 Local $iSizeMB = Round($oPartition.Size / (1024^2))
                 Local $sUnit = "MB"  ;
                 Local $iDisplaySize = $iSizeMB
+                Local $iSizeBytes = $oPartition.Size ; Lấy kích thước byte gốc
                 If $iSizeMB >= 1024 Then
                     $sUnit = "GB"
                     $iDisplaySize = Round($iSizeMB / 1024, 2)
-                EndIf  ;
-
+                EndIf
                 Local $sNotes = ""
+
                 If $oPartition.BootPartition Then $sNotes &= " 🚀 Khởi động"
 
+                ; --- SỬA ĐỔI MỚI: Dùng logic bắt MSR (15-17MB) ---
                 Local $sPartType = $oPartition.Type
                 Local $bIsSystemType = False
 
@@ -618,8 +620,10 @@ Func _AnalyzePartitions()
                     $bIsSystemType = True
                 EndIf
 
-                ; Bắt MSR 16MB/128MB nếu Type không rõ ràng (ví dụ: "Unknown")
-                If Not $bIsSystemType And ($iSizeMB = 16 Or $iSizeMB = 128) And _GetDriveLetterFromPartition($oWMI, $oPartition.DeviceID) = "" Then
+                ; Bắt MSR 15-17MB (giống _GetReservedPartitionOffset) 
+                ; và MSR cho GPT (thường 128MB)
+                If Not $bIsSystemType And _GetDriveLetterFromPartition($oWMI, $oPartition.DeviceID) = "" And _
+                   (($iSizeBytes >= 15*1048576 And $iSizeBytes <= 17*1048576) Or $iSizeMB = 128) Then
                     $bIsSystemType = True
                 EndIf
 
@@ -628,6 +632,7 @@ Func _AnalyzePartitions()
                 ElseIf $iSizeMB < 1000 Then
                      $sNotes &= " ⚠️ Nhỏ (<1GB)" ; Chỉ đánh dấu nhỏ nếu chưa phải là "Hệ thống"
                 EndIf
+                ; --- KẾT THÚC SỬA ĐỔI MỚI ---
 
                 If _IsWindowsPartition($oWMI, $oPartition.DiskIndex, $oPartition.Index) Then ;
 					$sNotes &= " 👤 Dữ liệu người dùng"  ;
@@ -720,19 +725,20 @@ Func _AutoCleanPartitions()
             For $oPartition In $colPartitions
 
                 ; --- LOGIC LỌC (DỰA TRÊN KÍCH THƯỚC) ---
-                Local $iSizeMB = Round($oPartition.Size / (1024^2)) ; 
+                Local $iSizeMB = Round($oPartition.Size / (1024^2)) ;
+                Local $iSizeBytes = $oPartition.Size ; Lấy kích thước byte gốc
                 Local $sSizeStr = Round($iSizeMB, 2) & " MB"
                 If $iSizeMB >= 1024 Then $sSizeStr = Round($iSizeMB / 1024, 2) & " GB"
 
-                Local $bIsOldWindows = _IsWindowsPartition($oWMI, $oPartition.DiskIndex, $oPartition.Index) ; [cite: 134]
+                Local $bIsOldWindows = _IsWindowsPartition($oWMI, $oPartition.DiskIndex, $oPartition.Index) ;
                 Local $sReason = ""
                 Local $bShouldDelete = False
                 Local $sPartType = $oPartition.Type
 
                 ; 1. Luôn XÓA nếu là Windows cũ
                 If $bIsOldWindows Then
-                    $sReason = "Chứa hệ điều hành cũ" ; 
-                    $bShouldDelete = True ; [cite: 136]
+                    $sReason = "Chứa hệ điều hành cũ" ;
+                    $bShouldDelete = True ;
                 Else
                     ; 2. Nếu không phải Windows cũ, kiểm tra các loại phân vùng hệ thống
                     Local $bIsKnownSystemType = False
@@ -744,8 +750,10 @@ Func _AutoCleanPartitions()
                         $bIsKnownSystemType = True
                     EndIf
 
-                    ; Bắt MSR 16MB/128MB nếu Type không rõ ràng
-                    If Not $bIsKnownSystemType And ($iSizeMB = 16 Or $iSizeMB = 128) And _GetDriveLetterFromPartition($oWMI, $oPartition.DeviceID) = "" Then
+                    ; Bắt MSR 15-17MB (giống _GetReservedPartitionOffset) 
+                    ; và MSR cho GPT (thường 128MB)
+                    If Not $bIsKnownSystemType And _GetDriveLetterFromPartition($oWMI, $oPartition.DeviceID) = "" And _
+                       (($iSizeBytes >= 15*1048576 And $iSizeBytes <= 17*1048576) Or $iSizeMB = 128) Then
                          $bIsKnownSystemType = True
                          $sPartType = "Reserved (16/128MB)" ; Gán Type giả để hiển thị lý do
                     EndIf
@@ -753,7 +761,7 @@ Func _AutoCleanPartitions()
                     ; 3. Quyết định dựa trên loại hoặc kích thước
                     If $iSizeMB > $iDataThresholdMB Then
                         ; Lớn hơn 1.5GB -> Giả định là DATA -> GIỮ LẠI
-                        $bShouldDelete = False ; 
+                        $bShouldDelete = False ;
                         $sReason = "Dữ liệu (> " & $iDataThresholdMB & " MB)"
                     ElseIf $bIsKnownSystemType Then
                         ; Là phân vùng hệ thống VÀ nhỏ hơn 1.5GB -> XÓA
@@ -764,6 +772,7 @@ Func _AutoCleanPartitions()
                         $sReason = "Phân vùng nhỏ không rõ (< " & $iDataThresholdMB & " MB)"
                         $bShouldDelete = True
                     EndIf
+                EndIf
                 EndIf
 
                 If $bShouldDelete Then
