@@ -30,7 +30,7 @@ EndIf
 ; --- Cài đặt và Biến toàn cục ---
 Global Const $g_sIniFile = @ScriptDir & "\TekDTMenu.ini"
 Global $g_sTitle = IniRead($g_sIniFile, "Settings", "Title", "TekDT BMC")
-Global $RecordLog = False
+Global $RecordLog = True
 Global $RootDevice = SearchRootDevice()
 Global $g_iMainWidth = _Scale(260)
 Global $g_iMaxButtonsVisible = 5 ; Số nút tối đa hiển thị cùng lúc
@@ -650,6 +650,8 @@ Func _GetPartitionsFromDiskPart($iDiskIndex)
         $aPartitions[$iIdx][3] = $iSizeBytes
     Next
     
+	RecordLogforDebug("Bên dưới là log khi chạy DiskPart"&@CRLF&_ArrayToString($aPartitions))
+	
     Return $aPartitions
 EndFunc
 
@@ -665,6 +667,11 @@ Func _AnalyzePartitions()
     EndIf
 
     Local $colDisks = $oWMI.ExecQuery("SELECT * FROM Win32_DiskDrive")
+	If Not IsObj($colDisks) Then
+        RecordLogforDebug("WMI Query (colDisks) thất bại.")
+        Return
+    EndIf
+    RecordLogforDebug("Bước 1: WMI tìm thấy " & $colDisks.Count & " ổ đĩa vật lý.")
     If Not IsObj($colDisks) Or $colDisks.Count = 0 Then Return
 
     Local $aPartitions[0][5]  ; [0]: Disk Info, [1]: Partition (bắt đầu từ 1), [2]: Type, [3]: Size, [4]: Notes
@@ -673,12 +680,14 @@ Func _AnalyzePartitions()
         ; Bỏ qua ổ đĩa ngoài dựa trên InterfaceType
         If _ArraySearch($exclusion_keywords, $oDisk.InterfaceType) <> -1 Then ContinueLoop
 
-        Local $sDiskInfo = StringFormat("Disk %i (%s GB - %s)", $oDisk.Index, Round($oDisk.Size / (1024^3), 2), $oDisk.Model)
+        RecordLogforDebug("Bước 2: Đang xử lý Disk " & $oDisk.Index & " (" & $oDisk.Model & ")" & @CRLF & "Interface: " & $oDisk.InterfaceType)
+		Local $sDiskInfo = StringFormat("Disk %i (%s GB - %s)", $oDisk.Index, Round($oDisk.Size / (1024^3), 2), $oDisk.Model)
         Local $sQuery = "SELECT * FROM Win32_DiskPartition WHERE DiskIndex = " & $oDisk.Index
         Local $colPartitions = $oWMI.ExecQuery($sQuery)
 
         ; Lấy partitions từ DiskPart để merge
         Local $aDiskPartParts = _GetPartitionsFromDiskPart($oDisk.Index)
+		RecordLogforDebug("Bước 3: Hàm _GetPartitionsFromDiskPart trả về " & UBound($aDiskPartParts) & " phân vùng cho Disk " & $oDisk.Index)
 
         Local $aWMIParts[0][6]  ; Tạm lưu WMI parts để merge: [0]: Index (0-based), [1]: Type, [2]: SizeBytes, [3]: BootPartition, [4]: DeviceID, [5]: Notes (temp)
 
