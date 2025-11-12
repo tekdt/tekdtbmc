@@ -570,13 +570,6 @@ Func _AdjustPopupLayout($hGUI, $hList, $aButtons)
     EndIf
 EndFunc
 
-#include <Array.au3>
-#include <GUIConstantsEx.au3>
-#include <GuiListView.au3>
-#include <WindowsConstants.au3>
-
-; Giả sử các hàm phụ trợ khác như _IsWindowsPartition, _IsRecoveryPartition, _GetDriveLetterFromPartition, _AdjustPopupLayout, và mảng $exclusion_keywords đã được định nghĩa ở nơi khác.
-
 Func _GetPartitionsFromDiskPart($iDiskIndex)
     Local $sScriptFile = @TempDir & "\listpart.txt"
     Local $hFile = FileOpen($sScriptFile, 2)
@@ -592,37 +585,38 @@ Func _GetPartitionsFromDiskPart($iDiskIndex)
     FileDelete($sOutputFile)
 
     Local $aLines = StringSplit($sOutput, @CRLF, 1)
-    Local $aPartitions[0][4]  ; [0]: Num (1-based), [1]: Type, [2]: SizeStr, [3]: SizeBytes [cite: 2]
+    Local $aPartitions[0][4]  ; [0]: Num (1-based), [1]: Type, [2]: SizeStr, [3]: SizeBytes
 
     For $i = 1 To $aLines[0]
-        Local $sLine = StringStripWS($aLines[$i], 3)  ; Strip leading/trailing spaces [cite: 3]
+        Local $sLine = StringStripWS($aLines[$i], 3)
         If $sLine = "" Then ContinueLoop
 
-        ; === THAY ĐỔI 1: Regex linh hoạt hơn, chỉ bắt 3 nhóm cần thiết ===
-        ; Regex này sẽ tìm (1: Số) (2: Loại, có thể nhiều chữ) (3: Kích thước)
-        ; và bỏ qua mọi thứ khác (như Offset)
+        ; === ĐIỀU CHỈNH CỐT LÕI ===
+        ; Regex này linh hoạt, chỉ bắt 3 nhóm (Num, Type, Size)
+        ; và coi cột Offset (nếu có) là tùy chọn.
+        ; Nó cũng bỏ qua tiền tố "Partition " hay "Phân vùng "
         Local $aParts = StringRegExp($sLine, "^\D*?(\d+)\s+(.*?)\s+(\d+\s+\S+)(?:\s+.*)?$", 3)
 
-        ; === THAY ĐỔI 2: Kiểm tra UBound = 3 (vì chúng ta chỉ bắt 3 nhóm) ===
+        ; Kiểm tra UBound = 3 (vì chúng ta chỉ bắt 3 nhóm)
         If UBound($aParts) = 3 Then
             Local $iNum = Number($aParts[0])
-            Local $sType = StringStripWS($aParts[1], 3)  ; Type, strip spaces [cite: 4]
+            Local $sType = StringStripWS($aParts[1], 3)  ; Type, strip spaces
             Local $sSize = $aParts[2]
-            
-            ; Convert size to bytes [cite: 5]
+
+            ; Convert size to bytes
             Local $aSize = StringSplit($sSize, " ", 1)
-            If $aSize[0] < 2 Then ContinueLoop ; Bỏ qua nếu không phân tích được size (ví dụ: "Size" header)
-            
+            If $aSize[0] < 2 Then ContinueLoop ; Bỏ qua nếu không phân tích được size (ví dụ: dòng tiêu đề "Size")
+
             Local $iSizeVal = Number($aSize[1])
             Local $sUnit = $aSize[2]
             Local $iSizeBytes = $iSizeVal
-            If StringInStr($sUnit, "T") Then $iSizeBytes *= 1024^4 [cite: 6]
+            If StringInStr($sUnit, "T") Then $iSizeBytes *= 1024^4
             If StringInStr($sUnit, "G") Then $iSizeBytes *= 1024^3
             If StringInStr($sUnit, "M") Then $iSizeBytes *= 1024^2
             If StringInStr($sUnit, "K") Then $iSizeBytes *= 1024
-            
+
             Local $iIdx = UBound($aPartitions)
-            ReDim $aPartitions[$iIdx + 1][4] [cite: 7]
+            ReDim $aPartitions[$iIdx + 1][4]
             $aPartitions[$iIdx][0] = $iNum
             $aPartitions[$iIdx][1] = $sType
             $aPartitions[$iIdx][2] = $sSize
