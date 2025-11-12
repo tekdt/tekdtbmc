@@ -736,7 +736,6 @@ Func _AnalyzePartitions()
 			Local $bBootPartition = False
 			Local $sDeviceID = ""
 			Local $sExistingLetter = ""
-			Local $iWMIIndex = -1  ; Không dùng index giả định nữa
 
 			; Tìm WMI partition match bằng size (tolerance 1MB để bù rounding)
 			Local $iTolerance = 1048576  ; 1MB
@@ -744,107 +743,93 @@ Func _AnalyzePartitions()
 				If Abs($aWMIParts[$iW][2] - $iDPSizeBytes) < $iTolerance Then
 					$bFoundInWMI = True
 					$iWMIIndex = $aWMIParts[$iW][0]
-					$sPartType = $aWMIParts[$iW][1]  ; Ưu tiên type WMI nếu match
-					$iSizeBytes = $aWMIParts[$iW][2]  ; Dùng size exact từ WMI
+					$sPartType = $aWMIParts[$iW][1]
+					$iSizeBytes = $aWMIParts[$iW][2]
 					$bBootPartition = $aWMIParts[$iW][3]
 					$sDeviceID = $aWMIParts[$iW][4]
 					$sExistingLetter = _GetDriveLetterFromPartition($oWMI, $sDeviceID)
-					ExitLoop  ; Giả sử size unique, lấy match đầu tiên
+					ExitLoop
 				EndIf
 			Next
 
-			; Nếu không match WMI, ưu tiên type từ DiskPart (ví dụ cho MSR ẩn)
-			If Not $bFoundInWMI Then
-				$sPartType = $sDPType
+			If $bBootPartition Then $sNotes &= " 🚀 Khởi động"
+
+			Local $iSizeMB = Round($iSizeBytes / (1024^2))
+			Local $sUnit = "MB"
+			Local $iDisplaySize = $iSizeMB
+			If $iSizeMB >= 1024 Then
+				$sUnit = "GB"
+				$iDisplaySize = Round($iSizeMB / 1024, 2)
 			EndIf
 
-			; Phần logic phân loại giữ nguyên, nhưng thêm ưu tiên nếu DP type là "Recovery" hoặc "Reserved"
-			If StringInStr($sDPType, "Recovery") Or StringInStr($sDPType, "Phục hồi") Then
+			Local $bIsSystemType = False
+
+			;  Logic phân loại (kết hợp Type từ DP/WMI)
+			If StringInStr($sPartType, "EFI") Or StringInStr($sPartType, "System") Or StringInStr($sPartType, "Hệ thống") Then
 				$bIsSystemType = True
-				$sNotes &= " ⚠️ Recovery (ưu tiên từ DiskPart)"
-			ElseIf StringInStr($sDPType, "Reserved") Or StringInStr($sDPType, "Dự trữ") Then
+				$sNotes &= " ⚠️ EFI System"
+			ElseIf StringInStr($sPartType, "Recovery") Or StringInStr($sPartType, "Phục hồi") Then
 				$bIsSystemType = True
-				$sNotes &= " ⚠️ MSR Reserved (from DiskPart)"
+				$sNotes &= " ⚠️ Recovery"
+			ElseIf StringInStr($sPartType, "Reserved") Or StringInStr($sPartType, "MSR") Or StringInStr($sPartType, "Microsoft reserved") Or StringInStr($sPartType, "Dự trữ") Then
+				$bIsSystemType = True
+				$sNotes &= " ⚠️ MSR Reserved"
+			ElseIf StringInStr($sPartType, "OEM") Then
+				$bIsSystemType = True
+				$sNotes &= " ⚠️ OEM"
+			ElseIf StringInStr($sPartType, "Linux") Then
+				$bIsSystemType = True
+				$sNotes &= " ⚠️ Linux Partition"
+			ElseIf StringInStr($sPartType, "Apple") Or StringInStr($sPartType, "HFS") Or StringInStr($sPartType, "APFS") Then
+				$bIsSystemType = True
+				$sNotes &= " ⚠️ MacOS Partition"
+			ElseIf StringInStr($sPartType, "Unknown") Or Not $bFoundInWMI Then
+				;  Kiểm tra size cho MSR/Recovery
+				If $sExistingLetter = "" And _
+				   (($iSizeBytes >= 15*1048576 And $iSizeBytes <= 17*1048576) Or _
+					($iSizeBytes >= 128*1048576 And $iSizeBytes <= 130*1048576)) Then
+					$bIsSystemType = True
+					$sNotes &= " ⚠️ MSR Reserved"
+				ElseIf $iSizeMB >= 450 And $iSizeMB <= 1024 Then
+					If $bFoundInWMI And _IsRecoveryPartition($oWMI, $oDisk.Index, $iWMIIndex) Then
+						$bIsSystemType = True
+						$sNotes &= " ⚠️ Recovery"
+					EndIf
+				EndIf
 			EndIf
 
-            If $bBootPartition Then $sNotes &= " 🚀 Khởi động"
+			; Phân loại thêm nếu không phải system
+			If Not $bIsSystemType And $bFoundInWMI Then
+				
+				; *** Ưu tiên kiểm tra Recovery TRƯỚC Windows ***
+				If _IsRecoveryPartition($oWMI, $oDisk.Index, $iWMIIndex) Then
+					$bIsSystemType = True
+					$sNotes &= " ⚠️ Recovery"
+				
+				ElseIf $iSizeMB > 8000 And _IsWindowsPartition($oWMI, $oDisk.Index, $iWMIIndex) Then
+					$sNotes &= " 💻 Windows cũ"
+					
+				ElseIf $sExistingLetter <> "" Then
+					$sNotes &= " 👤 Dữ liệu người dùng"
+				Else
+					; *** Bắt các phân vùng MSR (16/128MB) bị bỏ sót (khi Type không phải "Reserved") ***
+					If $sExistingLetter = "" And _
+					   (($iSizeBytes >= 15*1048576 And $iSizeBytes <= 17*1048576) Or _
+						($iSizeBytes >= 128*1048576 And $iSizeBytes <= 130*1048576)) Then
+						$bIsSystemType = True
+						$sNotes &= " ⚠️ MSR Reserved"
+					EndIf
+				EndIf
+			EndIf
 
-            Local $iSizeMB = Round($iSizeBytes / (1024^2))
-            Local $sUnit = "MB"
-            Local $iDisplaySize = $iSizeMB
-            If $iSizeMB >= 1024 Then
-                $sUnit = "GB"
-                $iDisplaySize = Round($iSizeMB / 1024, 2)
-            EndIf
-
-            Local $bIsSystemType = False
-
-            ;  Logic phân loại (kết hợp Type từ DP/WMI)
-            If StringInStr($sPartType, "EFI") Or StringInStr($sPartType, "System") Or StringInStr($sPartType, "Hệ thống") Then
-                $bIsSystemType = True
-                $sNotes &= " ⚠️ EFI System"
-            ElseIf StringInStr($sPartType, "Recovery") Or StringInStr($sPartType, "Phục hồi") Then
-                $bIsSystemType = True
-                $sNotes &= " ⚠️ Recovery"
-            ElseIf StringInStr($sPartType, "Reserved") Or StringInStr($sPartType, "MSR") Or StringInStr($sPartType, "Microsoft reserved") Or StringInStr($sPartType, "Dự trữ") Then
-                $bIsSystemType = True
-                $sNotes &= " ⚠️ MSR Reserved"
-            ElseIf StringInStr($sPartType, "OEM") Then
-                $bIsSystemType = True
-                $sNotes &= " ⚠️ OEM"
-            ElseIf StringInStr($sPartType, "Linux") Then
-                $bIsSystemType = True
-                $sNotes &= " ⚠️ Linux Partition"
-            ElseIf StringInStr($sPartType, "Apple") Or StringInStr($sPartType, "HFS") Or StringInStr($sPartType, "APFS") Then
-                $bIsSystemType = True
-                $sNotes &= " ⚠️ MacOS Partition"
-            ElseIf StringInStr($sPartType, "Unknown") Or Not $bFoundInWMI Then
-                ;  Kiểm tra size cho MSR/Recovery
-                If $sExistingLetter = "" And _
-                   (($iSizeBytes >= 15*1048576 And $iSizeBytes <= 17*1048576) Or _
-                    ($iSizeBytes >= 128*1048576 And $iSizeBytes <= 130*1048576)) Then
-                    $bIsSystemType = True
-                    $sNotes &= " ⚠️ MSR Reserved (16/128MB)"
-                ElseIf $iSizeMB >= 450 And $iSizeMB <= 1024 Then
-                    If $bFoundInWMI And _IsRecoveryPartition($oWMI, $oDisk.Index, $iWMIIndex) Then
-                        $bIsSystemType = True
-                        $sNotes &= " ⚠️ Recovery (WinRE)"
-                    EndIf
-                EndIf
-            EndIf
-
-            ; Phân loại thêm nếu không phải system
-            If Not $bIsSystemType And $bFoundInWMI Then
-                
-                ; *** Ưu tiên kiểm tra Recovery TRƯỚC Windows ***
-                If _IsRecoveryPartition($oWMI, $oDisk.Index, $iWMIIndex) Then
-                    $bIsSystemType = True
-                    $sNotes &= " ⚠️ Recovery (WinRE)"
-                
-                ElseIf $iSizeMB > 8000 And _IsWindowsPartition($oWMI, $oDisk.Index, $iWMIIndex) Then
-                    $sNotes &= " 💻 Windows cũ"
-                    
-                ElseIf $sExistingLetter <> "" Then
-                    $sNotes &= " 👤 Dữ liệu người dùng"
-                Else
-                    ; *** Bắt các phân vùng MSR (16/128MB) bị bỏ sót (khi Type không phải "Reserved") ***
-                    If $sExistingLetter = "" And _
-                       (($iSizeBytes >= 15*1048576 And $iSizeBytes <= 17*1048576) Or _
-                        ($iSizeBytes >= 128*1048576 And $iSizeBytes <= 130*1048576)) Then
-                        $bIsSystemType = True
-                        $sNotes &= " ⚠️ MSR Reserved (16/128MB)"
-                    EndIf
-                EndIf
-            EndIf
-
-            Local $iIdx = UBound($aPartitions)
-            ReDim $aPartitions[$iIdx + 1][5]
-            $aPartitions[$iIdx][0] = $sDiskInfo
-            $aPartitions[$iIdx][1] = $iPartitionNum
-            $aPartitions[$iIdx][2] = $sPartType
-            $aPartitions[$iIdx][3] = $iDisplaySize & " " & $sUnit
-            $aPartitions[$iIdx][4] = $sNotes & (Not $bFoundInWMI ? " (from DiskPart)" : "")
-        Next
+			Local $iIdx = UBound($aPartitions)
+			ReDim $aPartitions[$iIdx + 1][5]
+			$aPartitions[$iIdx][0] = $sDiskInfo
+			$aPartitions[$iIdx][1] = $iPartitionNum
+			$aPartitions[$iIdx][2] = $sPartType
+			$aPartitions[$iIdx][3] = $iDisplaySize & " " & $sUnit
+			$aPartitions[$iIdx][4] = $sNotes
+		Next
 
         If UBound($aDiskPartParts) = 0 Then
             Local $iIdx = UBound($aPartitions)
@@ -938,98 +923,90 @@ Func _AutoCleanPartitions()
         For $iDP = 0 To UBound($aDiskPartParts) - 1
 			Local $iPartitionNum = $aDiskPartParts[$iDP][0]
 			Local $sDPType = $aDiskPartParts[$iDP][1]
-			Local $sDPSizeStr = $aDiskPartParts[$iDP][2]
-			Local $iDPSizeBytes = $aDiskPartParts[$iDP][3]
+			Local $sSizeStr = $aDiskPartParts[$iDP][2]
+			Local $iSizeBytes = $aDiskPartParts[$iDP][3]
+			Local $iSizeMB = Round($iSizeBytes / (1024^2))
 
 			Local $bFoundInWMI = False
 			Local $sPartType = $sDPType
-			Local $iSizeBytes = $iDPSizeBytes
-			Local $sNotes = ""
-			Local $bBootPartition = False
-			Local $sDeviceID = ""
 			Local $sExistingLetter = ""
-			Local $iWMIIndex = -1  ; Không dùng index giả định nữa
+			Local $sReason = ""
+			Local $bShouldDelete = False
+			Local $bIsKnownSystemType = False
 
-			; Tìm WMI partition match bằng size (tolerance 1MB để bù rounding)
-			Local $iTolerance = 1048576  ; 1MB
+			; Tìm WMI partition match bằng size (tolerance 1MB)
+			Local $iTolerance = 1048576
 			For $iW = 0 To UBound($aWMIParts) - 1
-				If Abs($aWMIParts[$iW][2] - $iDPSizeBytes) < $iTolerance Then
+				If Abs($aWMIParts[$iW][2] - $iSizeBytes) < $iTolerance Then
 					$bFoundInWMI = True
 					$iWMIIndex = $aWMIParts[$iW][0]
-					$sPartType = $aWMIParts[$iW][1]  ; Ưu tiên type WMI nếu match
-					$iSizeBytes = $aWMIParts[$iW][2]  ; Dùng size exact từ WMI
-					$bBootPartition = $aWMIParts[$iW][3]
-					$sDeviceID = $aWMIParts[$iW][4]
-					$sExistingLetter = _GetDriveLetterFromPartition($oWMI, $sDeviceID)
-					ExitLoop  ; Giả sử size unique, lấy match đầu tiên
+					$sPartType = $aWMIParts[$iW][1]  ; Ưu tiên WMI
+					$iSizeBytes = $aWMIParts[$iW][2]
+					$sExistingLetter = $aWMIParts[$iW][4]
+					ExitLoop
 				EndIf
 			Next
-			
-			; Nếu không match WMI, ưu tiên type từ DiskPart (ví dụ cho MSR ẩn)
-			If Not $bFoundInWMI Then
-				$sPartType = $sDPType
+
+			; Kiểm tra type kết hợp (thêm hỗ trợ ngôn ngữ VN)
+			If StringInStr($sPartType, "EFI") Or StringInStr($sPartType, "System") Or StringInStr($sPartType, "Hệ thống") Then
+				$bIsKnownSystemType = True
+				$sReason = "EFI System"
+			ElseIf StringInStr($sPartType, "Recovery") Or StringInStr($sPartType, "Phục hồi") Then
+				$bIsKnownSystemType = True
+				$sReason = "Recovery"
+			ElseIf StringInStr($sPartType, "Reserved") Or StringInStr($sPartType, "MSR") Or StringInStr($sPartType, "Microsoft reserved") Or StringInStr($sPartType, "Dự trữ") Then
+				$bIsKnownSystemType = True
+				$sReason = "MSR Reserved"
+			ElseIf StringInStr($sPartType, "OEM") Then
+				$bIsKnownSystemType = True
+				$sReason = "OEM"
+			ElseIf StringInStr($sPartType, "Linux") Then
+				$bIsKnownSystemType = True
+				$sReason = "Linux Partition"
+			ElseIf StringInStr($sPartType, "Apple") Or StringInStr($sPartType, "HFS") Or StringInStr($sPartType, "APFS") Then
+				$bIsKnownSystemType = True
+				$sReason = "MacOS Partition"
+			ElseIf StringInStr($sPartType, "Unknown") Or Not $bFoundInWMI Then
+				If $sExistingLetter = "" And _
+				   (($iSizeBytes >= 15*1048576 And $iSizeBytes <= 17*1048576) Or _
+					($iSizeBytes >= 128*1048576 And $iSizeBytes <= 130*1048576)) Then
+					$bIsKnownSystemType = True
+					$sReason = "MSR Reserved"
+				ElseIf $iSizeMB >= 500 And $iSizeMB <= 1024 Then
+					If $bFoundInWMI And _IsRecoveryPartition($oWMI, $oDisk.Index, $iWMIIndex) Then
+						$bIsKnownSystemType = True
+						$sReason = "Recovery"
+					EndIf
+				EndIf
 			EndIf
 
-            ; Kiểm tra type kết hợp (thêm hỗ trợ ngôn ngữ VN)
-            If StringInStr($sPartType, "EFI") Or StringInStr($sPartType, "System") Or StringInStr($sPartType, "Hệ thống") Then
-                $bIsKnownSystemType = True
-                $sReason = "EFI System"
-            ElseIf StringInStr($sPartType, "Recovery") Or StringInStr($sPartType, "Phục hồi") Then
-                $bIsKnownSystemType = True
-                $sReason = "Recovery"
-            ElseIf StringInStr($sPartType, "Reserved") Or StringInStr($sPartType, "MSR") Or StringInStr($sPartType, "Microsoft reserved") Or StringInStr($sPartType, "Dự trữ") Then
-                $bIsKnownSystemType = True
-                $sReason = "MSR Reserved"
-            ElseIf StringInStr($sPartType, "OEM") Then
-                $bIsKnownSystemType = True
-                $sReason = "OEM"
-            ElseIf StringInStr($sPartType, "Linux") Then
-                $bIsKnownSystemType = True
-                $sReason = "Linux Partition"
-            ElseIf StringInStr($sPartType, "Apple") Or StringInStr($sPartType, "HFS") Or StringInStr($sPartType, "APFS") Then
-                $bIsKnownSystemType = True
-                $sReason = "MacOS Partition"
-            ElseIf StringInStr($sPartType, "Unknown") Or Not $bFoundInWMI Then
-                If $sExistingLetter = "" And _
-                   (($iSizeBytes >= 15*1048576 And $iSizeBytes <= 17*1048576) Or _
-                    ($iSizeBytes >= 128*1048576 And $iSizeBytes <= 130*1048576)) Then
-                    $bIsKnownSystemType = True
-                    $sReason = "MSR Reserved (16/128MB)"
-                ElseIf $iSizeMB >= 500 And $iSizeMB <= 1024 Then
-                    If $bFoundInWMI And _IsRecoveryPartition($oWMI, $oDisk.Index, $iWMIIndex) Then
-                        $bIsKnownSystemType = True
-                        $sReason = "Recovery (WinRE)"
-                    EndIf
-                EndIf
-            EndIf
+			; Quyết định xoá
+			If $bIsKnownSystemType Then
+				$bShouldDelete = True
+			ElseIf $bFoundInWMI And _IsWindowsPartition($oWMI, $oDisk.Index, $iWMIIndex) Then
+				$sReason = "Windows cũ"
+				$bShouldDelete = True
+			ElseIf $bFoundInWMI And _IsRecoveryPartition($oWMI, $oDisk.Index, $iWMIIndex) Then
+				$sReason = "Recovery"
+				$bShouldDelete = True
+			ElseIf $iSizeMB > $iDataThresholdMB Then
+				$bShouldDelete = False
+				$sReason = "Dữ liệu (> " & $iDataThresholdMB & " MB)"
+			Else
+				$sReason = "Phân vùng nhỏ không rõ (< " & $iDataThresholdMB & " MB)"
+				$bShouldDelete = True
+			EndIf
 
-            ; Quyết định xoá
-            If $bIsKnownSystemType Then
-                $bShouldDelete = True
-            ElseIf $bFoundInWMI And _IsWindowsPartition($oWMI, $oDisk.Index, $iWMIIndex) Then
-                $sReason = "Chứa hệ điều hành cũ"
-                $bShouldDelete = True
-            ElseIf $bFoundInWMI And _IsRecoveryPartition($oWMI, $oDisk.Index, $iWMIIndex) Then
-                $sReason = "Recovery (WinRE cũ)"
-                $bShouldDelete = True
-            ElseIf $iSizeMB > $iDataThresholdMB Then
-                $bShouldDelete = False
-                $sReason = "Dữ liệu (> " & $iDataThresholdMB & " MB)"
-            Else
-                $sReason = "Phân vùng nhỏ không rõ (< " & $iDataThresholdMB & " MB)"
-                $bShouldDelete = True
-            EndIf
-
-            If $bShouldDelete Then
-                Local $iIdx = UBound($aToDelete)
-                ReDim $aToDelete[$iIdx + 1][5]
-                $aToDelete[$iIdx][0] = $oDisk.Index
-                $aToDelete[$iIdx][1] = $iPartitionNum
-                $aToDelete[$iIdx][2] = $sPartType
-                $aToDelete[$iIdx][3] = $sSizeStr
-                $aToDelete[$iIdx][4] = $sReason
-            EndIf
-        Next
+			If $bShouldDelete Then
+				Local $iIdx = UBound($aToDelete)
+				ReDim $aToDelete[$iIdx + 1][5]
+				$aToDelete[$iIdx][0] = $oDisk.Index
+				$aToDelete[$iIdx][1] = $iPartitionNum
+				$aToDelete[$iIdx][2] = $sPartType
+				$aToDelete[$iIdx][3] = $sSizeStr
+				$aToDelete[$iIdx][4] = $sReason
+			EndIf
+		Next
     Next
 
     If UBound($aToDelete) <= 0 Then
