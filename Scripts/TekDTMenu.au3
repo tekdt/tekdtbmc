@@ -62,6 +62,8 @@ Global $g_iTitleBarColor = 0x0070C0 ; Màu xanh dương đậm cho title bar
 ; Mảng màu pastel (hoàn toàn không trong suốt)
 Global $aPastelColors = [0xFFD700, 0xFF6347, 0x98FB98, 0xDDA0DD, 0xAFEEEE, 0xF0E68C, 0xFFB6C1, 0xE6E6FA]
 
+FileExists($RootDevice&'\ventoy\DebugLog.txt') Then FileDelete($RootDevice&'\ventoy\DebugLog.txt')
+
 _Main()
 
 Func _Main()
@@ -577,13 +579,26 @@ Func _GetPartitionsFromDiskPart($iDiskIndex)
     FileWriteLine($hFile, "list partition")
     FileClose($hFile)
 
-    Local $sOutputFile = @TempDir & "\diskpart_out.txt"
-    RunWait('diskpart /s "' & $sScriptFile & '" > "' & $sOutputFile & '"', "", @SW_HIDE)
+    ; === THAY ĐỔI CỐT LÕI: Chuyển từ File I/O sang Stdout I/O ===
+    Local $sOutput = ""
+    Local $sTempRead
+    
+    ; Chạy diskpart và báo cho AutoIt biết chúng ta muốn bắt output
+    Local $hProcess = Run('diskpart /s "' & $sScriptFile & '"', "", @SW_HIDE, $STDOUT_CHILD)
+    
+    ; Đọc output cho đến khi tiến trình kết thúc
+    While 1
+        $sTempRead = StdRead($hProcess)
+        If @error Then ExitLoop ; @error = 1 khi không còn gì để đọc (tiến trình đã đóng)
+        $sOutput &= $sTempRead
+    WEnd
+    
+    ProcessWaitClose($hProcess) ; Đảm bảo tiến trình đã đóng hoàn toàn
     FileDelete($sScriptFile)
+    ; === KẾT THÚC THAY ĐỔI I/O ===
 
-    Local $sOutput = FileRead($sOutputFile)
-    FileDelete($sOutputFile)
-
+    
+    ; Phần logic phân tích (parsing) V3 được giữ nguyên vì nó đã đúng
     Local $aLines = StringSplit($sOutput, @CRLF, 1)
     Local $aPartitions[0][4]  ; [0]: Num (1-based), [1]: Type, [2]: SizeStr, [3]: SizeBytes
     Local $bFoundHeader = False ; Cờ (flag) để theo dõi dòng "---"
@@ -591,47 +606,30 @@ Func _GetPartitionsFromDiskPart($iDiskIndex)
     For $i = 1 To $aLines[0]
         Local $sLine = $aLines[$i]
 
-        ; === LOGIC MỚI 1: Tìm dòng gạch ngang --- ===
-        ; Nếu chưa tìm thấy header, hãy tìm nó
         If Not $bFoundHeader Then
-            ; "^\s*-" nghĩa là: Bắt đầu (^) bằng 0+ dấu cách (\s*) và 1 dấu gạch ngang (-)
             If StringRegExp($sLine, "^\s*-") Then
                 $bFoundHeader = True
             EndIf
-            ContinueLoop ; Bỏ qua dòng này (dù là header hay là rác ở trên)
+            ContinueLoop
         EndIf
 
-        ; === LOGIC MỚI 2: Xử lý các dòng dữ liệu SAU header ===
-        $sLine = StringStripWS($sLine, 3) ; Dọn dẹp 2 đầu
+        $sLine = StringStripWS($sLine, 3)
         If $sLine = "" Then ContinueLoop
 
-        ; === LOGIC MỚI 3: Thay thế 2+ dấu cách bằng ký tự '|' ===
-        ; "\s{2,}" nghĩa là "tìm một ký tự khoảng trắng (\s) lặp lại 2 lần hoặc nhiều hơn {2,}"
-        ; Điều này đảm bảo "Partition 1" (1 dấu cách) không bị tách,
-        ; nhưng "Partition 1   System" (nhiều dấu cách) sẽ bị tách.
         Local $sNormalizedLine = StringRegExpReplace($sLine, "\s{2,}", "|")
+        Local $aCols = StringSplit($sNormalizedLine, "|", 1)
 
-        ; Tách các cột bằng dấu '|'
-        Local $aCols = StringSplit($sNormalizedLine, "|", 1) ; 1 = bỏ qua các chuỗi rỗng
-
-        ; Chúng ta cần ít nhất 3 cột (Partition, Type, Size)
         If $aCols[0] < 3 Then ContinueLoop
 
-        ; $aCols[1] = "Partition 1" hoặc "Phân vùng 1"
-        ; $aCols[2] = "System" hoặc "Microsoft reserved"
-        ; $aCols[3] = "100 MB"
-
-        ; Lấy số phân vùng từ cột đầu tiên
-        Local $aNumMatch = StringRegExp($aCols[1], "(\d+)", 3) ; 3 = trả về mảng
-        If UBound($aNumMatch) = 0 Then ContinueLoop ; Không tìm thấy số
+        Local $aNumMatch = StringRegExp($aCols[1], "(\d+)", 3)
+        If UBound($aNumMatch) = 0 Then ContinueLoop
         Local $iNum = Number($aNumMatch[0])
 
-        Local $sType = $aCols[2]  ; Loại (đã được tách chính xác)
-        Local $sSize = $aCols[3]  ; Kích thước
+        Local $sType = $aCols[2]
+        Local $sSize = $aCols[3]
 
-        ; Chuyển đổi kích thước sang bytes (giữ nguyên logic của bạn)
         Local $aSize = StringSplit($sSize, " ", 1)
-        If $aSize[0] < 2 Then ContinueLoop ; Không phân tích được size (ví dụ: 100MB dính liền)
+        If $aSize[0] < 2 Then ContinueLoop
 
         Local $iSizeVal = Number($aSize[1])
         Local $sUnit = $aSize[2]
@@ -641,7 +639,6 @@ Func _GetPartitionsFromDiskPart($iDiskIndex)
         If StringInStr($sUnit, "M") Then $iSizeBytes *= 1024^2
         If StringInStr($sUnit, "K") Then $iSizeBytes *= 1024
 
-        ; Thêm vào mảng kết quả
         Local $iIdx = UBound($aPartitions)
         ReDim $aPartitions[$iIdx + 1][4]
         $aPartitions[$iIdx][0] = $iNum
@@ -649,9 +646,15 @@ Func _GetPartitionsFromDiskPart($iDiskIndex)
         $aPartitions[$iIdx][2] = $sSize
         $aPartitions[$iIdx][3] = $iSizeBytes
     Next
-    
-	RecordLogforDebug("Bên dưới là log khi chạy DiskPart"&@CRLF&_ArrayToString($aPartitions))
-	
+
+    ; Nếu thất bại, nó sẽ báo cho bạn biết *chính xác* DiskPart đã trả về cái gì
+    If UBound($aPartitions) = 0 Then
+        RecordLogforDebug("Không thể phân tích đầu ra DiskPart." & @CRLF & _
+                 "Số dòng đọc được: " & $aLines[0] & @CRLF & _
+                 "Đầu ra thô (Raw Output):" & @CRLF & $sOutput)
+    EndIf
+    ; === Kết thúc bước gỡ lỗi ===
+
     Return $aPartitions
 EndFunc
 
