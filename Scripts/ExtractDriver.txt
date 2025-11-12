@@ -5,7 +5,7 @@ Func _GetPartitionsFromDiskPart($iDiskIndex)
     FileWriteLine($hFile, "list partition")
     FileClose($hFile)
 
-    ; === THAY ĐỔI CỐT LÕI: Chuyển từ File I/O sang Stdout I/O ===
+    ; === Chuyển từ File I/O sang Stdout I/O ===
     Local $sOutput = ""
     Local $sTempRead
 
@@ -80,7 +80,7 @@ Func _GetPartitionsFromDiskPart($iDiskIndex)
                  "Đầu ra thô (Raw Output):" & @CRLF & $sOutput)
     EndIf
     ; === Kết thúc bước gỡ lỗi ===
-
+	RecordLogforDebug("Tất cả partition trên Disk "&$iDiskIndex&@CRLF&_ArrayToString($aPartitions))
     Return $aPartitions
 EndFunc
 
@@ -96,7 +96,7 @@ Func _AnalyzePartitions()
     EndIf
 
     Local $colDisks = $oWMI.ExecQuery("SELECT * FROM Win32_DiskDrive")
-	If Not IsObj($colDisks) Then
+    If Not IsObj($colDisks) Then
         RecordLogforDebug("WMI Query (colDisks) thất bại.")
         Return
     EndIf
@@ -110,13 +110,13 @@ Func _AnalyzePartitions()
         If _ArraySearch($exclusion_keywords, $oDisk.InterfaceType) <> -1 Then ContinueLoop
 
         RecordLogforDebug("Bước 2: Đang xử lý Disk " & $oDisk.Index & " (" & $oDisk.Model & ")" & @CRLF & "Interface: " & $oDisk.InterfaceType)
-		Local $sDiskInfo = StringFormat("Disk %i (%s GB - %s)", $oDisk.Index, Round($oDisk.Size / (1024^3), 2), $oDisk.Model)
+        Local $sDiskInfo = StringFormat("Disk %i (%s GB - %s)", $oDisk.Index, Round($oDisk.Size / (1024^3), 2), $oDisk.Model)
         Local $sQuery = "SELECT * FROM Win32_DiskPartition WHERE DiskIndex = " & $oDisk.Index
         Local $colPartitions = $oWMI.ExecQuery($sQuery)
 
         ; Lấy partitions từ DiskPart để merge
         Local $aDiskPartParts = _GetPartitionsFromDiskPart($oDisk.Index)
-		RecordLogforDebug("Bước 3: Hàm _GetPartitionsFromDiskPart trả về " & UBound($aDiskPartParts) & " phân vùng cho Disk " & $oDisk.Index)
+        RecordLogforDebug("Bước 3: Hàm _GetPartitionsFromDiskPart trả về " & UBound($aDiskPartParts) & " phân vùng cho Disk " & $oDisk.Index)
 
         Local $aWMIParts[0][6]  ; Tạm lưu WMI parts để merge: [0]: Index (0-based), [1]: Type, [2]: SizeBytes, [3]: BootPartition, [4]: DeviceID, [5]: Notes (temp)
 
@@ -129,18 +129,18 @@ Func _AnalyzePartitions()
                 $aWMIParts[$iIdx][2] = $oPartition.Size
                 $aWMIParts[$iIdx][3] = $oPartition.BootPartition
                 $aWMIParts[$iIdx][4] = $oPartition.DeviceID
-                $aWMIParts[$iIdx][5] = ""  ; Notes temp
+                $aWMIParts[$iIdx][5] = ""
             Next
         EndIf
 
-        ; Merge và xử lý từng partition (ưu tiên DiskPart cho miss, WMI cho details)
+        ;  Merge và xử lý từng partition (ưu tiên DiskPart cho miss, WMI cho details)
         For $iDP = 0 To UBound($aDiskPartParts) - 1
-            Local $iPartitionNum = $aDiskPartParts[$iDP][0]  ; 1-based
+            Local $iPartitionNum = $aDiskPartParts[$iDP][0]
             Local $sDPType = $aDiskPartParts[$iDP][1]
             Local $sDPSizeStr = $aDiskPartParts[$iDP][2]
             Local $iDPSizeBytes = $aDiskPartParts[$iDP][3]
 
-            Local $iWMIIndex = $iPartitionNum - 1  ; WMI 0-based
+            Local $iWMIIndex = $iPartitionNum - 1
             Local $bFoundInWMI = False
             Local $sPartType = $sDPType
             Local $iSizeBytes = $iDPSizeBytes
@@ -149,11 +149,10 @@ Func _AnalyzePartitions()
             Local $sDeviceID = ""
             Local $sExistingLetter = ""
 
-            ; Tìm match trong WMI
             For $iW = 0 To UBound($aWMIParts) - 1
                 If $aWMIParts[$iW][0] = $iWMIIndex Then
                     $bFoundInWMI = True
-                    $sPartType = $aWMIParts[$iW][1]  ; Ưu tiên WMI type nếu có
+                    $sPartType = $aWMIParts[$iW][1]
                     $iSizeBytes = $aWMIParts[$iW][2]
                     $bBootPartition = $aWMIParts[$iW][3]
                     $sDeviceID = $aWMIParts[$iW][4]
@@ -174,7 +173,7 @@ Func _AnalyzePartitions()
 
             Local $bIsSystemType = False
 
-            ; Logic phân loại (kết hợp Type từ DP/WMI)
+            ;  Logic phân loại (kết hợp Type từ DP/WMI)
             If StringInStr($sPartType, "EFI") Or StringInStr($sPartType, "System") Or StringInStr($sPartType, "Hệ thống") Then
                 $bIsSystemType = True
                 $sNotes &= " ⚠️ EFI System"
@@ -194,13 +193,13 @@ Func _AnalyzePartitions()
                 $bIsSystemType = True
                 $sNotes &= " ⚠️ MacOS Partition"
             ElseIf StringInStr($sPartType, "Unknown") Or Not $bFoundInWMI Then
-                ; Kiểm tra size cho MSR/Recovery
+                ;  Kiểm tra size cho MSR/Recovery
                 If $sExistingLetter = "" And _
                    (($iSizeBytes >= 15*1048576 And $iSizeBytes <= 17*1048576) Or _
                     ($iSizeBytes >= 128*1048576 And $iSizeBytes <= 130*1048576)) Then
                     $bIsSystemType = True
                     $sNotes &= " ⚠️ MSR Reserved (16/128MB)"
-                ElseIf $iSizeMB >= 500 And $iSizeMB <= 1024 Then
+                ElseIf $iSizeMB >= 450 And $iSizeMB <= 1024 Then
                     If $bFoundInWMI And _IsRecoveryPartition($oWMI, $oDisk.Index, $iWMIIndex) Then
                         $bIsSystemType = True
                         $sNotes &= " ⚠️ Recovery (WinRE)"
@@ -210,13 +209,25 @@ Func _AnalyzePartitions()
 
             ; Phân loại thêm nếu không phải system
             If Not $bIsSystemType And $bFoundInWMI Then
-                If _IsWindowsPartition($oWMI, $oDisk.Index, $iWMIIndex) Then
-                    $sNotes &= " 💻 Windows cũ"
-                ElseIf _IsRecoveryPartition($oWMI, $oDisk.Index, $iWMIIndex) Then
+                
+                ; *** Ưu tiên kiểm tra Recovery TRƯỚC Windows ***
+                If _IsRecoveryPartition($oWMI, $oDisk.Index, $iWMIIndex) Then
                     $bIsSystemType = True
                     $sNotes &= " ⚠️ Recovery (WinRE)"
+                
+                ElseIf $iSizeMB > 8000 And _IsWindowsPartition($oWMI, $oDisk.Index, $iWMIIndex) Then
+                    $sNotes &= " 💻 Windows cũ"
+                    
                 ElseIf $sExistingLetter <> "" Then
                     $sNotes &= " 👤 Dữ liệu người dùng"
+                Else
+                    ; *** Bắt các phân vùng MSR (16/128MB) bị bỏ sót (khi Type không phải "Reserved") ***
+                    If $sExistingLetter = "" And _
+                       (($iSizeBytes >= 15*1048576 And $iSizeBytes <= 17*1048576) Or _
+                        ($iSizeBytes >= 128*1048576 And $iSizeBytes <= 130*1048576)) Then
+                        $bIsSystemType = True
+                        $sNotes &= " ⚠️ MSR Reserved (16/128MB)"
+                    EndIf
                 EndIf
             EndIf
 
@@ -257,7 +268,7 @@ Func _AnalyzePartitions()
     Next
 
     For $i = 0 To 4
-        _GUICtrlListView_SetColumnWidth($hList, $i, $LVSCW_AUTOSIZE)
+        _GUICtrlListView_SetColumnWidth($hList, $i, $LVSCW_AUTOSIZE_USEHEADER) ; (Dùng USEHEADER như đã sửa ở truy vấn trước)
     Next
 
     _AdjustPopupLayout($hGUI, $hList, $aButtons)
