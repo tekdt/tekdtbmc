@@ -724,31 +724,48 @@ Func _AnalyzePartitions()
 
         ;  Merge và xử lý từng partition (ưu tiên DiskPart cho miss, WMI cho details)
         For $iDP = 0 To UBound($aDiskPartParts) - 1
-            Local $iPartitionNum = $aDiskPartParts[$iDP][0]
-            Local $sDPType = $aDiskPartParts[$iDP][1]
-            Local $sDPSizeStr = $aDiskPartParts[$iDP][2]
-            Local $iDPSizeBytes = $aDiskPartParts[$iDP][3]
+			Local $iPartitionNum = $aDiskPartParts[$iDP][0]
+			Local $sDPType = $aDiskPartParts[$iDP][1]
+			Local $sDPSizeStr = $aDiskPartParts[$iDP][2]
+			Local $iDPSizeBytes = $aDiskPartParts[$iDP][3]
 
-            Local $iWMIIndex = $iPartitionNum - 1
-            Local $bFoundInWMI = False
-            Local $sPartType = $sDPType
-            Local $iSizeBytes = $iDPSizeBytes
-            Local $sNotes = ""
-            Local $bBootPartition = False
-            Local $sDeviceID = ""
-            Local $sExistingLetter = ""
+			Local $bFoundInWMI = False
+			Local $sPartType = $sDPType
+			Local $iSizeBytes = $iDPSizeBytes
+			Local $sNotes = ""
+			Local $bBootPartition = False
+			Local $sDeviceID = ""
+			Local $sExistingLetter = ""
+			Local $iWMIIndex = -1  ; Không dùng index giả định nữa
 
-            For $iW = 0 To UBound($aWMIParts) - 1
-                If $aWMIParts[$iW][0] = $iWMIIndex Then
-                    $bFoundInWMI = True
-                    $sPartType = $aWMIParts[$iW][1]
-                    $iSizeBytes = $aWMIParts[$iW][2]
-                    $bBootPartition = $aWMIParts[$iW][3]
-                    $sDeviceID = $aWMIParts[$iW][4]
-                    $sExistingLetter = _GetDriveLetterFromPartition($oWMI, $sDeviceID)
-                    ExitLoop
-                EndIf
-            Next
+			; Tìm WMI partition match bằng size (tolerance 1MB để bù rounding)
+			Local $iTolerance = 1048576  ; 1MB
+			For $iW = 0 To UBound($aWMIParts) - 1
+				If Abs($aWMIParts[$iW][2] - $iDPSizeBytes) < $iTolerance Then
+					$bFoundInWMI = True
+					$iWMIIndex = $aWMIParts[$iW][0]
+					$sPartType = $aWMIParts[$iW][1]  ; Ưu tiên type WMI nếu match
+					$iSizeBytes = $aWMIParts[$iW][2]  ; Dùng size exact từ WMI
+					$bBootPartition = $aWMIParts[$iW][3]
+					$sDeviceID = $aWMIParts[$iW][4]
+					$sExistingLetter = _GetDriveLetterFromPartition($oWMI, $sDeviceID)
+					ExitLoop  ; Giả sử size unique, lấy match đầu tiên
+				EndIf
+			Next
+
+			; Nếu không match WMI, ưu tiên type từ DiskPart (ví dụ cho MSR ẩn)
+			If Not $bFoundInWMI Then
+				$sPartType = $sDPType
+			EndIf
+
+			; Phần logic phân loại giữ nguyên, nhưng thêm ưu tiên nếu DP type là "Recovery" hoặc "Reserved"
+			If StringInStr($sDPType, "Recovery") Or StringInStr($sDPType, "Phục hồi") Then
+				$bIsSystemType = True
+				$sNotes &= " ⚠️ Recovery (ưu tiên từ DiskPart)"
+			ElseIf StringInStr($sDPType, "Reserved") Or StringInStr($sDPType, "Dự trữ") Then
+				$bIsSystemType = True
+				$sNotes &= " ⚠️ MSR Reserved (from DiskPart)"
+			EndIf
 
             If $bBootPartition Then $sNotes &= " 🚀 Khởi động"
 
@@ -919,30 +936,39 @@ Func _AutoCleanPartitions()
 
         ; Xử lý từng DP partition
         For $iDP = 0 To UBound($aDiskPartParts) - 1
-            Local $iPartitionNum = $aDiskPartParts[$iDP][0]
-            Local $sDPType = $aDiskPartParts[$iDP][1]
-            Local $sSizeStr = $aDiskPartParts[$iDP][2]
-            Local $iSizeBytes = $aDiskPartParts[$iDP][3]
-            Local $iSizeMB = Round($iSizeBytes / (1024^2))
+			Local $iPartitionNum = $aDiskPartParts[$iDP][0]
+			Local $sDPType = $aDiskPartParts[$iDP][1]
+			Local $sDPSizeStr = $aDiskPartParts[$iDP][2]
+			Local $iDPSizeBytes = $aDiskPartParts[$iDP][3]
 
-            Local $iWMIIndex = $iPartitionNum - 1
-            Local $bFoundInWMI = False
-            Local $sPartType = $sDPType
-            Local $sExistingLetter = ""
-            Local $sReason = ""
-            Local $bShouldDelete = False
-            Local $bIsKnownSystemType = False
+			Local $bFoundInWMI = False
+			Local $sPartType = $sDPType
+			Local $iSizeBytes = $iDPSizeBytes
+			Local $sNotes = ""
+			Local $bBootPartition = False
+			Local $sDeviceID = ""
+			Local $sExistingLetter = ""
+			Local $iWMIIndex = -1  ; Không dùng index giả định nữa
 
-            ; Match WMI
-            For $iW = 0 To UBound($aWMIParts) - 1
-                If $aWMIParts[$iW][0] = $iWMIIndex Then
-                    $bFoundInWMI = True
-                    $sPartType = $aWMIParts[$iW][1]  ; Ưu tiên WMI
-                    $iSizeBytes = $aWMIParts[$iW][2]
-                    $sExistingLetter = $aWMIParts[$iW][4]
-                    ExitLoop
-                EndIf
-            Next
+			; Tìm WMI partition match bằng size (tolerance 1MB để bù rounding)
+			Local $iTolerance = 1048576  ; 1MB
+			For $iW = 0 To UBound($aWMIParts) - 1
+				If Abs($aWMIParts[$iW][2] - $iDPSizeBytes) < $iTolerance Then
+					$bFoundInWMI = True
+					$iWMIIndex = $aWMIParts[$iW][0]
+					$sPartType = $aWMIParts[$iW][1]  ; Ưu tiên type WMI nếu match
+					$iSizeBytes = $aWMIParts[$iW][2]  ; Dùng size exact từ WMI
+					$bBootPartition = $aWMIParts[$iW][3]
+					$sDeviceID = $aWMIParts[$iW][4]
+					$sExistingLetter = _GetDriveLetterFromPartition($oWMI, $sDeviceID)
+					ExitLoop  ; Giả sử size unique, lấy match đầu tiên
+				EndIf
+			Next
+			
+			; Nếu không match WMI, ưu tiên type từ DiskPart (ví dụ cho MSR ẩn)
+			If Not $bFoundInWMI Then
+				$sPartType = $sDPType
+			EndIf
 
             ; Kiểm tra type kết hợp (thêm hỗ trợ ngôn ngữ VN)
             If StringInStr($sPartType, "EFI") Or StringInStr($sPartType, "System") Or StringInStr($sPartType, "Hệ thống") Then
