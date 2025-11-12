@@ -585,7 +585,7 @@ Func _GetPartitionsFromDiskPart($iDiskIndex)
     FileDelete($sOutputFile)
 
     Local $aLines = StringSplit($sOutput, @CRLF, 1)
-    Local $aPartitions[0][4]  ; [0]: Num (1-based), [1]: Type, [2]: SizeStr, [3]: SizeBytes [cite: 1, 2]
+    Local $aPartitions[0][4]  ; [0]: Num (1-based), [1]: Type, [2]: SizeStr, [3]: SizeBytes
     Local $bFoundHeader = False ; Cờ (flag) để theo dõi dòng "---"
 
     For $i = 1 To $aLines[0]
@@ -602,8 +602,8 @@ Func _GetPartitionsFromDiskPart($iDiskIndex)
         EndIf
 
         ; === LOGIC MỚI 2: Xử lý các dòng dữ liệu SAU header ===
-        $sLine = StringStripWS($sLine, 3) ; Dọn dẹp 2 đầu [cite: 3]
-        If $sLine = "" Then ContinueLoop [cite: 3]
+        $sLine = StringStripWS($sLine, 3) ; Dọn dẹp 2 đầu
+        If $sLine = "" Then ContinueLoop
 
         ; === LOGIC MỚI 3: Thay thế 2+ dấu cách bằng ký tự '|' ===
         ; "\s{2,}" nghĩa là "tìm một ký tự khoảng trắng (\s) lặp lại 2 lần hoặc nhiều hơn {2,}"
@@ -626,24 +626,24 @@ Func _GetPartitionsFromDiskPart($iDiskIndex)
         If UBound($aNumMatch) = 0 Then ContinueLoop ; Không tìm thấy số
         Local $iNum = Number($aNumMatch[0])
 
-        Local $sType = $aCols[2]  ; Loại (đã được tách chính xác) [cite: 4]
-        Local $sSize = $aCols[3]  ; Kích thước [cite: 4]
+        Local $sType = $aCols[2]  ; Loại (đã được tách chính xác)
+        Local $sSize = $aCols[3]  ; Kích thước
 
         ; Chuyển đổi kích thước sang bytes (giữ nguyên logic của bạn)
-        Local $aSize = StringSplit($sSize, " ", 1) [cite: 5]
+        Local $aSize = StringSplit($sSize, " ", 1)
         If $aSize[0] < 2 Then ContinueLoop ; Không phân tích được size (ví dụ: 100MB dính liền)
 
-        Local $iSizeVal = Number($aSize[1]) [cite: 5]
-        Local $sUnit = $aSize[2] [cite: 5]
+        Local $iSizeVal = Number($aSize[1])
+        Local $sUnit = $aSize[2]
         Local $iSizeBytes = $iSizeVal
-        If StringInStr($sUnit, "T") Then $iSizeBytes *= 1024^4 [cite: 6]
-        If StringInStr($sUnit, "G") Then $iSizeBytes *= 1024^3 [cite: 6]
-        If StringInStr($sUnit, "M") Then $iSizeBytes *= 1024^2 [cite: 6]
-        If StringInStr($sUnit, "K") Then $iSizeBytes *= 1024 [cite: 6]
+        If StringInStr($sUnit, "T") Then $iSizeBytes *= 1024^4
+        If StringInStr($sUnit, "G") Then $iSizeBytes *= 1024^3
+        If StringInStr($sUnit, "M") Then $iSizeBytes *= 1024^2
+        If StringInStr($sUnit, "K") Then $iSizeBytes *= 1024
 
         ; Thêm vào mảng kết quả
-        Local $iIdx = UBound($aPartitions) [cite: 6]
-        ReDim $aPartitions[$iIdx + 1][4] [cite: 7]
+        Local $iIdx = UBound($aPartitions)
+        ReDim $aPartitions[$iIdx + 1][4]
         $aPartitions[$iIdx][0] = $iNum
         $aPartitions[$iIdx][1] = $sType
         $aPartitions[$iIdx][2] = $sSize
