@@ -5,44 +5,82 @@ Func _GetPartitionsFromDiskPart($iDiskIndex)
     FileWriteLine($hFile, "list partition")
     FileClose($hFile)
 
-    Local $sOutputFile = @TempDir & "\diskpart_out.txt"
-    RunWait('diskpart /s "' & $sScriptFile & '" > "' & $sOutputFile & '"', "", @SW_HIDE)
+    ; === THAY ĐỔI CỐT LÕI: Chuyển từ File I/O sang Stdout I/O ===
+    Local $sOutput = ""
+    Local $sTempRead
+
+    ; Chạy diskpart và báo cho AutoIt biết chúng ta muốn bắt output
+    Local $hProcess = Run('diskpart /s "' & $sScriptFile & '"', "", @SW_HIDE, $STDOUT_CHILD)
+
+    ; Đọc output cho đến khi tiến trình kết thúc
+    While 1
+        $sTempRead = StdoutRead($hProcess)
+        If @error Then ExitLoop ; @error = 1 khi không còn gì để đọc (tiến trình đã đóng)
+        $sOutput &= $sTempRead
+    WEnd
+
+    ProcessWaitClose($hProcess) ; Đảm bảo tiến trình đã đóng hoàn toàn
     FileDelete($sScriptFile)
+    ; === KẾT THÚC THAY ĐỔI I/O ===
 
-    Local $sOutput = FileRead($sOutputFile)
-    FileDelete($sOutputFile)
 
+    ; Phần logic phân tích (parsing) V3 được giữ nguyên vì nó đã đúng
     Local $aLines = StringSplit($sOutput, @CRLF, 1)
     Local $aPartitions[0][4]  ; [0]: Num (1-based), [1]: Type, [2]: SizeStr, [3]: SizeBytes
+    Local $bFoundHeader = False ; Cờ (flag) để theo dõi dòng "---"
 
     For $i = 1 To $aLines[0]
-        Local $sLine = StringStripWS($aLines[$i], 3)  ; Strip leading/trailing spaces
+        Local $sLine = $aLines[$i]
+
+        If Not $bFoundHeader Then
+            If StringRegExp($sLine, "^\s*-") Then
+                $bFoundHeader = True
+            EndIf
+            ContinueLoop
+        EndIf
+
+        $sLine = StringStripWS($sLine, 3)
         If $sLine = "" Then ContinueLoop
 
-        If StringRegExp($sLine, "^.*?\s*(\d+)\s+(.*?)\s+(\d+\s+\S+)\s+(\d+\s+\S+)$") Then
-            Local $aParts = StringRegExp($sLine, "^.*?\s*(\d+)\s+(.*?)\s+(\d+\s+\S+)\s+(\d+\s+\S+)$", 3)
-            If UBound($aParts) = 4 Then
-                Local $iNum = Number($aParts[0])
-                Local $sType = StringStripWS($aParts[1], 3)  ; Type, strip spaces
-                Local $sSize = $aParts[2]
-                ; Convert size to bytes
-                Local $aSize = StringSplit($sSize, " ", 1)
-                Local $iSizeVal = Number($aSize[1])
-                Local $sUnit = $aSize[2]
-                Local $iSizeBytes = $iSizeVal
-                If StringInStr($sUnit, "T") Then $iSizeBytes *= 1024^4
-                If StringInStr($sUnit, "G") Then $iSizeBytes *= 1024^3
-                If StringInStr($sUnit, "M") Then $iSizeBytes *= 1024^2
-                If StringInStr($sUnit, "K") Then $iSizeBytes *= 1024
-                Local $iIdx = UBound($aPartitions)
-                ReDim $aPartitions[$iIdx + 1][4]
-                $aPartitions[$iIdx][0] = $iNum
-                $aPartitions[$iIdx][1] = $sType
-                $aPartitions[$iIdx][2] = $sSize
-                $aPartitions[$iIdx][3] = $iSizeBytes
-            EndIf
-        EndIf
+        Local $sNormalizedLine = StringRegExpReplace($sLine, "\s{2,}", "|")
+        Local $aCols = StringSplit($sNormalizedLine, "|", 1)
+
+        If $aCols[0] < 3 Then ContinueLoop
+
+        Local $aNumMatch = StringRegExp($aCols[1], "(\d+)", 3)
+        If UBound($aNumMatch) = 0 Then ContinueLoop
+        Local $iNum = Number($aNumMatch[0])
+
+        Local $sType = $aCols[2]
+        Local $sSize = $aCols[3]
+
+        Local $aSize = StringSplit($sSize, " ", 1)
+        If $aSize[0] < 2 Then ContinueLoop
+
+        Local $iSizeVal = Number($aSize[1])
+        Local $sUnit = $aSize[2]
+        Local $iSizeBytes = $iSizeVal
+        If StringInStr($sUnit, "T") Then $iSizeBytes *= 1024^4
+        If StringInStr($sUnit, "G") Then $iSizeBytes *= 1024^3
+        If StringInStr($sUnit, "M") Then $iSizeBytes *= 1024^2
+        If StringInStr($sUnit, "K") Then $iSizeBytes *= 1024
+
+        Local $iIdx = UBound($aPartitions)
+        ReDim $aPartitions[$iIdx + 1][4]
+        $aPartitions[$iIdx][0] = $iNum
+        $aPartitions[$iIdx][1] = $sType
+        $aPartitions[$iIdx][2] = $sSize
+        $aPartitions[$iIdx][3] = $iSizeBytes
     Next
+
+    ; Nếu thất bại, nó sẽ báo cho bạn biết *chính xác* DiskPart đã trả về cái gì
+    If UBound($aPartitions) = 0 Then
+        RecordLogforDebug("Không thể phân tích đầu ra DiskPart." & @CRLF & _
+                 "Số dòng đọc được: " & $aLines[0] & @CRLF & _
+                 "Đầu ra thô (Raw Output):" & @CRLF & $sOutput)
+    EndIf
+    ; === Kết thúc bước gỡ lỗi ===
+
     Return $aPartitions
 EndFunc
 
@@ -58,6 +96,11 @@ Func _AnalyzePartitions()
     EndIf
 
     Local $colDisks = $oWMI.ExecQuery("SELECT * FROM Win32_DiskDrive")
+	If Not IsObj($colDisks) Then
+        RecordLogforDebug("WMI Query (colDisks) thất bại.")
+        Return
+    EndIf
+    RecordLogforDebug("Bước 1: WMI tìm thấy " & $colDisks.Count & " ổ đĩa vật lý.")
     If Not IsObj($colDisks) Or $colDisks.Count = 0 Then Return
 
     Local $aPartitions[0][5]  ; [0]: Disk Info, [1]: Partition (bắt đầu từ 1), [2]: Type, [3]: Size, [4]: Notes
@@ -66,12 +109,14 @@ Func _AnalyzePartitions()
         ; Bỏ qua ổ đĩa ngoài dựa trên InterfaceType
         If _ArraySearch($exclusion_keywords, $oDisk.InterfaceType) <> -1 Then ContinueLoop
 
-        Local $sDiskInfo = StringFormat("Disk %i (%s GB - %s)", $oDisk.Index, Round($oDisk.Size / (1024^3), 2), $oDisk.Model)
+        RecordLogforDebug("Bước 2: Đang xử lý Disk " & $oDisk.Index & " (" & $oDisk.Model & ")" & @CRLF & "Interface: " & $oDisk.InterfaceType)
+		Local $sDiskInfo = StringFormat("Disk %i (%s GB - %s)", $oDisk.Index, Round($oDisk.Size / (1024^3), 2), $oDisk.Model)
         Local $sQuery = "SELECT * FROM Win32_DiskPartition WHERE DiskIndex = " & $oDisk.Index
         Local $colPartitions = $oWMI.ExecQuery($sQuery)
 
         ; Lấy partitions từ DiskPart để merge
         Local $aDiskPartParts = _GetPartitionsFromDiskPart($oDisk.Index)
+		RecordLogforDebug("Bước 3: Hàm _GetPartitionsFromDiskPart trả về " & UBound($aDiskPartParts) & " phân vùng cho Disk " & $oDisk.Index)
 
         Local $aWMIParts[0][6]  ; Tạm lưu WMI parts để merge: [0]: Index (0-based), [1]: Type, [2]: SizeBytes, [3]: BootPartition, [4]: DeviceID, [5]: Notes (temp)
 
