@@ -585,44 +585,71 @@ Func _GetPartitionsFromDiskPart($iDiskIndex)
     FileDelete($sOutputFile)
 
     Local $aLines = StringSplit($sOutput, @CRLF, 1)
-    Local $aPartitions[0][4]  ; [0]: Num (1-based), [1]: Type, [2]: SizeStr, [3]: SizeBytes
+    Local $aPartitions[0][4]  ; [0]: Num (1-based), [1]: Type, [2]: SizeStr, [3]: SizeBytes [cite: 1, 2]
+    Local $bFoundHeader = False ; Cờ (flag) để theo dõi dòng "---"
 
     For $i = 1 To $aLines[0]
-        Local $sLine = StringStripWS($aLines[$i], 3)
-        If $sLine = "" Then ContinueLoop
+        Local $sLine = $aLines[$i]
 
-        ; === ĐIỀU CHỈNH CỐT LÕI ===
-        ; Regex này linh hoạt, chỉ bắt 3 nhóm (Num, Type, Size)
-        ; và coi cột Offset (nếu có) là tùy chọn.
-        ; Nó cũng bỏ qua tiền tố "Partition " hay "Phân vùng "
-        Local $aParts = StringRegExp($sLine, "^\D*?(\d+)\s+(.*?)\s+(\d+\s+\S+)(?:\s+.*)?$", 3)
-
-        ; Kiểm tra UBound = 3 (vì chúng ta chỉ bắt 3 nhóm)
-        If UBound($aParts) = 3 Then
-            Local $iNum = Number($aParts[0])
-            Local $sType = StringStripWS($aParts[1], 3)  ; Type, strip spaces
-            Local $sSize = $aParts[2]
-
-            ; Convert size to bytes
-            Local $aSize = StringSplit($sSize, " ", 1)
-            If $aSize[0] < 2 Then ContinueLoop ; Bỏ qua nếu không phân tích được size (ví dụ: dòng tiêu đề "Size")
-
-            Local $iSizeVal = Number($aSize[1])
-            Local $sUnit = $aSize[2]
-            Local $iSizeBytes = $iSizeVal
-            If StringInStr($sUnit, "T") Then $iSizeBytes *= 1024^4
-            If StringInStr($sUnit, "G") Then $iSizeBytes *= 1024^3
-            If StringInStr($sUnit, "M") Then $iSizeBytes *= 1024^2
-            If StringInStr($sUnit, "K") Then $iSizeBytes *= 1024
-
-            Local $iIdx = UBound($aPartitions)
-            ReDim $aPartitions[$iIdx + 1][4]
-            $aPartitions[$iIdx][0] = $iNum
-            $aPartitions[$iIdx][1] = $sType
-            $aPartitions[$iIdx][2] = $sSize
-            $aPartitions[$iIdx][3] = $iSizeBytes
+        ; === LOGIC MỚI 1: Tìm dòng gạch ngang --- ===
+        ; Nếu chưa tìm thấy header, hãy tìm nó
+        If Not $bFoundHeader Then
+            ; "^\s*-" nghĩa là: Bắt đầu (^) bằng 0+ dấu cách (\s*) và 1 dấu gạch ngang (-)
+            If StringRegExp($sLine, "^\s*-") Then
+                $bFoundHeader = True
+            EndIf
+            ContinueLoop ; Bỏ qua dòng này (dù là header hay là rác ở trên)
         EndIf
+
+        ; === LOGIC MỚI 2: Xử lý các dòng dữ liệu SAU header ===
+        $sLine = StringStripWS($sLine, 3) ; Dọn dẹp 2 đầu [cite: 3]
+        If $sLine = "" Then ContinueLoop [cite: 3]
+
+        ; === LOGIC MỚI 3: Thay thế 2+ dấu cách bằng ký tự '|' ===
+        ; "\s{2,}" nghĩa là "tìm một ký tự khoảng trắng (\s) lặp lại 2 lần hoặc nhiều hơn {2,}"
+        ; Điều này đảm bảo "Partition 1" (1 dấu cách) không bị tách,
+        ; nhưng "Partition 1   System" (nhiều dấu cách) sẽ bị tách.
+        Local $sNormalizedLine = StringRegExpReplace($sLine, "\s{2,}", "|")
+
+        ; Tách các cột bằng dấu '|'
+        Local $aCols = StringSplit($sNormalizedLine, "|", 1) ; 1 = bỏ qua các chuỗi rỗng
+
+        ; Chúng ta cần ít nhất 3 cột (Partition, Type, Size)
+        If $aCols[0] < 3 Then ContinueLoop
+
+        ; $aCols[1] = "Partition 1" hoặc "Phân vùng 1"
+        ; $aCols[2] = "System" hoặc "Microsoft reserved"
+        ; $aCols[3] = "100 MB"
+
+        ; Lấy số phân vùng từ cột đầu tiên
+        Local $aNumMatch = StringRegExp($aCols[1], "(\d+)", 3) ; 3 = trả về mảng
+        If UBound($aNumMatch) = 0 Then ContinueLoop ; Không tìm thấy số
+        Local $iNum = Number($aNumMatch[0])
+
+        Local $sType = $aCols[2]  ; Loại (đã được tách chính xác) [cite: 4]
+        Local $sSize = $aCols[3]  ; Kích thước [cite: 4]
+
+        ; Chuyển đổi kích thước sang bytes (giữ nguyên logic của bạn)
+        Local $aSize = StringSplit($sSize, " ", 1) [cite: 5]
+        If $aSize[0] < 2 Then ContinueLoop ; Không phân tích được size (ví dụ: 100MB dính liền)
+
+        Local $iSizeVal = Number($aSize[1]) [cite: 5]
+        Local $sUnit = $aSize[2] [cite: 5]
+        Local $iSizeBytes = $iSizeVal
+        If StringInStr($sUnit, "T") Then $iSizeBytes *= 1024^4 [cite: 6]
+        If StringInStr($sUnit, "G") Then $iSizeBytes *= 1024^3 [cite: 6]
+        If StringInStr($sUnit, "M") Then $iSizeBytes *= 1024^2 [cite: 6]
+        If StringInStr($sUnit, "K") Then $iSizeBytes *= 1024 [cite: 6]
+
+        ; Thêm vào mảng kết quả
+        Local $iIdx = UBound($aPartitions) [cite: 6]
+        ReDim $aPartitions[$iIdx + 1][4] [cite: 7]
+        $aPartitions[$iIdx][0] = $iNum
+        $aPartitions[$iIdx][1] = $sType
+        $aPartitions[$iIdx][2] = $sSize
+        $aPartitions[$iIdx][3] = $iSizeBytes
     Next
+    
     Return $aPartitions
 EndFunc
 
