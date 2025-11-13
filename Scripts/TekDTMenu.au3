@@ -1152,14 +1152,20 @@ Func _IsWindowsPartition($oWMIService, $iDiskIndex, $iPartitionIndex)
     Local $iDiskpartPartitionIndex = $iPartitionIndex + 1 ; WMI là 0-based, Diskpart là 1-based
 
     If $sDriveLetter = "" Then
-        ; 1. Không có ký tự ổ đĩa -> Gán tạm (Phương pháp Loại 2 - An toàn)
+        ; Không có ký tự ổ đĩa -> Gán tạm
         Local $sScriptFile = @TempDir & "\_assign_temp.txt"
         Local $hFile = FileOpen($sScriptFile, 2)
         FileWriteLine($hFile, "select disk " & $iDiskIndex)
         FileWriteLine($hFile, "select partition " & $iDiskpartPartitionIndex)
+        
+        ; *** Cưỡng chế mount MBR và GPT ***
+        FileWriteLine($hFile, "gpt attributes=0x0000000000000000") ; Xóa cờ 'no mount' của GPT
+        FileWriteLine($hFile, "set id=07 override") ; Đặt ID là NTFS (07) cho MBR
+        
         FileWriteLine($hFile, "assign letter=" & $sTempLetter)
         FileWriteLine($hFile, "exit")
         FileClose($hFile)
+    
         Local $sOutput = ""
         Local $hProcess = Run('diskpart /s "' & $sScriptFile & '"', "", @SW_HIDE, $STDOUT_CHILD)
         While 1
@@ -1170,27 +1176,7 @@ Func _IsWindowsPartition($oWMIService, $iDiskIndex, $iPartitionIndex)
         FileDelete($sScriptFile)
         Sleep(1000) ; Đợi hệ thống mount ổ đĩa
 
-        If Not StringInStr($sOutput, "successfully assigned") Then
-            ; Thử clear GPT attributes nếu assign thất bại
-            Local $sScriptFileClear = @TempDir & "\_assign_temp_clear.txt"
-            $hFile = FileOpen($sScriptFileClear, 2)
-            FileWriteLine($hFile, "select disk " & $iDiskIndex)
-            FileWriteLine($hFile, "select partition " & $iDiskpartPartitionIndex)
-            FileWriteLine($hFile, "gpt attributes=0x0000000000000000")
-            FileWriteLine($hFile, "assign letter=" & $sTempLetter)
-            FileWriteLine($hFile, "exit")
-            FileClose($hFile)
-            $sOutput = ""
-            $hProcess = Run('diskpart /s "' & $sScriptFileClear & '"', "", @SW_HIDE, $STDOUT_CHILD)
-            While 1
-                $sOutput &= StdoutRead($hProcess)
-                If @error Then ExitLoop
-            WEnd
-            ProcessWaitClose($hProcess)
-            FileDelete($sScriptFileClear)
-            Sleep(1000)
-            ; Giả định clear attributes thành công, nhưng không restore vì có thể xoá sau
-        EndIf
+        ; *** Khối logic "Thử clear GPT attributes"  đã bị xóa vì không cần thiết ***
 
         $sDriveLetter = $sTempLetter & ":"
         $bNeedToUnmount = True ; Đánh dấu để gỡ ra sau
@@ -1207,6 +1193,7 @@ Func _IsWindowsPartition($oWMIService, $iDiskIndex, $iPartitionIndex)
             RunWait('diskpart /s "' & $sScriptFileRemove & '"', "", @SW_HIDE)
             FileDelete($sScriptFileRemove)
         EndIf
+     
         Return False
     EndIf
 
@@ -1215,7 +1202,7 @@ Func _IsWindowsPartition($oWMIService, $iDiskIndex, $iPartitionIndex)
         $bIsWindows = _CheckWindowsFiles($sDriveLetter)
     EndIf
 
-    ; 3. Gỡ ký tự ổ đĩa nếu chúng ta đã gán tạm (Phương pháp Loại 2 - An toàn)
+    ; 3. Gỡ ký tự ổ đĩa nếu chúng ta đã gán tạm
     If $bNeedToUnmount Then
         Local $sScriptFile = @TempDir & "\_remove_temp.txt"
         FileWrite($sScriptFile, "select disk " & $iDiskIndex & @CRLF & _
@@ -1264,15 +1251,20 @@ Func _IsRecoveryPartition($oWMIService, $iDiskIndex, $iPartitionIndex)
     Local $iDiskpartPartitionIndex = $iPartitionIndex + 1
 
     If $sDriveLetter = "" Then
-        ; Clear GPT attributes cho Recovery
+        
         Local $sScriptFile = @TempDir & "\_assign_temp_rec.txt"
         Local $hFile = FileOpen($sScriptFile, 2)
         FileWriteLine($hFile, "select disk " & $iDiskIndex)
         FileWriteLine($hFile, "select partition " & $iDiskpartPartitionIndex)
-        FileWriteLine($hFile, "gpt attributes=0x0000000000000000")
+        
+        ; *** Cưỡng chế mount MBR và GPT ***
+        FileWriteLine($hFile, "gpt attributes=0x0000000000000000") ; Xóa cờ GPT
+        FileWriteLine($hFile, "set id=07 override") ; Đặt ID là NTFS (07) cho MBR
+        
         FileWriteLine($hFile, "assign letter=" & $sTempLetter)
         FileWriteLine($hFile, "exit")
         FileClose($hFile)
+     
         Local $sOutput = ""
         Local $hProcess = Run('diskpart /s "' & $sScriptFile & '"', "", @SW_HIDE, $STDOUT_CHILD)
         While 1
@@ -1283,6 +1275,7 @@ Func _IsRecoveryPartition($oWMIService, $iDiskIndex, $iPartitionIndex)
         FileDelete($sScriptFile)
         Sleep(1000)
 
+    
         $sDriveLetter = $sTempLetter & ":"
         $bNeedToUnmount = True
     EndIf
@@ -1292,10 +1285,14 @@ Func _IsRecoveryPartition($oWMIService, $iDiskIndex, $iPartitionIndex)
     If Not FileExists($sRoot) Then
         If $bNeedToUnmount Then
             Local $sScriptFileRemove = @TempDir & "\_remove_temp_rec.txt"
+            
+            ; *** Khôi phục cờ MBR và GPT ***
             FileWrite($sScriptFileRemove, "select disk " & $iDiskIndex & @CRLF & _
                                   "select partition " & $iDiskpartPartitionIndex & @CRLF & _
                                   "remove letter=" & $sTempLetter & @CRLF & _
-                                  "gpt attributes=0x8000000000000001" & @CRLF & "exit") ; Restore typical recovery attributes
+                                  "gpt attributes=0x8000000000000001" & @CRLF & _ ; Restore GPT
+                                  "set id=27 override" & @CRLF & "exit") ; Restore MBR Recovery ID
+            
             RunWait('diskpart /s "' & $sScriptFileRemove & '"', "", @SW_HIDE)
             FileDelete($sScriptFileRemove)
         EndIf
@@ -1312,10 +1309,14 @@ Func _IsRecoveryPartition($oWMIService, $iDiskIndex, $iPartitionIndex)
     ; Gỡ ký tự nếu cần
     If $bNeedToUnmount Then
         Local $sScriptFile = @TempDir & "\_remove_temp_rec.txt"
+        
+        ; *** Khôi phục cờ MBR và GPT ***
         FileWrite($sScriptFile, "select disk " & $iDiskIndex & @CRLF & _
                               "select partition " & $iDiskpartPartitionIndex & @CRLF & _
                               "remove letter=" & $sTempLetter & @CRLF & _
-                              "gpt attributes=0x8000000000000001" & @CRLF & "exit") ; Restore
+                              "gpt attributes=0x8000000000000001" & @CRLF & _ ; Restore GPT
+                              "set id=27 override" & @CRLF & "exit") ; Restore MBR Recovery ID
+        
         RunWait('diskpart /s "' & $sScriptFile & '"', "", @SW_HIDE)
         FileDelete($sScriptFile)
     EndIf
