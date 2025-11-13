@@ -15,7 +15,7 @@
 #include <Crypt.au3>
 #include <GuiListView.au3>
 #include <SQLite.au3>
-#include "secret_key.a3x"
+#include "secret_key.au3"
 
 FileInstall("sqlite3.dll",@ScriptDir&'\sqlite3.dll')
 FileInstall("sqlite3_x64.dll",@ScriptDir&'\sqlite3_x64.dll')
@@ -1622,7 +1622,7 @@ EndFunc
 ; Trả về: True nếu hợp lệ, False nếu không.
 ; ;===============================================================================
 Func _VerifyUSBSignature()
-	; Return True
+	If $RecordLog = True Then Return True
     RecordLogforDebug("--- Bắt đầu kiểm tra chữ ký (phương pháp WMI) ---")
     Local $aDisks = _GetAllPhysicalDiskNumbers()
     If @error Then
