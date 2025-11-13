@@ -530,33 +530,23 @@ Func _CheckWindowsFiles($sDriveLetter)
     $sDriveLetter = StringUpper(StringLeft($sDriveLetter, 2))
     If StringRight($sDriveLetter, 1) <> ":" Then $sDriveLetter &= ":"
 
-    ; Kiểm tra nếu là Recovery trước (false positive)
+    ; Kiểm tra nếu là Recovery trước (quan trọng nhất)
     If FileExists($sDriveLetter & "\Recovery\WindowsRE\Winre.wim") Or FileExists($sDriveLetter & "\ReAgent.xml") Then
         Return False  ; Đây là Recovery, không phải Windows đầy đủ
     EndIf
 
-    ; Kiểm tra sự tồn tại của thư mục "Windows" và "Program Files"
+    ; Chỉ cần có \Windows VÀ (\Users HOẶC \Program Files) là đủ
+
     If Not FileExists($sDriveLetter & "\Windows") Then Return False
-    If Not FileExists($sDriveLetter & "\Program Files") Then Return False
 
-    ; Kiểm tra dấu hiệu OS đầy đủ (ví dụ: thư mục Users, ProgramData)
-    If Not FileExists($sDriveLetter & "\Users") Or Not FileExists($sDriveLetter & "\ProgramData") Then Return False
+    ; Chỉ cần một trong hai thư mục chính này tồn tại
+    If FileExists($sDriveLetter & "\Users") Or FileExists($sDriveLetter & "\Program Files") Then
+        ; Nó không phải Recovery, và nó có \Windows + \Users hoặc \Program Files
+        Return True
+    EndIf
 
-    ; Kiểm tra các tệp hệ thống quan trọng
-    Local $aCriticalFiles = [ _
-        $sDriveLetter & "\Windows\System32\ntoskrnl.exe", _
-        $sDriveLetter & "\Windows\System32\kernel32.dll", _
-        $sDriveLetter & "\Windows\System32\user32.dll", _
-        $sDriveLetter & "\Windows\System32\winload.efi", _
-        $sDriveLetter & "\Windows\System32\cmd.exe" _
-    ]
-    Local $iFound = 0
-    For $sFile In $aCriticalFiles
-        If FileExists($sFile) Then $iFound += 1
-    Next
-
-    ; Yêu cầu có thư mục Windows, Users, và ít nhất 3 tệp hệ thống quan trọng
-    Return $iFound >= 3
+    ; Nếu chỉ có \Windows mà không có gì khác, coi như không phải
+    Return False
 EndFunc
 
 ;===============================================================================
