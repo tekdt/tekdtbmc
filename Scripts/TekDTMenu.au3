@@ -464,7 +464,7 @@ Func _RunTool($sTool)
         If FileExists($sSystemPath) Then
 			Run($sSystemPath, $sParams, @SW_SHOW)
         Else
-            MsgBox(16, "Lỗi", "Không tìm thấy tệp: " & @CRLF & $sExePath & @CRLF & "Vui lòng kiểm tra thư mục Tools trong thư mục chứa script.")
+            If $RecordLog = False Then MsgBox(16, "Lỗi", "Không tìm thấy tệp: " & @CRLF & $sExePath & @CRLF & "Vui lòng kiểm tra thư mục Tools trong thư mục chứa script.")
         EndIf
     EndIf
 EndFunc
@@ -724,6 +724,7 @@ Func _AnalyzePartitions()
                 $aWMIParts[$iIdx][5] = ""
                 $aWMIParts[$iIdx][6] = 0 ; *** 0 = Chưa sử dụng ***
             Next
+			RecordLogforDebug(_ArrayToString($aWMIParts))
         EndIf
 
         ; Merge và xử lý từng partition (ưu tiên DiskPart cho miss, WMI cho details)
@@ -814,11 +815,15 @@ Func _AnalyzePartitions()
 					EndIf
 				EndIf
 			EndIf
+			ConsoleWrite("Disk " &$oDisk.Index&" Partition "&$iWMIIndex&":"&_IsWindowsPartition($oWMI, $oDisk.Index, $iWMIIndex))
 
 			; Phân loại thêm nếu không phải system
 			If Not $bIsSystemType And $bFoundInWMI Then
 				
 				; *** Ưu tiên kiểm tra Recovery TRƯỚC Windows ***
+                ; PHẢI DÙNG $iBestMatchWMI_Index ĐỂ LẤY I_WMIIndex CHÍNH XÁC.
+                ; $iWMIIndex là WMI 0-based index.
+
 				If _IsRecoveryPartition($oWMI, $oDisk.Index, $iWMIIndex) Then
 					$bIsSystemType = True
 					$sNotes &= " ⚠️ Recovery"
@@ -829,7 +834,7 @@ Func _AnalyzePartitions()
 				ElseIf $sExistingLetter <> "" Then
 					$sNotes &= " 👤 Dữ liệu người dùng"
 				Else
-					; *** Bắt các phân vùng MSR (16/128MB) bị bỏ sót (khi Type không phải "Reserved") ***
+					; [Source 34] Bắt các phân vùng MSR (16/128MB) bị bỏ sót (khi Type không phải "Reserved")
 					If $sExistingLetter = "" And _
 					   (($iSizeBytes >= 15*1048576 And $iSizeBytes <= 17*1048576) Or _
 						($iSizeBytes >= 128*1048576 And $iSizeBytes <= 130*1048576)) Then
@@ -1152,15 +1157,16 @@ Func _IsWindowsPartition($oWMIService, $iDiskIndex, $iPartitionIndex)
     Local $iDiskpartPartitionIndex = $iPartitionIndex + 1 ; WMI là 0-based, Diskpart là 1-based
 
     If $sDriveLetter = "" Then
-        ; Không có ký tự ổ đĩa -> Gán tạm
+        ; 1. Không có ký tự ổ đĩa -> Gán tạm
         Local $sScriptFile = @TempDir & "\_assign_temp.txt"
         Local $hFile = FileOpen($sScriptFile, 2)
         FileWriteLine($hFile, "select disk " & $iDiskIndex)
         FileWriteLine($hFile, "select partition " & $iDiskpartPartitionIndex)
-        
-        ; *** Cưỡng chế mount MBR và GPT ***
-        FileWriteLine($hFile, "gpt attributes=0x0000000000000000") ; Xóa cờ 'no mount' của GPT
-        FileWriteLine($hFile, "set id=07 override") ; Đặt ID là NTFS (07) cho MBR
+
+        ; *** SỬ DỤNG LỆNH DETAIL ĐỂ XEM THUỘC TÍNH VÀ CỐ GẮNG CLEAR CỜ GPT/MBR ***
+        FileWriteLine($hFile, "detail partition") ; Lấy thông tin chi tiết
+        FileWriteLine($hFile, "gpt attributes=0x0000000000000000") ; Cố gắng xóa cờ 'no mount' của GPT (sẽ fail trên MBR)
+        FileWriteLine($hFile, "set id=07 override") ; Cố gắng đặt ID NTFS cho MBR (sẽ fail trên GPT)
         
         FileWriteLine($hFile, "assign letter=" & $sTempLetter)
         FileWriteLine($hFile, "exit")
@@ -1174,26 +1180,33 @@ Func _IsWindowsPartition($oWMIService, $iDiskIndex, $iPartitionIndex)
         WEnd
         ProcessWaitClose($hProcess)
         FileDelete($sScriptFile)
-        Sleep(1000) ; Đợi hệ thống mount ổ đĩa
+        Sleep(1000)
 
-        ; *** Khối logic "Thử clear GPT attributes"  đã bị xóa vì không cần thiết ***
-
+        ; Kiểm tra xem lệnh assign có thành công không (dựa trên việc có ký tự ổ đĩa sau 1 giây)
         $sDriveLetter = $sTempLetter & ":"
-        $bNeedToUnmount = True ; Đánh dấu để gỡ ra sau
+        Local $oFSO = ObjCreate("Scripting.FileSystemObject")
+        If Not $oFSO.DriveExists($sTempLetter) Then
+             ; Nếu vẫn không mount được, thì không phải Windows cũ
+             Return False
+        EndIf
+        $bNeedToUnmount = True
     EndIf
 
     ; Kiểm tra xem ổ đĩa có sẵn sàng không
     Local $sRoot = $sDriveLetter & "\"
     If Not FileExists($sRoot) Then
+        ; Khối Unmount bị thiếu logic khôi phục cờ MBR/GPT (Phải copy từ _IsRecoveryPartition)
         If $bNeedToUnmount Then
             Local $sScriptFileRemove = @TempDir & "\_remove_temp.txt"
+            ; Khôi phục MBR (Primary) và GPT (Primary) mặc định
             FileWrite($sScriptFileRemove, "select disk " & $iDiskIndex & @CRLF & _
                                   "select partition " & $iDiskpartPartitionIndex & @CRLF & _
-                                  "remove letter=" & $sTempLetter & @CRLF & "exit")
+                                  "remove letter=" & $sTempLetter & @CRLF & _
+                                  "gpt attributes=0x0000000000000000" & @CRLF & _ ; GPT: Primary
+                                  "set id=07 override" & @CRLF & "exit") ; MBR: Primary (ID 07)
             RunWait('diskpart /s "' & $sScriptFileRemove & '"', "", @SW_HIDE)
             FileDelete($sScriptFileRemove)
         EndIf
-     
         Return False
     EndIf
 
@@ -1205,9 +1218,12 @@ Func _IsWindowsPartition($oWMIService, $iDiskIndex, $iPartitionIndex)
     ; 3. Gỡ ký tự ổ đĩa nếu chúng ta đã gán tạm
     If $bNeedToUnmount Then
         Local $sScriptFile = @TempDir & "\_remove_temp.txt"
+        ; Khôi phục MBR (Primary) và GPT (Primary) mặc định
         FileWrite($sScriptFile, "select disk " & $iDiskIndex & @CRLF & _
                               "select partition " & $iDiskpartPartitionIndex & @CRLF & _
-                              "remove letter=" & $sTempLetter & @CRLF & "exit")
+                              "remove letter=" & $sTempLetter & @CRLF & _
+                              "gpt attributes=0x0000000000000000" & @CRLF & _ ; GPT: Primary
+                              "set id=07 override" & @CRLF & "exit") ; MBR: Primary (ID 07)
         RunWait('diskpart /s "' & $sScriptFile & '"', "", @SW_HIDE)
         FileDelete($sScriptFile)
     EndIf

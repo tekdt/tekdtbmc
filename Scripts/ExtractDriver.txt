@@ -1,4 +1,3 @@
-
 Func _GetPartitionsFromDiskPart($iDiskIndex)
     Local $sScriptFile = @TempDir & "\listpart.txt"
     Local $hFile = FileOpen($sScriptFile, 2)
@@ -113,28 +112,32 @@ Func _AnalyzePartitions()
         RecordLogforDebug("Bước 2: Đang xử lý Disk " & $oDisk.Index & " (" & $oDisk.Model & ")" & @CRLF & "Interface: " & $oDisk.InterfaceType)
         Local $sDiskInfo = StringFormat("Disk %i (%s GB - %s)", $oDisk.Index, Round($oDisk.Size / (1024^3), 2), $oDisk.Model)
         Local $sQuery = "SELECT * FROM Win32_DiskPartition WHERE DiskIndex = " & $oDisk.Index
+       
         Local $colPartitions = $oWMI.ExecQuery($sQuery)
 
         ; Lấy partitions từ DiskPart để merge
         Local $aDiskPartParts = _GetPartitionsFromDiskPart($oDisk.Index)
         RecordLogforDebug("Bước 3: Hàm _GetPartitionsFromDiskPart trả về " & UBound($aDiskPartParts) & " phân vùng cho Disk " & $oDisk.Index)
 
-        Local $aWMIParts[0][6]  ; Tạm lưu WMI parts để merge: [0]: Index (0-based), [1]: Type, [2]: SizeBytes, [3]: BootPartition, [4]: DeviceID, [5]: Notes (temp)
+        Local $aWMIParts[0][7]  ; *** Tăng từ [6] lên [7] để chứa cờ "Đã sử dụng" ***
+        ; [0]: Index (0-based), [1]: Type, [2]: SizeBytes, [3]: BootPartition, [4]: DeviceID, [5]: Notes (temp), [6]: Used (0 or 1)
 
         If IsObj($colPartitions) And $colPartitions.Count > 0 Then
             For $oPartition In $colPartitions
                 Local $iIdx = UBound($aWMIParts)
-                ReDim $aWMIParts[$iIdx + 1][6]
+                ReDim $aWMIParts[$iIdx + 1][7] ; *** Tăng lên 7 ***
+              
                 $aWMIParts[$iIdx][0] = $oPartition.Index
                 $aWMIParts[$iIdx][1] = $oPartition.Type
                 $aWMIParts[$iIdx][2] = $oPartition.Size
                 $aWMIParts[$iIdx][3] = $oPartition.BootPartition
                 $aWMIParts[$iIdx][4] = $oPartition.DeviceID
                 $aWMIParts[$iIdx][5] = ""
+                $aWMIParts[$iIdx][6] = 0 ; *** 0 = Chưa sử dụng ***
             Next
         EndIf
 
-        ;  Merge và xử lý từng partition (ưu tiên DiskPart cho miss, WMI cho details)
+        ; Merge và xử lý từng partition (ưu tiên DiskPart cho miss, WMI cho details)
         For $iDP = 0 To UBound($aDiskPartParts) - 1
 			Local $iPartitionNum = $aDiskPartParts[$iDP][0]
 			Local $sDPType = $aDiskPartParts[$iDP][1]
@@ -149,20 +152,33 @@ Func _AnalyzePartitions()
 			Local $sDeviceID = ""
 			Local $sExistingLetter = ""
 
-			; Tìm WMI partition match bằng size (tolerance 1MB để bù rounding)
-			Local $iTolerance = 1048576  ; 1MB
-			For $iW = 0 To UBound($aWMIParts) - 1
-				If Abs($aWMIParts[$iW][2] - $iDPSizeBytes) < $iTolerance Then
-					$bFoundInWMI = True
-					$iWMIIndex = $aWMIParts[$iW][0]
-					$sPartType = $aWMIParts[$iW][1]
-					$iSizeBytes = $aWMIParts[$iW][2]
-					$bBootPartition = $aWMIParts[$iW][3]
-					$sDeviceID = $aWMIParts[$iW][4]
-					$sExistingLetter = _GetDriveLetterFromPartition($oWMI, $sDeviceID)
-					ExitLoop
-				EndIf
-			Next
+            Local $iBestMatchWMI_Index = -1
+            Local $iLowestTolerance = 104857600  ; 100MB tolerance
+
+            For $iW = 0 To UBound($aWMIParts) - 1
+                ; Bỏ qua nếu WMI part này đã được sử dụng
+                If $aWMIParts[$iW][6] = 1 Then ContinueLoop
+
+                Local $iCurrentTolerance = Abs($aWMIParts[$iW][2] - $iDPSizeBytes)
+                If $iCurrentTolerance < $iLowestTolerance Then
+                    ; Tìm thấy một "khớp tốt nhất" mới
+                    $iLowestTolerance = $iCurrentTolerance
+                    $iBestMatchWMI_Index = $iW
+                EndIf
+            Next
+
+            ; Áp dụng "khớp tốt nhất" nếu tìm thấy
+            If $iBestMatchWMI_Index <> -1 Then
+                $bFoundInWMI = True
+                $aWMIParts[$iBestMatchWMI_Index][6] = 1 ; Đánh dấu là "Đã sử dụng"
+
+                $iWMIIndex = $aWMIParts[$iBestMatchWMI_Index][0]
+                $sPartType = $aWMIParts[$iBestMatchWMI_Index][1]
+                $iSizeBytes = $aWMIParts[$iBestMatchWMI_Index][2]
+                $bBootPartition = $aWMIParts[$iBestMatchWMI_Index][3]
+                $sDeviceID = $aWMIParts[$iBestMatchWMI_Index][4]
+                $sExistingLetter = _GetDriveLetterFromPartition($oWMI, $sDeviceID)
+            EndIf
 
 			If $bBootPartition Then $sNotes &= " 🚀 Khởi động"
 
@@ -176,7 +192,7 @@ Func _AnalyzePartitions()
 
 			Local $bIsSystemType = False
 
-			;  Logic phân loại (kết hợp Type từ DP/WMI)
+			; Logic phân loại (kết hợp Type từ DP/WMI)
 			If StringInStr($sPartType, "EFI") Or StringInStr($sDPType, "EFI") Or StringInStr($sPartType, "System") Or StringInStr($sDPType, "System") Or StringInStr($sPartType, "Hệ thống") Or StringInStr($sDPType, "Hệ thống") Then
 				$bIsSystemType = True
 				$sNotes &= " ⚠️ EFI System"
@@ -196,7 +212,7 @@ Func _AnalyzePartitions()
 				$bIsSystemType = True
 				$sNotes &= " ⚠️ MacOS Partition"
 			ElseIf StringInStr($sPartType, "Unknown") Or StringInStr($sDPType, "Unknown") Or Not $bFoundInWMI Then
-				;  Kiểm tra size cho MSR/Recovery
+				; Kiểm tra size cho MSR/Recovery
 				If $sExistingLetter = "" And _
 				   (($iSizeBytes >= 15*1048576 And $iSizeBytes <= 17*1048576) Or _
 					($iSizeBytes >= 128*1048576 And $iSizeBytes <= 130*1048576)) Then
@@ -209,11 +225,15 @@ Func _AnalyzePartitions()
 					EndIf
 				EndIf
 			EndIf
+			ConsoleWrite("Disk " &$oDisk.Index&" Partition "&$iWMIIndex&":"&_IsWindowsPartition($oWMI, $oDisk.Index, $iWMIIndex))
 
 			; Phân loại thêm nếu không phải system
 			If Not $bIsSystemType And $bFoundInWMI Then
 				
 				; *** Ưu tiên kiểm tra Recovery TRƯỚC Windows ***
+                ; PHẢI DÙNG $iBestMatchWMI_Index ĐỂ LẤY I_WMIIndex CHÍNH XÁC.
+                ; $iWMIIndex là WMI 0-based index.
+
 				If _IsRecoveryPartition($oWMI, $oDisk.Index, $iWMIIndex) Then
 					$bIsSystemType = True
 					$sNotes &= " ⚠️ Recovery"
@@ -224,7 +244,7 @@ Func _AnalyzePartitions()
 				ElseIf $sExistingLetter <> "" Then
 					$sNotes &= " 👤 Dữ liệu người dùng"
 				Else
-					; *** Bắt các phân vùng MSR (16/128MB) bị bỏ sót (khi Type không phải "Reserved") ***
+					; [Source 34] Bắt các phân vùng MSR (16/128MB) bị bỏ sót (khi Type không phải "Reserved")
 					If $sExistingLetter = "" And _
 					   (($iSizeBytes >= 15*1048576 And $iSizeBytes <= 17*1048576) Or _
 						($iSizeBytes >= 128*1048576 And $iSizeBytes <= 130*1048576)) Then
@@ -245,6 +265,7 @@ Func _AnalyzePartitions()
 
         If UBound($aDiskPartParts) = 0 Then
             Local $iIdx = UBound($aPartitions)
+       
             ReDim $aPartitions[$iIdx + 1][5]
             $aPartitions[$iIdx][0] = $sDiskInfo
             $aPartitions[$iIdx][1] = "-"
@@ -254,7 +275,8 @@ Func _AnalyzePartitions()
         EndIf
     Next
 
-    ; Tạo GUI
+ 
+    ; [Source 36] Tạo GUI
     Local $iTotalItems = UBound($aPartitions)
     Local $iNewHeight = 150 + ($iTotalItems * 20)
     If $iNewHeight < 200 Then $iNewHeight = 200
@@ -264,6 +286,7 @@ Func _AnalyzePartitions()
     _GUICtrlListView_SetExtendedListViewStyle($hList, $LVS_EX_FULLROWSELECT)
     Local $hClose = GUICtrlCreateButton("Đóng", 250, $iNewHeight - 40, 100, 30)
     Local $aButtons[1] = [$hClose]
+ 
     GUISetState(@SW_SHOW, $hGUI)
 
     For $i = 0 To $iTotalItems - 1
@@ -271,7 +294,7 @@ Func _AnalyzePartitions()
     Next
 
     For $i = 0 To 4
-        _GUICtrlListView_SetColumnWidth($hList, $i, $LVSCW_AUTOSIZE_USEHEADER) ; (Dùng USEHEADER như đã sửa ở truy vấn trước)
+        _GUICtrlListView_SetColumnWidth($hList, $i, $LVSCW_AUTOSIZE_USEHEADER) ; [Source 38]
     Next
 
     _AdjustPopupLayout($hGUI, $hList, $aButtons)
@@ -282,7 +305,8 @@ Func _AnalyzePartitions()
             Case $GUI_EVENT_CLOSE, $hClose
                 GUIDelete($hGUI)
                 ExitLoop
-            Case $GUI_EVENT_RESIZED
+           
+         Case $GUI_EVENT_RESIZED
                 _AdjustPopupLayout($hGUI, $hList, $aButtons)
         EndSwitch
     WEnd
@@ -294,7 +318,6 @@ Func _AutoCleanPartitions()
                    "Các phân vùng nhỏ hơn " & $iDataThresholdMB & " MB (EFI, MSR, Recovery, OEM...) sẽ bị xoá." & @CRLF & _
                    "Các phân vùng lớn hơn " & $iDataThresholdMB & " MB (giả định là Data) sẽ được giữ lại." & @CRLF & @CRLF & _
                    "BẠN CÓ CHẮC CHẮN MUỐN TIẾP TỤC KHÔNG?"
-
     Local $iConfirm = MsgBox(36, "Cảnh Báo Nâng Cao", $sMsg)
     If $iConfirm <> 6 Then Return
 
@@ -311,23 +334,28 @@ Func _AutoCleanPartitions()
     For $oDisk In $colDisks
         If _ArraySearch($exclusion_keywords, $oDisk.InterfaceType) <> -1 Then ContinueLoop
 
+        
         Local $sQuery = "SELECT * FROM Win32_DiskPartition WHERE DiskIndex = " & $oDisk.Index
         Local $colPartitions = $oWMI.ExecQuery($sQuery)
 
         ; Lấy partitions từ DiskPart
         Local $aDiskPartParts = _GetPartitionsFromDiskPart($oDisk.Index)
 
-        Local $aWMIParts[0][5]  ; [0]: Index (0-based), [1]: Type, [2]: SizeBytes, [3]: DeviceID, [4]: ExistingLetter
+        Local $aWMIParts[0][7]
+        ; [0]: Index (0-based), [1]: Type, [2]: SizeBytes, [3]: DeviceID, [4]: ExistingLetter, [5]: BootPartition, [6]: Used (0 or 1)
 
         If IsObj($colPartitions) And $colPartitions.Count > 0 Then
             For $oPartition In $colPartitions
                 Local $iIdx = UBound($aWMIParts)
-                ReDim $aWMIParts[$iIdx + 1][5]
+                ReDim $aWMIParts[$iIdx + 1][7] 
                 $aWMIParts[$iIdx][0] = $oPartition.Index
+     
                 $aWMIParts[$iIdx][1] = $oPartition.Type
                 $aWMIParts[$iIdx][2] = $oPartition.Size
                 $aWMIParts[$iIdx][3] = $oPartition.DeviceID
                 $aWMIParts[$iIdx][4] = _GetDriveLetterFromPartition($oWMI, $oPartition.DeviceID)
+                $aWMIParts[$iIdx][5] = $oPartition.BootPartition ; Giữ cờ Boot
+                $aWMIParts[$iIdx][6] = 0 ; *** 0 = Chưa sử dụng ***
             Next
         EndIf
 
@@ -345,22 +373,39 @@ Func _AutoCleanPartitions()
 			Local $sReason = ""
 			Local $bShouldDelete = False
 			Local $bIsKnownSystemType = False
+            Local $bBootPartition = False ; Giữ biến cờ Boot
 
-			; Tìm WMI partition match bằng size (tolerance 1MB)
-			Local $iTolerance = 1048576
+            Local $iBestMatchWMI_Index = -1
+            Local $iLowestTolerance = 104857600  ; 100MB tolerance
+
 			For $iW = 0 To UBound($aWMIParts) - 1
-				If Abs($aWMIParts[$iW][2] - $iSizeBytes) < $iTolerance Then
-					$bFoundInWMI = True
-					$iWMIIndex = $aWMIParts[$iW][0]
-					$sPartType = $aWMIParts[$iW][1]  ; Ưu tiên WMI
-					$iSizeBytes = $aWMIParts[$iW][2]
-					$sExistingLetter = $aWMIParts[$iW][4]
-					ExitLoop
+                ; Bỏ qua nếu WMI part này đã được sử dụng
+                If $aWMIParts[$iW][6] = 1 Then ContinueLoop
+
+                Local $iCurrentTolerance = Abs($aWMIParts[$iW][2] - $iSizeBytes)
+				If $iCurrentTolerance < $iLowestTolerance Then
+                    $iLowestTolerance = $iCurrentTolerance
+                    $iBestMatchWMI_Index = $iW
 				EndIf
 			Next
 
-			; Kiểm tra type kết hợp (thêm hỗ trợ ngôn ngữ VN)
-			If StringInStr($sPartType, "EFI") Or StringInStr($sDPType, "EFI") Or StringInStr($sPartType, "System") Or StringInStr($sDPType, "System") Or StringInStr($sPartType, "Hệ thống") Or StringInStr($sDPType, "Hệ thống") Then
+            ; Áp dụng "khớp tốt nhất" nếu tìm thấy
+			If $iBestMatchWMI_Index <> -1 Then
+                $bFoundInWMI = True
+                $aWMIParts[$iBestMatchWMI_Index][6] = 1 ; Đánh dấu là "Đã sử dụng"
+
+                $iWMIIndex = $aWMIParts[$iBestMatchWMI_Index][0]
+                $sPartType = $aWMIParts[$iBestMatchWMI_Index][1]
+                $iSizeBytes = $aWMIParts[$iBestMatchWMI_Index][2]
+                $sExistingLetter = $aWMIParts[$iBestMatchWMI_Index][4]
+                $bBootPartition = $aWMIParts[$iBestMatchWMI_Index][5]
+			EndIf
+
+			; Kiểm tra type kết hợp (vẫn ưu tiên MBR Boot)
+            If $bBootPartition Then
+                $bIsKnownSystemType = True
+                $sReason = "Boot Partition (MBR)"
+			ElseIf StringInStr($sPartType, "EFI") Or StringInStr($sDPType, "EFI") Or StringInStr($sPartType, "System") Or StringInStr($sDPType, "System") Or StringInStr($sPartType, "Hệ thống") Or StringInStr($sDPType, "Hệ thống") Then
 				$bIsKnownSystemType = True
 				$sReason = "EFI System"
 			ElseIf StringInStr($sPartType, "Recovery") Or StringInStr($sDPType, "Recovery") Or StringInStr($sPartType, "Phục hồi") Or StringInStr($sDPType, "Phục hồi") Then
@@ -426,7 +471,7 @@ Func _AutoCleanPartitions()
         Return
     EndIf
 
-    ; Tạo GUI
+    ; [Source 54] Tạo GUI
     Local $iTotalItems = UBound($aToDelete)
     Local $iNewHeight = 150 + ($iTotalItems * 20)
     If $iNewHeight < 200 Then $iNewHeight = 200
@@ -444,7 +489,6 @@ Func _AutoCleanPartitions()
     Next
 
     For $i = 0 To 4
-        ; _GUICtrlListView_SetColumnWidth($hList, $i, $LVSCW_AUTOSIZE)
 		_GUICtrlListView_SetColumnWidth($hList, $i, $LVSCW_AUTOSIZE_USEHEADER)
     Next
 
@@ -457,14 +501,15 @@ Func _AutoCleanPartitions()
                 GUIDelete($hGUI)
                 Return
             Case $hYes
-                ExitLoop
+  
+               ExitLoop
             Case $GUI_EVENT_RESIZED
                 _AdjustPopupLayout($hGUI, $hList, $aButtons)
         EndSwitch
     WEnd
     GUIDelete($hGUI)
 
-    ; Thực thi xoá bằng DiskPart
+    ; [Source 58] Thực thi xoá bằng DiskPart
     Local $sCleanScriptFile = @TempDir & "\cleanpart.txt"
     Local $hFile = FileOpen($sCleanScriptFile, 2)
     For $i = 0 To UBound($aToDelete) - 1
@@ -481,34 +526,6 @@ Func _AutoCleanPartitions()
     MsgBox(64, "Hoàn Tất", "Đã xoá " & UBound($aToDelete) & " phân vùng.")
 EndFunc
 
-;===============================================================================
-; HÀM HỖ TRỢ WMI: _GetDriveLetterFromPartition
-; Mục đích: Tìm ký tự ổ đĩa (C:, D:...) tương ứng với một đối tượng
-;           phân vùng WMI.
-;===============================================================================
-Func _GetDriveLetterFromPartition($oWMIService, $sPartitionDeviceID)
-    Local $sQuery = "ASSOCIATORS OF {Win32_DiskPartition.DeviceID='" & $sPartitionDeviceID & "'} WHERE AssocClass = Win32_LogicalDiskToPartition"
-    Local $colLogicalDisks = $oWMIService.ExecQuery($sQuery)
-    If IsObj($colLogicalDisks) And $colLogicalDisks.Count > 0 Then
-        For $oLogicalDisk In $colLogicalDisks
-            Return $oLogicalDisk.DeviceID ; Trả về ký tự đầu tiên tìm thấy (ví dụ: "C:")
-        Next
-    EndIf
-    Return ""
-EndFunc
-
-;===============================================================================
-; Hàm: _IsWindowsPartition
-; Mục đích: Kiểm tra xem một phân vùng có chứa hệ điều hành Windows hay không
-;           bằng cách tạm thời gán ký tự và kiểm tra các tệp/thư mục hệ thống.
-; Tham số:
-;    $iDiskNum  - Chỉ số của ổ đĩa.
-;    $iPartNum  - Chỉ số của phân vùng trên ổ đĩa đó.
-; Trả về:
-;    True      - Nếu có vẻ là phân vùng Windows.
-;    False     - Nếu không phải hoặc có lỗi.
-;===============================================================================
-
 Func _IsWindowsPartition($oWMIService, $iDiskIndex, $iPartitionIndex)
     ; Lấy đối tượng WMI cho partition
     Local $oPartition = $oWMIService.Get("Win32_DiskPartition.DeviceID='Disk #" & $iDiskIndex & ", Partition #" & $iPartitionIndex & "'")
@@ -522,14 +539,21 @@ Func _IsWindowsPartition($oWMIService, $iDiskIndex, $iPartitionIndex)
     Local $iDiskpartPartitionIndex = $iPartitionIndex + 1 ; WMI là 0-based, Diskpart là 1-based
 
     If $sDriveLetter = "" Then
-        ; 1. Không có ký tự ổ đĩa -> Gán tạm (Phương pháp Loại 2 - An toàn)
+        ; 1. Không có ký tự ổ đĩa -> Gán tạm
         Local $sScriptFile = @TempDir & "\_assign_temp.txt"
         Local $hFile = FileOpen($sScriptFile, 2)
         FileWriteLine($hFile, "select disk " & $iDiskIndex)
         FileWriteLine($hFile, "select partition " & $iDiskpartPartitionIndex)
+
+        ; *** SỬ DỤNG LỆNH DETAIL ĐỂ XEM THUỘC TÍNH VÀ CỐ GẮNG CLEAR CỜ GPT/MBR ***
+        FileWriteLine($hFile, "detail partition") ; Lấy thông tin chi tiết
+        FileWriteLine($hFile, "gpt attributes=0x0000000000000000") ; Cố gắng xóa cờ 'no mount' của GPT (sẽ fail trên MBR)
+        FileWriteLine($hFile, "set id=07 override") ; Cố gắng đặt ID NTFS cho MBR (sẽ fail trên GPT)
+        
         FileWriteLine($hFile, "assign letter=" & $sTempLetter)
         FileWriteLine($hFile, "exit")
         FileClose($hFile)
+    
         Local $sOutput = ""
         Local $hProcess = Run('diskpart /s "' & $sScriptFile & '"', "", @SW_HIDE, $STDOUT_CHILD)
         While 1
@@ -538,42 +562,30 @@ Func _IsWindowsPartition($oWMIService, $iDiskIndex, $iPartitionIndex)
         WEnd
         ProcessWaitClose($hProcess)
         FileDelete($sScriptFile)
-        Sleep(1000) ; Đợi hệ thống mount ổ đĩa
+        Sleep(1000)
 
-        If Not StringInStr($sOutput, "successfully assigned") Then
-            ; Thử clear GPT attributes nếu assign thất bại
-            Local $sScriptFileClear = @TempDir & "\_assign_temp_clear.txt"
-            $hFile = FileOpen($sScriptFileClear, 2)
-            FileWriteLine($hFile, "select disk " & $iDiskIndex)
-            FileWriteLine($hFile, "select partition " & $iDiskpartPartitionIndex)
-            FileWriteLine($hFile, "gpt attributes=0x0000000000000000")
-            FileWriteLine($hFile, "assign letter=" & $sTempLetter)
-            FileWriteLine($hFile, "exit")
-            FileClose($hFile)
-            $sOutput = ""
-            $hProcess = Run('diskpart /s "' & $sScriptFileClear & '"', "", @SW_HIDE, $STDOUT_CHILD)
-            While 1
-                $sOutput &= StdoutRead($hProcess)
-                If @error Then ExitLoop
-            WEnd
-            ProcessWaitClose($hProcess)
-            FileDelete($sScriptFileClear)
-            Sleep(1000)
-            ; Giả định clear attributes thành công, nhưng không restore vì có thể xoá sau
-        EndIf
-
+        ; Kiểm tra xem lệnh assign có thành công không (dựa trên việc có ký tự ổ đĩa sau 1 giây)
         $sDriveLetter = $sTempLetter & ":"
-        $bNeedToUnmount = True ; Đánh dấu để gỡ ra sau
+        Local $oFSO = ObjCreate("Scripting.FileSystemObject")
+        If Not $oFSO.DriveExists($sTempLetter) Then
+             ; Nếu vẫn không mount được, thì không phải Windows cũ
+             Return False
+        EndIf
+        $bNeedToUnmount = True
     EndIf
 
     ; Kiểm tra xem ổ đĩa có sẵn sàng không
     Local $sRoot = $sDriveLetter & "\"
     If Not FileExists($sRoot) Then
+        ; Khối Unmount bị thiếu logic khôi phục cờ MBR/GPT (Phải copy từ _IsRecoveryPartition)
         If $bNeedToUnmount Then
             Local $sScriptFileRemove = @TempDir & "\_remove_temp.txt"
+            ; Khôi phục MBR (Primary) và GPT (Primary) mặc định
             FileWrite($sScriptFileRemove, "select disk " & $iDiskIndex & @CRLF & _
                                   "select partition " & $iDiskpartPartitionIndex & @CRLF & _
-                                  "remove letter=" & $sTempLetter & @CRLF & "exit")
+                                  "remove letter=" & $sTempLetter & @CRLF & _
+                                  "gpt attributes=0x0000000000000000" & @CRLF & _ ; GPT: Primary
+                                  "set id=07 override" & @CRLF & "exit") ; MBR: Primary (ID 07)
             RunWait('diskpart /s "' & $sScriptFileRemove & '"', "", @SW_HIDE)
             FileDelete($sScriptFileRemove)
         EndIf
@@ -585,12 +597,15 @@ Func _IsWindowsPartition($oWMIService, $iDiskIndex, $iPartitionIndex)
         $bIsWindows = _CheckWindowsFiles($sDriveLetter)
     EndIf
 
-    ; 3. Gỡ ký tự ổ đĩa nếu chúng ta đã gán tạm (Phương pháp Loại 2 - An toàn)
+    ; 3. Gỡ ký tự ổ đĩa nếu chúng ta đã gán tạm
     If $bNeedToUnmount Then
         Local $sScriptFile = @TempDir & "\_remove_temp.txt"
+        ; Khôi phục MBR (Primary) và GPT (Primary) mặc định
         FileWrite($sScriptFile, "select disk " & $iDiskIndex & @CRLF & _
                               "select partition " & $iDiskpartPartitionIndex & @CRLF & _
-                              "remove letter=" & $sTempLetter & @CRLF & "exit")
+                              "remove letter=" & $sTempLetter & @CRLF & _
+                              "gpt attributes=0x0000000000000000" & @CRLF & _ ; GPT: Primary
+                              "set id=07 override" & @CRLF & "exit") ; MBR: Primary (ID 07)
         RunWait('diskpart /s "' & $sScriptFile & '"', "", @SW_HIDE)
         FileDelete($sScriptFile)
     EndIf
@@ -611,18 +626,11 @@ Func _CheckWindowsFiles($sDriveLetter)
         Return False  ; Đây là Recovery, không phải Windows đầy đủ
     EndIf
 
-    ; Chỉ cần có \Windows VÀ (\Users HOẶC \Program Files) là đủ
-
+    ; Chỉ cần có \Windows là đủ (đã loại bỏ check \Users và \Program Files)
     If Not FileExists($sDriveLetter & "\Windows") Then Return False
 
-    ; Chỉ cần một trong hai thư mục chính này tồn tại
-    If FileExists($sDriveLetter & "\Users") Or FileExists($sDriveLetter & "\Program Files") Then
-        ; Nó không phải Recovery, và nó có \Windows + \Users hoặc \Program Files
-        Return True
-    EndIf
-
-    ; Nếu chỉ có \Windows mà không có gì khác, coi như không phải
-    Return False
+    ; Nó không phải Recovery, và nó có \Windows
+    Return True
 EndFunc
 
 ;===============================================================================
@@ -641,15 +649,20 @@ Func _IsRecoveryPartition($oWMIService, $iDiskIndex, $iPartitionIndex)
     Local $iDiskpartPartitionIndex = $iPartitionIndex + 1
 
     If $sDriveLetter = "" Then
-        ; Clear GPT attributes cho Recovery
+        
         Local $sScriptFile = @TempDir & "\_assign_temp_rec.txt"
         Local $hFile = FileOpen($sScriptFile, 2)
         FileWriteLine($hFile, "select disk " & $iDiskIndex)
         FileWriteLine($hFile, "select partition " & $iDiskpartPartitionIndex)
-        FileWriteLine($hFile, "gpt attributes=0x0000000000000000")
+        
+        ; *** Cưỡng chế mount MBR và GPT ***
+        FileWriteLine($hFile, "gpt attributes=0x0000000000000000") ; Xóa cờ GPT
+        FileWriteLine($hFile, "set id=07 override") ; Đặt ID là NTFS (07) cho MBR
+        
         FileWriteLine($hFile, "assign letter=" & $sTempLetter)
         FileWriteLine($hFile, "exit")
         FileClose($hFile)
+     
         Local $sOutput = ""
         Local $hProcess = Run('diskpart /s "' & $sScriptFile & '"', "", @SW_HIDE, $STDOUT_CHILD)
         While 1
@@ -660,6 +673,7 @@ Func _IsRecoveryPartition($oWMIService, $iDiskIndex, $iPartitionIndex)
         FileDelete($sScriptFile)
         Sleep(1000)
 
+    
         $sDriveLetter = $sTempLetter & ":"
         $bNeedToUnmount = True
     EndIf
@@ -669,10 +683,14 @@ Func _IsRecoveryPartition($oWMIService, $iDiskIndex, $iPartitionIndex)
     If Not FileExists($sRoot) Then
         If $bNeedToUnmount Then
             Local $sScriptFileRemove = @TempDir & "\_remove_temp_rec.txt"
+            
+            ; *** Khôi phục cờ MBR và GPT ***
             FileWrite($sScriptFileRemove, "select disk " & $iDiskIndex & @CRLF & _
                                   "select partition " & $iDiskpartPartitionIndex & @CRLF & _
                                   "remove letter=" & $sTempLetter & @CRLF & _
-                                  "gpt attributes=0x8000000000000001" & @CRLF & "exit") ; Restore typical recovery attributes
+                                  "gpt attributes=0x8000000000000001" & @CRLF & _ ; Restore GPT
+                                  "set id=27 override" & @CRLF & "exit") ; Restore MBR Recovery ID
+            
             RunWait('diskpart /s "' & $sScriptFileRemove & '"', "", @SW_HIDE)
             FileDelete($sScriptFileRemove)
         EndIf
@@ -689,32 +707,17 @@ Func _IsRecoveryPartition($oWMIService, $iDiskIndex, $iPartitionIndex)
     ; Gỡ ký tự nếu cần
     If $bNeedToUnmount Then
         Local $sScriptFile = @TempDir & "\_remove_temp_rec.txt"
+        
+        ; *** Khôi phục cờ MBR và GPT ***
         FileWrite($sScriptFile, "select disk " & $iDiskIndex & @CRLF & _
                               "select partition " & $iDiskpartPartitionIndex & @CRLF & _
                               "remove letter=" & $sTempLetter & @CRLF & _
-                              "gpt attributes=0x8000000000000001" & @CRLF & "exit") ; Restore
+                              "gpt attributes=0x8000000000000001" & @CRLF & _ ; Restore GPT
+                              "set id=27 override" & @CRLF & "exit") ; Restore MBR Recovery ID
+        
         RunWait('diskpart /s "' & $sScriptFile & '"', "", @SW_HIDE)
         FileDelete($sScriptFile)
     EndIf
 
     Return $bIsRecovery
-EndFunc
-
-Func _GetFreeDriveLetter()
-    Local $aDrives = DriveGetDrive("ALL")
-    Local $sLetters = "DEFGHIJKLMNOPQRSTUV"
-    For $i = 1 To StringLen($sLetters)
-        Local $sLet = StringMid($sLetters, $i, 1)
-        Local $bUsed = False
-        If $aDrives[0] > 0 Then
-            For $j = 1 To $aDrives[0]
-                If StringUpper(StringLeft($aDrives[$j], 1)) = $sLet Then
-                    $bUsed = True
-                    ExitLoop
-                EndIf
-            Next
-        EndIf
-        If Not $bUsed Then Return $sLet
-    Next
-    Return ""
 EndFunc
