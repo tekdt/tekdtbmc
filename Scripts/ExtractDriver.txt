@@ -135,6 +135,7 @@ Func _AnalyzePartitions()
                 $aWMIParts[$iIdx][5] = ""
                 $aWMIParts[$iIdx][6] = 0 ; *** 0 = Chưa sử dụng ***
             Next
+			RecordLogforDebug(_ArrayToString($aWMIParts))
         EndIf
 
         ; Merge và xử lý từng partition (ưu tiên DiskPart cho miss, WMI cho details)

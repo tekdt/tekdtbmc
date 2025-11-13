@@ -15,7 +15,7 @@
 #include <Crypt.au3>
 #include <GuiListView.au3>
 #include <SQLite.au3>
-#include "secret_key.au3"
+#include "secret_key.a3x"
 
 FileInstall("sqlite3.dll",@ScriptDir&'\sqlite3.dll')
 FileInstall("sqlite3_x64.dll",@ScriptDir&'\sqlite3_x64.dll')
@@ -30,7 +30,7 @@ EndIf
 ; --- Cài đặt và Biến toàn cục ---
 Global Const $g_sIniFile = @ScriptDir & "\TekDTMenu.ini"
 Global $g_sTitle = IniRead($g_sIniFile, "Settings", "Title", "TekDT BMC")
-Global $RecordLog = True
+Global $RecordLog = False
 Global $RootDevice = SearchRootDevice()
 Global $g_iMainWidth = _Scale(260)
 Global $g_iMaxButtonsVisible = 5 ; Số nút tối đa hiển thị cùng lúc
@@ -610,7 +610,6 @@ Func _GetPartitionsFromDiskPart($iDiskIndex)
 
     ProcessWaitClose($hProcess) ; Đảm bảo tiến trình đã đóng hoàn toàn
     FileDelete($sScriptFile)
-    ; === KẾT THÚC THAY ĐỔI I/O ===
 
 
     ; Phần logic phân tích (parsing) V3 được giữ nguyên vì nó đã đúng
@@ -668,7 +667,6 @@ Func _GetPartitionsFromDiskPart($iDiskIndex)
                  "Số dòng đọc được: " & $aLines[0] & @CRLF & _
                  "Đầu ra thô (Raw Output):" & @CRLF & $sOutput)
     EndIf
-    ; === Kết thúc bước gỡ lỗi ===
 	RecordLogforDebug("Tất cả partition trên Disk "&$iDiskIndex&@CRLF&_ArrayToString($aPartitions))
     Return $aPartitions
 EndFunc
@@ -741,9 +739,10 @@ Func _AnalyzePartitions()
 			Local $bBootPartition = False
 			Local $sDeviceID = ""
 			Local $sExistingLetter = ""
+            Local $iWMIIndex = -1
 
             Local $iBestMatchWMI_Index = -1
-            Local $iLowestTolerance = 104857600  ; 100MB tolerance
+            Local $iLowestTolerance = 9223372036854775807  ; Huge initial value to find min diff
 
             For $iW = 0 To UBound($aWMIParts) - 1
                 ; Bỏ qua nếu WMI part này đã được sử dụng
@@ -757,8 +756,9 @@ Func _AnalyzePartitions()
                 EndIf
             Next
 
-            ; Áp dụng "khớp tốt nhất" nếu tìm thấy
-            If $iBestMatchWMI_Index <> -1 Then
+            ; Áp dụng "khớp tốt nhất" nếu tìm thấy và diff trong ngưỡng cho phép
+            Local $iMaxTolerance = _Max(104857600, $iDPSizeBytes * 0.001)  ; max(100MB, 0.1% size)
+            If $iBestMatchWMI_Index <> -1 And $iLowestTolerance < $iMaxTolerance Then
                 $bFoundInWMI = True
                 $aWMIParts[$iBestMatchWMI_Index][6] = 1 ; Đánh dấu là "Đã sử dụng"
 
@@ -815,14 +815,14 @@ Func _AnalyzePartitions()
 					EndIf
 				EndIf
 			EndIf
-			ConsoleWrite("Disk " &$oDisk.Index&" Partition "&$iWMIIndex&":"&_IsWindowsPartition($oWMI, $oDisk.Index, $iWMIIndex))
 
 			; Phân loại thêm nếu không phải system
 			If Not $bIsSystemType And $bFoundInWMI Then
 				
 				; *** Ưu tiên kiểm tra Recovery TRƯỚC Windows ***
-                ; PHẢI DÙNG $iBestMatchWMI_Index ĐỂ LẤY I_WMIIndex CHÍNH XÁC.
+                ; PHẢI DÙNG $iWMIIndex ĐỂ LẤY I_WMIIndex CHÍNH XÁC.
                 ; $iWMIIndex là WMI 0-based index.
+                If $iWMIIndex <> -1 Then RecordLogforDebug("Disk " &$oDisk.Index&" Partition "&$iWMIIndex&":"&_IsWindowsPartition($oWMI, $oDisk.Index, $iWMIIndex))
 
 				If _IsRecoveryPartition($oWMI, $oDisk.Index, $iWMIIndex) Then
 					$bIsSystemType = True
@@ -834,7 +834,7 @@ Func _AnalyzePartitions()
 				ElseIf $sExistingLetter <> "" Then
 					$sNotes &= " 👤 Dữ liệu người dùng"
 				Else
-					; [Source 34] Bắt các phân vùng MSR (16/128MB) bị bỏ sót (khi Type không phải "Reserved")
+					; Bắt các phân vùng MSR (16/128MB) bị bỏ sót (khi Type không phải "Reserved")
 					If $sExistingLetter = "" And _
 					   (($iSizeBytes >= 15*1048576 And $iSizeBytes <= 17*1048576) Or _
 						($iSizeBytes >= 128*1048576 And $iSizeBytes <= 130*1048576)) Then
@@ -866,28 +866,46 @@ Func _AnalyzePartitions()
     Next
 
  
-    ; [Source 36] Tạo GUI
+    ; Tạo GUI
     Local $iTotalItems = UBound($aPartitions)
     Local $iNewHeight = 150 + ($iTotalItems * 20)
     If $iNewHeight < 200 Then $iNewHeight = 200
     If $iNewHeight > 500 Then $iNewHeight = 500
-    Local $hGUI = GUICreate("Phân Tích Phân Vùng", 600, $iNewHeight, -1, -1, BitOR($WS_SIZEBOX, $WS_SYSMENU))
-    Local $hList = GUICtrlCreateListView("Disk|Partition|Type|Size|Notes", 10, 10, 580, $iNewHeight - 60)
+    ; Tính chiều rộng ban đầu (cố định tối thiểu)
+    Local $iMinWidth = 600
+    Local $iMaxWidth = 1000  ; Giới hạn tối đa để tránh GUI quá rộng
+    Local $iNewWidth = $iMinWidth
+
+    Local $hGUI = GUICreate("Phân Tích Phân Vùng", $iNewWidth, $iNewHeight, -1, -1, BitOR($WS_SIZEBOX, $WS_SYSMENU))
+    Local $hList = GUICtrlCreateListView("Disk|Partition|Type|Size|Notes", 10, 10, $iNewWidth - 20, $iNewHeight - 60)
     _GUICtrlListView_SetExtendedListViewStyle($hList, $LVS_EX_FULLROWSELECT)
-    Local $hClose = GUICtrlCreateButton("Đóng", 250, $iNewHeight - 40, 100, 30)
+    Local $hClose = GUICtrlCreateButton("Đóng", ($iNewWidth / 2) - 50, $iNewHeight - 40, 100, 30)  ; Căn giữa ban đầu
     Local $aButtons[1] = [$hClose]
- 
+
     GUISetState(@SW_SHOW, $hGUI)
 
     For $i = 0 To $iTotalItems - 1
         GUICtrlCreateListViewItem($aPartitions[$i][0] & "|" & $aPartitions[$i][1] & "|" & $aPartitions[$i][2] & "|" & $aPartitions[$i][3] & "|" & $aPartitions[$i][4], $hList)
     Next
 
+    ; Autosize cột dựa trên NỘI DUNG (không chỉ header)
+    Local $iTotalColumnWidth = 0
     For $i = 0 To 4
-        _GUICtrlListView_SetColumnWidth($hList, $i, $LVSCW_AUTOSIZE_USEHEADER) ; [Source 38]
+        _GUICtrlListView_SetColumnWidth($hList, $i, $LVSCW_AUTOSIZE)  ; Dùng $LVSCW_AUTOSIZE để fit nội dung
+        $iTotalColumnWidth += _GUICtrlListView_GetColumnWidth($hList, $i)
     Next
 
-    _AdjustPopupLayout($hGUI, $hList, $aButtons)
+    ; Tính chiều rộng mới cho GUI (tổng cột + margin cho border/scrollbar)
+    $iNewWidth = $iTotalColumnWidth + 40  ; +40 cho an toàn (border + scrollbar)
+    If $iNewWidth < $iMinWidth Then $iNewWidth = $iMinWidth
+    If $iNewWidth > $iMaxWidth Then $iNewWidth = $iMaxWidth
+
+    ; Điều chỉnh kích thước GUI và ListView
+    WinMove($hGUI, "", Default, Default, $iNewWidth, $iNewHeight)
+    GUICtrlSetPos($hList, 10, 10, $iNewWidth - 20, $iNewHeight - 60)
+    GUICtrlSetPos($hClose, ($iNewWidth / 2) - 50, $iNewHeight - 40)  ; Căn giữa nút
+
+    _AdjustPopupLayout($hGUI, $hList, $aButtons)  ; Gọi ngay để đồng bộ nếu cần
 
     While 1
         Local $iMsg = GUIGetMsg()
@@ -895,8 +913,7 @@ Func _AnalyzePartitions()
             Case $GUI_EVENT_CLOSE, $hClose
                 GUIDelete($hGUI)
                 ExitLoop
-           
-         Case $GUI_EVENT_RESIZED
+            Case $GUI_EVENT_RESIZED
                 _AdjustPopupLayout($hGUI, $hList, $aButtons)
         EndSwitch
     WEnd
@@ -964,9 +981,10 @@ Func _AutoCleanPartitions()
 			Local $bShouldDelete = False
 			Local $bIsKnownSystemType = False
             Local $bBootPartition = False ; Giữ biến cờ Boot
+            Local $iWMIIndex = -1
 
             Local $iBestMatchWMI_Index = -1
-            Local $iLowestTolerance = 104857600  ; 100MB tolerance
+            Local $iLowestTolerance = 9223372036854775807  ; Huge initial value to find min diff
 
 			For $iW = 0 To UBound($aWMIParts) - 1
                 ; Bỏ qua nếu WMI part này đã được sử dụng
@@ -979,8 +997,9 @@ Func _AutoCleanPartitions()
 				EndIf
 			Next
 
-            ; Áp dụng "khớp tốt nhất" nếu tìm thấy
-			If $iBestMatchWMI_Index <> -1 Then
+            ; Áp dụng "khớp tốt nhất" nếu tìm thấy và diff trong ngưỡng cho phép
+            Local $iMaxTolerance = _Max(104857600, $iSizeBytes * 0.001)  ; max(100MB, 0.1% size)
+            If $iBestMatchWMI_Index <> -1 And $iLowestTolerance < $iMaxTolerance Then
                 $bFoundInWMI = True
                 $aWMIParts[$iBestMatchWMI_Index][6] = 1 ; Đánh dấu là "Đã sử dụng"
 
@@ -1061,16 +1080,21 @@ Func _AutoCleanPartitions()
         Return
     EndIf
 
-    ; [Source 54] Tạo GUI
+    ; Tạo GUI
     Local $iTotalItems = UBound($aToDelete)
     Local $iNewHeight = 150 + ($iTotalItems * 20)
     If $iNewHeight < 200 Then $iNewHeight = 200
     If $iNewHeight > 400 Then $iNewHeight = 400
-    Local $hGUI = GUICreate("Xác Nhận Xóa Phân Vùng", 600, $iNewHeight, -1, -1, BitOR($WS_SIZEBOX, $WS_SYSMENU))
-    Local $hList = GUICtrlCreateListView("Disk|Partition|Type|Size|Reason", 10, 10, 580, $iNewHeight - 60)
+    ; Tính chiều rộng ban đầu (cố định tối thiểu)
+    Local $iMinWidth = 600
+    Local $iMaxWidth = 1000  ; Giới hạn tối đa
+    Local $iNewWidth = $iMinWidth
+
+    Local $hGUI = GUICreate("Xác Nhận Xóa Phân Vùng", $iNewWidth, $iNewHeight, -1, -1, BitOR($WS_SIZEBOX, $WS_SYSMENU))
+    Local $hList = GUICtrlCreateListView("Disk|Partition|Type|Size|Reason", 10, 10, $iNewWidth - 20, $iNewHeight - 60)
     _GUICtrlListView_SetExtendedListViewStyle($hList, $LVS_EX_FULLROWSELECT)
-    Local $hYes = GUICtrlCreateButton("Xóa", 195, $iNewHeight - 40, 100, 30)
-    Local $hNo = GUICtrlCreateButton("Hủy", 305, $iNewHeight - 40, 100, 30)
+    Local $hYes = GUICtrlCreateButton("Xóa", ($iNewWidth / 2) - 105, $iNewHeight - 40, 100, 30)  ; Căn giữa với 2 nút
+    Local $hNo = GUICtrlCreateButton("Hủy", ($iNewWidth / 2) + 5, $iNewHeight - 40, 100, 30)
     Local $aButtons[2] = [$hYes, $hNo]
     GUISetState(@SW_SHOW, $hGUI)
 
@@ -1078,11 +1102,25 @@ Func _AutoCleanPartitions()
         GUICtrlCreateListViewItem($aToDelete[$i][0] & "|" & $aToDelete[$i][1] & "|" & $aToDelete[$i][2] & "|" & $aToDelete[$i][3] & "|" & $aToDelete[$i][4], $hList)
     Next
 
+    ; Autosize cột dựa trên NỘI DUNG
+    Local $iTotalColumnWidth = 0
     For $i = 0 To 4
-		_GUICtrlListView_SetColumnWidth($hList, $i, $LVSCW_AUTOSIZE_USEHEADER)
+        _GUICtrlListView_SetColumnWidth($hList, $i, $LVSCW_AUTOSIZE)
+        $iTotalColumnWidth += _GUICtrlListView_GetColumnWidth($hList, $i)
     Next
 
-    _AdjustPopupLayout($hGUI, $hList, $aButtons)
+    ; Tính chiều rộng mới
+    $iNewWidth = $iTotalColumnWidth + 40
+    If $iNewWidth < $iMinWidth Then $iNewWidth = $iMinWidth
+    If $iNewWidth > $iMaxWidth Then $iNewWidth = $iMaxWidth
+
+    ; Điều chỉnh kích thước GUI và ListView
+    WinMove($hGUI, "", Default, Default, $iNewWidth, $iNewHeight)
+    GUICtrlSetPos($hList, 10, 10, $iNewWidth - 20, $iNewHeight - 60)
+    GUICtrlSetPos($hYes, ($iNewWidth / 2) - 105, $iNewHeight - 40)
+    GUICtrlSetPos($hNo, ($iNewWidth / 2) + 5, $iNewHeight - 40)
+
+    _AdjustPopupLayout($hGUI, $hList, $aButtons)  ; Gọi ngay
 
     While 1
         Local $iMsg = GUIGetMsg()
@@ -1091,15 +1129,14 @@ Func _AutoCleanPartitions()
                 GUIDelete($hGUI)
                 Return
             Case $hYes
-  
-               ExitLoop
+                ExitLoop
             Case $GUI_EVENT_RESIZED
                 _AdjustPopupLayout($hGUI, $hList, $aButtons)
         EndSwitch
     WEnd
     GUIDelete($hGUI)
 
-    ; [Source 58] Thực thi xoá bằng DiskPart
+    ; Thực thi xoá bằng DiskPart
     Local $sCleanScriptFile = @TempDir & "\cleanpart.txt"
     Local $hFile = FileOpen($sCleanScriptFile, 2)
     For $i = 0 To UBound($aToDelete) - 1
@@ -1431,30 +1468,8 @@ Func _CheckBitLockerViaDiskpart($iDiskNum, $iPartNum)
     Return (StringInStr($sData, "-FVE-FS") > 0)
 EndFunc
 
-; Hàm hỗ trợ lấy sector bắt đầu của partition
-; Func _GetPartitionStartSector($iDiskNum, $iPartNum)
-    ; Local $sOutput = "", $sScript = @TempDir & "\get_offset.txt"
-
-    ; FileWrite($sScript, "select disk " & $iDiskNum & @CRLF & _
-                      ; "select partition " & $iPartNum & @CRLF & _
-                      ; "detail partition" & @CRLF & _
-                      ; "exit")
-
-    ; RunWait('diskpart /s "' & $sScript & '" > "' & @TempDir & '"\part_info.txt"', "", @SW_HIDE)
-    ; $sOutput = FileRead(@TempDir & "\part_info.txt")
-    ; FileDelete($sScript)
-    ; FileDelete(@TempDir & "\part_info.txt")
-
-    ; Local $aMatches = StringRegExp($sOutput, "Offset\s*:\s*(\d+)\s*KB", 1)
-    ; If Not @error Then
-        ; Return Number($aMatches[0]) * 2 ; Convert KB to sectors (512B)
-    ; EndIf
-
-    ; Return 0 ; Mặc định sector 0 nếu không xác định được
-; EndFunc
-
 ;===============================================================================
-; HÀM: _GetPartitionStartSector (SỬA ĐỔI - AN TOÀN VỀ NGÔN NGỮ)
+; HÀM: _GetPartitionStartSector (AN TOÀN VỀ NGÔN NGỮ)
 ; Mục đích: Lấy offset (sector bắt đầu) của phân vùng bằng WMI.
 ; Trả về: Offset (tính bằng byte).
 ;===============================================================================
@@ -1668,7 +1683,7 @@ Func _VerifyUSBSignature()
         RecordLogforDebug("Disk ID: " & $sDiskIdentifier)
         RecordLogforDebug("Kích thước đĩa (Tổng): " & $iDiskSize & " bytes")
 
-        ; BƯỚC 3: Lấy offset của phân vùng ẩn (LOGIC MỚI)
+        ; BƯỚC 3: Lấy offset của phân vùng ẩn
         RecordLogforDebug("Đang tìm kiếm offset của phân vùng 16MB dành riêng...")
         Local $iTargetOffset = _GetReservedPartitionOffset($iPhysicalDriveNum)
 
@@ -1726,7 +1741,7 @@ Func _GetDiskInfo_WinPE($iDiskNum)
     Local $sDiskID = ""
     Local $iDiskSize = 0
 
-    ; --- BƯỚC 1: Lấy Disk ID từ 'detail disk' (Phương pháp này vẫn ổn định) ---
+    ; --- BƯỚC 1: Lấy Disk ID từ 'detail disk' ---
     Local $sDetailScriptFile = @TempDir & "\get_disk_detail.txt"
     Local $sDetailOutputFile = @TempDir & "\disk_detail_out.txt"
 
@@ -1915,11 +1930,9 @@ Func _ReadSectorData($sDevicePath, $iOffset, $iBytesToRead)
 
     ; Di chuyển file pointer đến offset
     Local $iOffsetLow = BitAND($iOffset, 0xFFFFFFFF)
-    ; ======================= SỬA LỖI TẠI ĐÂY =======================
     ; Dùng phép chia số học để lấy 32-bit cao một cách chính xác cho offset 64-bit
     ; thay vì dùng BitShift không đáng tin cậy. 2^32 = 4294967296
     Local $iOffsetHigh = Int($iOffset / 4294967296)
-    ; ===============================================================
 
     Local $aResult = DllCall("kernel32.dll", "dword", "SetFilePointer", _
         "handle", $hFile[0], _
@@ -2016,7 +2029,7 @@ EndFunc
 
 ; --- HÀM CHÍNH ---
 Func _AutoExtractDrivers()
-    ; --- Bước 1: Khai báo và xác định vị trí file (Sửa lại .7z) ---
+    ; --- Bước 1: Khai báo và xác định vị trí file ---
     Local Const $sRelativeArchivePath = "\ventoy\Drivers.7z" ; SỬA LẠI
     Local Const $sDestDir = "X:\Drivers"
     Local $s7zPath = StringReplace(@ScriptDir & "\Tools\7z" & (@OSArch = "X64" ? "64" : "32") & "\7za.exe",'\\','\')
@@ -2076,7 +2089,7 @@ Func _AutoExtractDrivers()
         Return True
     EndIf
 
-    ; --- Bước 3: Khởi tạo SQLite và chuẩn bị truy vấn (CẬP NHẬT) ---
+    ; --- Bước 3: Khởi tạo SQLite và chuẩn bị truy vấn ---
     RecordLogforDebug("* Thông tin: Đang mở " & $sDbPath)
 
 	If @AutoItX64 = 1 Then
