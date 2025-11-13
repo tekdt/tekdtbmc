@@ -742,7 +742,7 @@ Func _AnalyzePartitions()
 			Local $sExistingLetter = ""
 
 			; Tìm WMI partition match bằng size (tolerance 10MB để bù rounding)
-			Local $iTolerance = 10485760  ; *** ĐÃ SỬA: Tăng dung sai lên 10MB *** 
+			Local $iTolerance = 104857600  ; *** Tăng dung sai lên 100MB *** 
 			For $iW = 0 To UBound($aWMIParts) - 1
 				If Abs($aWMIParts[$iW][2] - $iDPSizeBytes) < $iTolerance Then
 					$bFoundInWMI = True
@@ -913,18 +913,20 @@ Func _AutoCleanPartitions()
         ; Lấy partitions từ DiskPart
         Local $aDiskPartParts = _GetPartitionsFromDiskPart($oDisk.Index)
 
-        Local $aWMIParts[0][5]  ; [0]: Index (0-based), [1]: Type, [2]: SizeBytes, [3]: DeviceID, [4]: ExistingLetter
+        Local $aWMIParts[0][6]  ; *** Tăng từ [5] lên [6] để chứa cờ Boot ***
+        ; [0]: Index (0-based), [1]: Type, [2]: SizeBytes, [3]: DeviceID, [4]: ExistingLetter, [5]: BootPartition
 
         If IsObj($colPartitions) And $colPartitions.Count > 0 Then
             For $oPartition In $colPartitions
                 Local $iIdx = UBound($aWMIParts)
-                ReDim $aWMIParts[$iIdx + 1][5]
+                ReDim $aWMIParts[$iIdx + 1][6] ; *** Tăng từ 5 lên 6 ***
                 $aWMIParts[$iIdx][0] = $oPartition.Index
      
                 $aWMIParts[$iIdx][1] = $oPartition.Type
                 $aWMIParts[$iIdx][2] = $oPartition.Size
                 $aWMIParts[$iIdx][3] = $oPartition.DeviceID
                 $aWMIParts[$iIdx][4] = _GetDriveLetterFromPartition($oWMI, $oPartition.DeviceID)
+                $aWMIParts[$iIdx][5] = $oPartition.BootPartition ; *** Lưu cờ Boot ***
             Next
         EndIf
 
@@ -942,9 +944,10 @@ Func _AutoCleanPartitions()
 			Local $sReason = ""
 			Local $bShouldDelete = False
 			Local $bIsKnownSystemType = False
+            Local $bBootPartition = False ; *** Biến lưu cờ Boot ***
 
-			; Tìm WMI partition match bằng size (tolerance 10MB)
-			Local $iTolerance = 10485760 ; *** ĐÃ SỬA: Tăng dung sai lên 10MB *** 
+			; Tìm WMI partition match bằng size (tolerance 100MB)
+			Local $iTolerance = 104857600 ; *** Tăng dung sai lên 100MB ***
 			For $iW = 0 To UBound($aWMIParts) - 1
 				If Abs($aWMIParts[$iW][2] - $iSizeBytes) < $iTolerance Then
 					$bFoundInWMI = True
@@ -952,18 +955,24 @@ Func _AutoCleanPartitions()
 					$sPartType = $aWMIParts[$iW][1]  ; Ưu tiên WMI
 					$iSizeBytes = $aWMIParts[$iW][2]
 					$sExistingLetter = $aWMIParts[$iW][4]
+                    $bBootPartition = $aWMIParts[$iW][5] ; *** Lấy cờ Boot từ WMI parts ***
 					ExitLoop
 				EndIf
 			Next
 
 			; Kiểm tra type kết hợp (thêm hỗ trợ ngôn ngữ VN)
-			If StringInStr($sPartType, "EFI") Or StringInStr($sDPType, "EFI") Or StringInStr($sPartType, "System") Or StringInStr($sDPType, "System") Or StringInStr($sPartType, "Hệ thống") Or StringInStr($sDPType, "Hệ thống") Then
+            ; *** Kiểm tra cờ Boot (MBR) LÊN TRÊN CÙNG ***
+            If $bBootPartition Then
+                $bIsKnownSystemType = True
+                $sReason = "Boot Partition (MBR)"
+			ElseIf StringInStr($sPartType, "EFI") Or StringInStr($sDPType, "EFI") Or StringInStr($sPartType, "System") Or StringInStr($sDPType, "System") Or StringInStr($sPartType, "Hệ thống") Or StringInStr($sDPType, "Hệ thống") Then
 				$bIsKnownSystemType = True
 				$sReason = "EFI System"
 			ElseIf StringInStr($sPartType, "Recovery") Or StringInStr($sDPType, "Recovery") Or StringInStr($sPartType, "Phục hồi") Or StringInStr($sDPType, "Phục hồi") Then
 				$bIsKnownSystemType = True
 				$sReason = "Recovery"
-			ElseIf StringInStr($sPartType, "Reserved") Or StringInStr($sDPType, "Reserved") Or StringInStr($sPartType, "MSR") Or StringInStr($sDPType, "MSR") Or StringInStr($sPartType, "Microsoft reserved") Or StringInStr($sDPType, "Microsoft reserved") Or StringInStr($sPartType, "Dự trữ") Or StringInStr($sDPType, "Dự trữ") Then
+			ElseIf StringInStr($sPartType, "Reserved") Or StringInStr($sDPType, "Reserved") Or StringInStr($sPartType, "MSR") Or StringInStr($sDPType, "MSR") Or StringInS
+tr($sPartType, "Microsoft reserved") Or StringInStr($sDPType, "Microsoft reserved") Or StringInStr($sPartType, "Dự trữ") Or StringInStr($sDPType, "Dự trữ") Then
 				$bIsKnownSystemType = True
 				$sReason = "MSR Reserved"
 			ElseIf StringInStr($sPartType, "OEM") Or StringInStr($sDPType, "OEM") Then
@@ -1023,7 +1032,7 @@ Func _AutoCleanPartitions()
         Return
     EndIf
 
-    ; Tạo GUI
+    ; [Source 54] Tạo GUI
     Local $iTotalItems = UBound($aToDelete)
     Local $iNewHeight = 150 + ($iTotalItems * 20)
     If $iNewHeight < 200 Then $iNewHeight = 200
@@ -1041,7 +1050,6 @@ Func _AutoCleanPartitions()
     Next
 
     For $i = 0 To 4
-        ; _GUICtrlListView_SetColumnWidth($hList, $i, $LVSCW_AUTOSIZE)
 		_GUICtrlListView_SetColumnWidth($hList, $i, $LVSCW_AUTOSIZE_USEHEADER)
     Next
 
