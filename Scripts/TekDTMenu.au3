@@ -765,25 +765,25 @@ Func _AnalyzePartitions()
 			Local $bIsSystemType = False
 
 			;  Logic phân loại (kết hợp Type từ DP/WMI)
-			If StringInStr($sPartType, "EFI") Or StringInStr($sPartType, "System") Or StringInStr($sPartType, "Hệ thống") Then
+			If StringInStr($sPartType, "EFI") Or StringInStr($sDPType, "EFI") Or StringInStr($sPartType, "System") Or StringInStr($sDPType, "System") Or StringInStr($sPartType, "Hệ thống") Or StringInStr($sDPType, "Hệ thống") Then
 				$bIsSystemType = True
 				$sNotes &= " ⚠️ EFI System"
-			ElseIf StringInStr($sPartType, "Recovery") Or StringInStr($sPartType, "Phục hồi") Then
+			ElseIf StringInStr($sPartType, "Recovery") Or StringInStr($sDPType, "Recovery") Or StringInStr($sPartType, "Phục hồi") Or StringInStr($sDPType, "Phục hồi") Then
 				$bIsSystemType = True
 				$sNotes &= " ⚠️ Recovery"
-			ElseIf StringInStr($sPartType, "Reserved") Or StringInStr($sPartType, "MSR") Or StringInStr($sPartType, "Microsoft reserved") Or StringInStr($sPartType, "Dự trữ") Then
+			ElseIf StringInStr($sPartType, "Reserved") Or StringInStr($sDPType, "Reserved") Or StringInStr($sPartType, "MSR") Or StringInStr($sDPType, "MSR") Or StringInStr($sPartType, "Microsoft reserved") Or StringInStr($sDPType, "Microsoft reserved") Or StringInStr($sPartType, "Dự trữ") Or StringInStr($sDPType, "Dự trữ") Then
 				$bIsSystemType = True
 				$sNotes &= " ⚠️ MSR Reserved"
-			ElseIf StringInStr($sPartType, "OEM") Then
+			ElseIf StringInStr($sPartType, "OEM") Or StringInStr($sDPType, "OEM") Then
 				$bIsSystemType = True
 				$sNotes &= " ⚠️ OEM"
-			ElseIf StringInStr($sPartType, "Linux") Then
+			ElseIf StringInStr($sPartType, "Linux") Or StringInStr($sDPType, "Linux") Then
 				$bIsSystemType = True
 				$sNotes &= " ⚠️ Linux Partition"
-			ElseIf StringInStr($sPartType, "Apple") Or StringInStr($sPartType, "HFS") Or StringInStr($sPartType, "APFS") Then
+			ElseIf StringInStr($sPartType, "Apple") Or StringInStr($sDPType, "Apple") Or StringInStr($sPartType, "HFS") Or StringInStr($sDPType, "HFS") Or StringInStr($sPartType, "APFS") Or StringInStr($sDPType, "APFS") Then
 				$bIsSystemType = True
 				$sNotes &= " ⚠️ MacOS Partition"
-			ElseIf StringInStr($sPartType, "Unknown") Or Not $bFoundInWMI Then
+			ElseIf StringInStr($sPartType, "Unknown") Or StringInStr($sDPType, "Unknown") Or Not $bFoundInWMI Then
 				;  Kiểm tra size cho MSR/Recovery
 				If $sExistingLetter = "" And _
 				   (($iSizeBytes >= 15*1048576 And $iSizeBytes <= 17*1048576) Or _
@@ -948,31 +948,31 @@ Func _AutoCleanPartitions()
 			Next
 
 			; Kiểm tra type kết hợp (thêm hỗ trợ ngôn ngữ VN)
-			If StringInStr($sPartType, "EFI") Or StringInStr($sPartType, "System") Or StringInStr($sPartType, "Hệ thống") Then
+			If StringInStr($sPartType, "EFI") Or StringInStr($sDPType, "EFI") Or StringInStr($sPartType, "System") Or StringInStr($sDPType, "System") Or StringInStr($sPartType, "Hệ thống") Or StringInStr($sDPType, "Hệ thống") Then
 				$bIsKnownSystemType = True
 				$sReason = "EFI System"
-			ElseIf StringInStr($sPartType, "Recovery") Or StringInStr($sPartType, "Phục hồi") Then
+			ElseIf StringInStr($sPartType, "Recovery") Or StringInStr($sDPType, "Recovery") Or StringInStr($sPartType, "Phục hồi") Or StringInStr($sDPType, "Phục hồi") Then
 				$bIsKnownSystemType = True
 				$sReason = "Recovery"
-			ElseIf StringInStr($sPartType, "Reserved") Or StringInStr($sPartType, "MSR") Or StringInStr($sPartType, "Microsoft reserved") Or StringInStr($sPartType, "Dự trữ") Then
+			ElseIf StringInStr($sPartType, "Reserved") Or StringInStr($sDPType, "Reserved") Or StringInStr($sPartType, "MSR") Or StringInStr($sDPType, "MSR") Or StringInStr($sPartType, "Microsoft reserved") Or StringInStr($sDPType, "Microsoft reserved") Or StringInStr($sPartType, "Dự trữ") Or StringInStr($sDPType, "Dự trữ") Then
 				$bIsKnownSystemType = True
 				$sReason = "MSR Reserved"
-			ElseIf StringInStr($sPartType, "OEM") Then
+			ElseIf StringInStr($sPartType, "OEM") Or StringInStr($sDPType, "OEM") Then
 				$bIsKnownSystemType = True
 				$sReason = "OEM"
-			ElseIf StringInStr($sPartType, "Linux") Then
+			ElseIf StringInStr($sPartType, "Linux") Or StringInStr($sDPType, "Linux") Then
 				$bIsKnownSystemType = True
 				$sReason = "Linux Partition"
-			ElseIf StringInStr($sPartType, "Apple") Or StringInStr($sPartType, "HFS") Or StringInStr($sPartType, "APFS") Then
+			ElseIf StringInStr($sPartType, "Apple") Or StringInStr($sDPType, "Apple") Or StringInStr($sPartType, "HFS") Or StringInStr($sDPType, "HFS") Or StringInStr($sPartType, "APFS") Or StringInStr($sDPType, "APFS") Then
 				$bIsKnownSystemType = True
 				$sReason = "MacOS Partition"
-			ElseIf StringInStr($sPartType, "Unknown") Or Not $bFoundInWMI Then
+			ElseIf StringInStr($sPartType, "Unknown") Or StringInStr($sDPType, "Unknown") Or Not $bFoundInWMI Then
 				If $sExistingLetter = "" And _
 				   (($iSizeBytes >= 15*1048576 And $iSizeBytes <= 17*1048576) Or _
 					($iSizeBytes >= 128*1048576 And $iSizeBytes <= 130*1048576)) Then
 					$bIsKnownSystemType = True
 					$sReason = "MSR Reserved"
-				ElseIf $iSizeMB >= 500 And $iSizeMB <= 1024 Then
+				ElseIf $iSizeMB >= 450 And $iSizeMB <= 1024 Then
 					If $bFoundInWMI And _IsRecoveryPartition($oWMI, $oDisk.Index, $iWMIIndex) Then
 						$bIsKnownSystemType = True
 						$sReason = "Recovery"
@@ -1105,20 +1105,67 @@ Func _IsWindowsPartition($oWMIService, $iDiskIndex, $iPartitionIndex)
     Local $sDriveLetter = _GetDriveLetterFromPartition($oWMIService, $oPartition.DeviceID)
     Local $bIsWindows = False
     Local $bNeedToUnmount = False
-    Local $sTempLetter = "M" ; Sử dụng một ký tự ổ đĩa cao, ít bị trùng
+    Local $sTempLetter = _GetFreeDriveLetter()
+    If $sTempLetter = "" Then Return False
     Local $iDiskpartPartitionIndex = $iPartitionIndex + 1 ; WMI là 0-based, Diskpart là 1-based
 
     If $sDriveLetter = "" Then
         ; 1. Không có ký tự ổ đĩa -> Gán tạm (Phương pháp Loại 2 - An toàn)
         Local $sScriptFile = @TempDir & "\_assign_temp.txt"
-        FileWrite($sScriptFile, "select disk " & $iDiskIndex & @CRLF & _
-                              "select partition " & $iDiskpartPartitionIndex & @CRLF & _
-                              "assign letter=" & $sTempLetter & @CRLF & "exit")
-        RunWait('diskpart /s "' & $sScriptFile & '"', "", @SW_HIDE)
-        Sleep(500) ; Đợi hệ thống mount ổ đĩa
+        Local $hFile = FileOpen($sScriptFile, 2)
+        FileWriteLine($hFile, "select disk " & $iDiskIndex)
+        FileWriteLine($hFile, "select partition " & $iDiskpartPartitionIndex)
+        FileWriteLine($hFile, "assign letter=" & $sTempLetter)
+        FileWriteLine($hFile, "exit")
+        FileClose($hFile)
+        Local $sOutput = ""
+        Local $hProcess = Run('diskpart /s "' & $sScriptFile & '"', "", @SW_HIDE, $STDOUT_CHILD)
+        While 1
+            $sOutput &= StdoutRead($hProcess)
+            If @error Then ExitLoop
+        WEnd
+        ProcessWaitClose($hProcess)
         FileDelete($sScriptFile)
+        Sleep(1000) ; Đợi hệ thống mount ổ đĩa
+
+        If Not StringInStr($sOutput, "successfully assigned") Then
+            ; Thử clear GPT attributes nếu assign thất bại
+            Local $sScriptFileClear = @TempDir & "\_assign_temp_clear.txt"
+            $hFile = FileOpen($sScriptFileClear, 2)
+            FileWriteLine($hFile, "select disk " & $iDiskIndex)
+            FileWriteLine($hFile, "select partition " & $iDiskpartPartitionIndex)
+            FileWriteLine($hFile, "gpt attributes=0x0000000000000000")
+            FileWriteLine($hFile, "assign letter=" & $sTempLetter)
+            FileWriteLine($hFile, "exit")
+            FileClose($hFile)
+            $sOutput = ""
+            $hProcess = Run('diskpart /s "' & $sScriptFileClear & '"', "", @SW_HIDE, $STDOUT_CHILD)
+            While 1
+                $sOutput &= StdoutRead($hProcess)
+                If @error Then ExitLoop
+            WEnd
+            ProcessWaitClose($hProcess)
+            FileDelete($sScriptFileClear)
+            Sleep(1000)
+            ; Giả định clear attributes thành công, nhưng không restore vì có thể xoá sau
+        EndIf
+
         $sDriveLetter = $sTempLetter & ":"
         $bNeedToUnmount = True ; Đánh dấu để gỡ ra sau
+    EndIf
+
+    ; Kiểm tra xem ổ đĩa có sẵn sàng không
+    Local $sRoot = $sDriveLetter & "\"
+    If Not FileExists($sRoot) Then
+        If $bNeedToUnmount Then
+            Local $sScriptFileRemove = @TempDir & "\_remove_temp.txt"
+            FileWrite($sScriptFileRemove, "select disk " & $iDiskIndex & @CRLF & _
+                                  "select partition " & $iDiskpartPartitionIndex & @CRLF & _
+                                  "remove letter=" & $sTempLetter & @CRLF & "exit")
+            RunWait('diskpart /s "' & $sScriptFileRemove & '"', "", @SW_HIDE)
+            FileDelete($sScriptFileRemove)
+        EndIf
+        Return False
     EndIf
 
     ; 2. Kiểm tra file hệ thống (dù là ổ có sẵn hay ổ vừa gán)
@@ -1177,19 +1224,47 @@ Func _IsRecoveryPartition($oWMIService, $iDiskIndex, $iPartitionIndex)
     Local $sDriveLetter = _GetDriveLetterFromPartition($oWMIService, $oPartition.DeviceID)
     Local $bIsRecovery = False
     Local $bNeedToUnmount = False
-    Local $sTempLetter = "N" ; Sử dụng ký tự khác để tránh trùng với Windows check
+    Local $sTempLetter = _GetFreeDriveLetter()
+    If $sTempLetter = "" Then Return False
     Local $iDiskpartPartitionIndex = $iPartitionIndex + 1
 
     If $sDriveLetter = "" Then
+        ; Clear GPT attributes cho Recovery
         Local $sScriptFile = @TempDir & "\_assign_temp_rec.txt"
-        FileWrite($sScriptFile, "select disk " & $iDiskIndex & @CRLF & _
-                              "select partition " & $iDiskpartPartitionIndex & @CRLF & _
-                              "assign letter=" & $sTempLetter & @CRLF & "exit")
-        RunWait('diskpart /s "' & $sScriptFile & '"', "", @SW_HIDE)
-        Sleep(500)
+        Local $hFile = FileOpen($sScriptFile, 2)
+        FileWriteLine($hFile, "select disk " & $iDiskIndex)
+        FileWriteLine($hFile, "select partition " & $iDiskpartPartitionIndex)
+        FileWriteLine($hFile, "gpt attributes=0x0000000000000000")
+        FileWriteLine($hFile, "assign letter=" & $sTempLetter)
+        FileWriteLine($hFile, "exit")
+        FileClose($hFile)
+        Local $sOutput = ""
+        Local $hProcess = Run('diskpart /s "' & $sScriptFile & '"', "", @SW_HIDE, $STDOUT_CHILD)
+        While 1
+            $sOutput &= StdoutRead($hProcess)
+            If @error Then ExitLoop
+        WEnd
+        ProcessWaitClose($hProcess)
         FileDelete($sScriptFile)
+        Sleep(1000)
+
         $sDriveLetter = $sTempLetter & ":"
         $bNeedToUnmount = True
+    EndIf
+
+    ; Kiểm tra xem ổ đĩa có sẵn sàng không
+    Local $sRoot = $sDriveLetter & "\"
+    If Not FileExists($sRoot) Then
+        If $bNeedToUnmount Then
+            Local $sScriptFileRemove = @TempDir & "\_remove_temp_rec.txt"
+            FileWrite($sScriptFileRemove, "select disk " & $iDiskIndex & @CRLF & _
+                                  "select partition " & $iDiskpartPartitionIndex & @CRLF & _
+                                  "remove letter=" & $sTempLetter & @CRLF & _
+                                  "gpt attributes=0x8000000000000001" & @CRLF & "exit") ; Restore typical recovery attributes
+            RunWait('diskpart /s "' & $sScriptFileRemove & '"', "", @SW_HIDE)
+            FileDelete($sScriptFileRemove)
+        EndIf
+        Return False
     EndIf
 
     ; Kiểm tra file Recovery cụ thể
@@ -1204,12 +1279,32 @@ Func _IsRecoveryPartition($oWMIService, $iDiskIndex, $iPartitionIndex)
         Local $sScriptFile = @TempDir & "\_remove_temp_rec.txt"
         FileWrite($sScriptFile, "select disk " & $iDiskIndex & @CRLF & _
                               "select partition " & $iDiskpartPartitionIndex & @CRLF & _
-                              "remove letter=" & $sTempLetter & @CRLF & "exit")
+                              "remove letter=" & $sTempLetter & @CRLF & _
+                              "gpt attributes=0x8000000000000001" & @CRLF & "exit") ; Restore
         RunWait('diskpart /s "' & $sScriptFile & '"', "", @SW_HIDE)
         FileDelete($sScriptFile)
     EndIf
 
     Return $bIsRecovery
+EndFunc
+
+Func _GetFreeDriveLetter()
+    Local $aDrives = DriveGetDrive("ALL")
+    Local $sLetters = "DEFGHIJKLMNOPQRSTUV"
+    For $i = 1 To StringLen($sLetters)
+        Local $sLet = StringMid($sLetters, $i, 1)
+        Local $bUsed = False
+        If $aDrives[0] > 0 Then
+            For $j = 1 To $aDrives[0]
+                If StringUpper(StringLeft($aDrives[$j], 1)) = $sLet Then
+                    $bUsed = True
+                    ExitLoop
+                EndIf
+            Next
+        EndIf
+        If Not $bUsed Then Return $sLet
+    Next
+    Return ""
 EndFunc
 
 Func _WaitForWinPEBootComplete()
