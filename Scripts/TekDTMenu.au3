@@ -1209,18 +1209,11 @@ Func _CheckWindowsFiles($sDriveLetter)
         Return False  ; Đây là Recovery, không phải Windows đầy đủ
     EndIf
 
-    ; Chỉ cần có \Windows VÀ (\Users HOẶC \Program Files) là đủ
-
+    ; Chỉ cần có \Windows là đủ (đã loại bỏ check \Users và \Program Files)
     If Not FileExists($sDriveLetter & "\Windows") Then Return False
 
-    ; Chỉ cần một trong hai thư mục chính này tồn tại
-    If FileExists($sDriveLetter & "\Users") Or FileExists($sDriveLetter & "\Program Files") Then
-        ; Nó không phải Recovery, và nó có \Windows + \Users hoặc \Program Files
-        Return True
-    EndIf
-
-    ; Nếu chỉ có \Windows mà không có gì khác, coi như không phải
-    Return False
+    ; Nó không phải Recovery, và nó có \Windows
+    Return True
 EndFunc
 
 ;===============================================================================
