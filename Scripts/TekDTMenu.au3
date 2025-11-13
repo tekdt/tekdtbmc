@@ -687,7 +687,6 @@ Func _AnalyzePartitions()
     Local $colDisks = $oWMI.ExecQuery("SELECT * FROM Win32_DiskDrive")
     If Not IsObj($colDisks) Then
         RecordLogforDebug("WMI Query (colDisks) thất bại.")
- 
         Return
     EndIf
     RecordLogforDebug("Bước 1: WMI tìm thấy " & $colDisks.Count & " ổ đĩa vật lý.")
@@ -703,27 +702,28 @@ Func _AnalyzePartitions()
         Local $sDiskInfo = StringFormat("Disk %i (%s GB - %s)", $oDisk.Index, Round($oDisk.Size / (1024^3), 2), $oDisk.Model)
         Local $sQuery = "SELECT * FROM Win32_DiskPartition WHERE DiskIndex = " & $oDisk.Index
        
-         Local $colPartitions = $oWMI.ExecQuery($sQuery)
+        Local $colPartitions = $oWMI.ExecQuery($sQuery)
 
         ; Lấy partitions từ DiskPart để merge
         Local $aDiskPartParts = _GetPartitionsFromDiskPart($oDisk.Index)
         RecordLogforDebug("Bước 3: Hàm _GetPartitionsFromDiskPart trả về " & UBound($aDiskPartParts) & " phân vùng cho Disk " & $oDisk.Index)
 
-        Local $aWMIParts[0][6]  ; Tạm lưu WMI parts để merge: [0]: Index (0-based), [1]: Type, [2]: SizeBytes, [3]: BootPartition, [4]: DeviceID, [5]: Notes (temp)
+        Local $aWMIParts[0][7]  ; *** Tăng từ [6] lên [7] để chứa cờ "Đã sử dụng" ***
+        ; [0]: Index (0-based), [1]: Type, [2]: SizeBytes, [3]: BootPartition, [4]: DeviceID, [5]: Notes (temp), [6]: Used (0 or 1)
 
         If IsObj($colPartitions) And $colPartitions.Count > 0 Then
             For $oPartition In $colPartitions
                 Local $iIdx = UBound($aWMIParts)
-                ReDim $aWMIParts[$iIdx + 1][6]
+                ReDim $aWMIParts[$iIdx + 1][7] ; *** Tăng lên 7 ***
               
-                 $aWMIParts[$iIdx][0] = $oPartition.Index
+                $aWMIParts[$iIdx][0] = $oPartition.Index
                 $aWMIParts[$iIdx][1] = $oPartition.Type
                 $aWMIParts[$iIdx][2] = $oPartition.Size
                 $aWMIParts[$iIdx][3] = $oPartition.BootPartition
                 $aWMIParts[$iIdx][4] = $oPartition.DeviceID
                 $aWMIParts[$iIdx][5] = ""
-      
-               Next
+                $aWMIParts[$iIdx][6] = 0 ; *** 0 = Chưa sử dụng ***
+            Next
         EndIf
 
         ; Merge và xử lý từng partition (ưu tiên DiskPart cho miss, WMI cho details)
@@ -741,20 +741,33 @@ Func _AnalyzePartitions()
 			Local $sDeviceID = ""
 			Local $sExistingLetter = ""
 
-			; Tìm WMI partition match bằng size (tolerance 10MB để bù rounding)
-			Local $iTolerance = 104857600  ; *** Tăng dung sai lên 100MB *** 
-			For $iW = 0 To UBound($aWMIParts) - 1
-				If Abs($aWMIParts[$iW][2] - $iDPSizeBytes) < $iTolerance Then
-					$bFoundInWMI = True
-					$iWMIIndex = $aWMIParts[$iW][0]
-					$sPartType = $aWMIParts[$iW][1]
-					$iSizeBytes = $aWMIParts[$iW][2]
-					$bBootPartition = $aWMIParts[$iW][3]
-					$sDeviceID = $aWMIParts[$iW][4]
-					$sExistingLetter = _GetDriveLetterFromPartition($oWMI, $sDeviceID)
-					ExitLoop
-				EndIf
-			Next
+            Local $iBestMatchWMI_Index = -1
+            Local $iLowestTolerance = 104857600  ; 100MB tolerance
+
+            For $iW = 0 To UBound($aWMIParts) - 1
+                ; Bỏ qua nếu WMI part này đã được sử dụng
+                If $aWMIParts[$iW][6] = 1 Then ContinueLoop
+
+                Local $iCurrentTolerance = Abs($aWMIParts[$iW][2] - $iDPSizeBytes)
+                If $iCurrentTolerance < $iLowestTolerance Then
+                    ; Tìm thấy một "khớp tốt nhất" mới
+                    $iLowestTolerance = $iCurrentTolerance
+                    $iBestMatchWMI_Index = $iW
+                EndIf
+            Next
+
+            ; Áp dụng "khớp tốt nhất" nếu tìm thấy
+            If $iBestMatchWMI_Index <> -1 Then
+                $bFoundInWMI = True
+                $aWMIParts[$iBestMatchWMI_Index][6] = 1 ; Đánh dấu là "Đã sử dụng"
+
+                $iWMIIndex = $aWMIParts[$iBestMatchWMI_Index][0]
+                $sPartType = $aWMIParts[$iBestMatchWMI_Index][1]
+                $iSizeBytes = $aWMIParts[$iBestMatchWMI_Index][2]
+                $bBootPartition = $aWMIParts[$iBestMatchWMI_Index][3]
+                $sDeviceID = $aWMIParts[$iBestMatchWMI_Index][4]
+                $sExistingLetter = _GetDriveLetterFromPartition($oWMI, $sDeviceID)
+            EndIf
 
 			If $bBootPartition Then $sNotes &= " 🚀 Khởi động"
 
@@ -848,7 +861,7 @@ Func _AnalyzePartitions()
     Next
 
  
-    ; Tạo GUI
+    ; [Source 36] Tạo GUI
     Local $iTotalItems = UBound($aPartitions)
     Local $iNewHeight = 150 + ($iTotalItems * 20)
     If $iNewHeight < 200 Then $iNewHeight = 200
@@ -866,7 +879,7 @@ Func _AnalyzePartitions()
     Next
 
     For $i = 0 To 4
-        _GUICtrlListView_SetColumnWidth($hList, $i, $LVSCW_AUTOSIZE_USEHEADER) ; (Dùng USEHEADER như đã sửa ở truy vấn trước)
+        _GUICtrlListView_SetColumnWidth($hList, $i, $LVSCW_AUTOSIZE_USEHEADER) ; [Source 38]
     Next
 
     _AdjustPopupLayout($hGUI, $hList, $aButtons)
@@ -913,20 +926,21 @@ Func _AutoCleanPartitions()
         ; Lấy partitions từ DiskPart
         Local $aDiskPartParts = _GetPartitionsFromDiskPart($oDisk.Index)
 
-        Local $aWMIParts[0][6]  ; *** Tăng từ [5] lên [6] để chứa cờ Boot ***
-        ; [0]: Index (0-based), [1]: Type, [2]: SizeBytes, [3]: DeviceID, [4]: ExistingLetter, [5]: BootPartition
+        Local $aWMIParts[0][7]
+        ; [0]: Index (0-based), [1]: Type, [2]: SizeBytes, [3]: DeviceID, [4]: ExistingLetter, [5]: BootPartition, [6]: Used (0 or 1)
 
         If IsObj($colPartitions) And $colPartitions.Count > 0 Then
             For $oPartition In $colPartitions
                 Local $iIdx = UBound($aWMIParts)
-                ReDim $aWMIParts[$iIdx + 1][6] ; *** Tăng từ 5 lên 6 ***
+                ReDim $aWMIParts[$iIdx + 1][7] 
                 $aWMIParts[$iIdx][0] = $oPartition.Index
      
                 $aWMIParts[$iIdx][1] = $oPartition.Type
                 $aWMIParts[$iIdx][2] = $oPartition.Size
                 $aWMIParts[$iIdx][3] = $oPartition.DeviceID
                 $aWMIParts[$iIdx][4] = _GetDriveLetterFromPartition($oWMI, $oPartition.DeviceID)
-                $aWMIParts[$iIdx][5] = $oPartition.BootPartition ; *** Lưu cờ Boot ***
+                $aWMIParts[$iIdx][5] = $oPartition.BootPartition ; Giữ cờ Boot
+                $aWMIParts[$iIdx][6] = 0 ; *** 0 = Chưa sử dụng ***
             Next
         EndIf
 
@@ -944,24 +958,35 @@ Func _AutoCleanPartitions()
 			Local $sReason = ""
 			Local $bShouldDelete = False
 			Local $bIsKnownSystemType = False
-            Local $bBootPartition = False ; *** Biến lưu cờ Boot ***
+            Local $bBootPartition = False ; Giữ biến cờ Boot
 
-			; Tìm WMI partition match bằng size (tolerance 100MB)
-			Local $iTolerance = 104857600 ; *** Tăng dung sai lên 100MB ***
+            Local $iBestMatchWMI_Index = -1
+            Local $iLowestTolerance = 104857600  ; 100MB tolerance
+
 			For $iW = 0 To UBound($aWMIParts) - 1
-				If Abs($aWMIParts[$iW][2] - $iSizeBytes) < $iTolerance Then
-					$bFoundInWMI = True
-					$iWMIIndex = $aWMIParts[$iW][0]
-					$sPartType = $aWMIParts[$iW][1]  ; Ưu tiên WMI
-					$iSizeBytes = $aWMIParts[$iW][2]
-					$sExistingLetter = $aWMIParts[$iW][4]
-                    $bBootPartition = $aWMIParts[$iW][5] ; *** Lấy cờ Boot từ WMI parts ***
-					ExitLoop
+                ; Bỏ qua nếu WMI part này đã được sử dụng
+                If $aWMIParts[$iW][6] = 1 Then ContinueLoop
+
+                Local $iCurrentTolerance = Abs($aWMIParts[$iW][2] - $iSizeBytes)
+				If $iCurrentTolerance < $iLowestTolerance Then
+                    $iLowestTolerance = $iCurrentTolerance
+                    $iBestMatchWMI_Index = $iW
 				EndIf
 			Next
 
-			; Kiểm tra type kết hợp (thêm hỗ trợ ngôn ngữ VN)
-            ; *** Kiểm tra cờ Boot (MBR) LÊN TRÊN CÙNG ***
+            ; Áp dụng "khớp tốt nhất" nếu tìm thấy
+			If $iBestMatchWMI_Index <> -1 Then
+                $bFoundInWMI = True
+                $aWMIParts[$iBestMatchWMI_Index][6] = 1 ; Đánh dấu là "Đã sử dụng"
+
+                $iWMIIndex = $aWMIParts[$iBestMatchWMI_Index][0]
+                $sPartType = $aWMIParts[$iBestMatchWMI_Index][1]
+                $iSizeBytes = $aWMIParts[$iBestMatchWMI_Index][2]
+                $sExistingLetter = $aWMIParts[$iBestMatchWMI_Index][4]
+                $bBootPartition = $aWMIParts[$iBestMatchWMI_Index][5]
+			EndIf
+
+			; Kiểm tra type kết hợp (vẫn ưu tiên MBR Boot)
             If $bBootPartition Then
                 $bIsKnownSystemType = True
                 $sReason = "Boot Partition (MBR)"
@@ -971,8 +996,7 @@ Func _AutoCleanPartitions()
 			ElseIf StringInStr($sPartType, "Recovery") Or StringInStr($sDPType, "Recovery") Or StringInStr($sPartType, "Phục hồi") Or StringInStr($sDPType, "Phục hồi") Then
 				$bIsKnownSystemType = True
 				$sReason = "Recovery"
-			ElseIf StringInStr($sPartType, "Reserved") Or StringInStr($sDPType, "Reserved") Or StringInStr($sPartType, "MSR") Or StringInStr($sDPType, "MSR") Or StringInS
-tr($sPartType, "Microsoft reserved") Or StringInStr($sDPType, "Microsoft reserved") Or StringInStr($sPartType, "Dự trữ") Or StringInStr($sDPType, "Dự trữ") Then
+			ElseIf StringInStr($sPartType, "Reserved") Or StringInStr($sDPType, "Reserved") Or StringInStr($sPartType, "MSR") Or StringInStr($sDPType, "MSR") Or StringInStr($sPartType, "Microsoft reserved") Or StringInStr($sDPType, "Microsoft reserved") Or StringInStr($sPartType, "Dự trữ") Or StringInStr($sDPType, "Dự trữ") Then
 				$bIsKnownSystemType = True
 				$sReason = "MSR Reserved"
 			ElseIf StringInStr($sPartType, "OEM") Or StringInStr($sDPType, "OEM") Then
@@ -1070,7 +1094,7 @@ tr($sPartType, "Microsoft reserved") Or StringInStr($sDPType, "Microsoft reserve
     WEnd
     GUIDelete($hGUI)
 
-    ; Thực thi xoá bằng DiskPart
+    ; [Source 58] Thực thi xoá bằng DiskPart
     Local $sCleanScriptFile = @TempDir & "\cleanpart.txt"
     Local $hFile = FileOpen($sCleanScriptFile, 2)
     For $i = 0 To UBound($aToDelete) - 1
