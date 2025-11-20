@@ -30,7 +30,7 @@ EndIf
 ; --- Cài đặt và Biến toàn cục ---
 Global Const $g_sIniFile = @ScriptDir & "\TekDTMenu.ini"
 Global $g_sTitle = IniRead($g_sIniFile, "Settings", "Title", "TekDT BMC")
-Global $RecordLog = False
+Global $RecordLog = True
 Global $RootDevice = SearchRootDevice()
 Global $g_iMainWidth = _Scale(260)
 Global $g_iMaxButtonsVisible = 5 ; Số nút tối đa hiển thị cùng lúc
@@ -2030,9 +2030,9 @@ EndFunc
 ; --- HÀM CHÍNH ---
 Func _AutoExtractDrivers()
     ; --- Bước 1: Khai báo và xác định vị trí file ---
-    Local Const $sRelativeArchivePath = "\ventoy\Drivers.7z" ; SỬA LẠI
+    Local Const $sRelativeArchivePath = "\ventoy\Drivers.7z"
     Local Const $sDestDir = "X:\Drivers"
-    Local $s7zPath = StringReplace(@ScriptDir & "\Tools\7z" & (@OSArch = "X64" ? "64" : "32") & "\7za.exe",'\\','\')
+    Local $s7zPath = StringReplace(@ScriptDir & "\Tools\7z" & (@OSArch = "X64" ? "64" : "32") & "\7za.exe", '\\', '\')
     Local $sArchivePath, $sDbPath
 
     ; 1a. Tìm file Archive
@@ -2046,7 +2046,7 @@ Func _AutoExtractDrivers()
         Return False
     EndIf
 
-    ; 1b. Tìm file SQLite DB (nằm cùng thư mục với archive)
+    ; 1b. Tìm file SQLite DB
     $sDbPath = StringRegExpReplace($sArchivePath, "\\[^\\]+$", "") & "\db.sqlite"
     If Not FileExists($sDbPath) Then
         RecordLogforDebug("! Lỗi: Không tìm thấy db.sqlite tại: " & $sDbPath)
@@ -2054,11 +2054,11 @@ Func _AutoExtractDrivers()
     EndIf
 
     DirCreate($sDestDir)
-    RecordLogforDebug("* Thông tin: Bắt đầu trích xuất driver theo yêu cầu vào " & $sDestDir)
+    RecordLogforDebug("* Thông tin: Bắt đầu trích xuất driver vào " & $sDestDir)
 
     ; --- Bước 2: Truy vấn WMI ---
     Local $aMissingHWIDs[0]
-    RecordLogforDebug("* Thông tin: Đang truy vấn WMI để tìm các thiết bị thiếu driver (ErrorCode 28)...")
+    RecordLogforDebug("* Thông tin: Đang truy vấn WMI (ErrorCode 28)...")
     Local $oWMI = ObjGet("winmgmts:\\.\root\cimv2")
     If Not IsObj($oWMI) Then
         RecordLogforDebug("! Lỗi: Không thể kết nối WMI.")
@@ -2071,68 +2071,43 @@ Func _AutoExtractDrivers()
             If IsArray($oDevice.HardwareID) Then
                 For $sHWID In $oDevice.HardwareID
                     $sHWID = StringUpper(StringStripWS($sHWID, 3))
-                    If StringLen($sHWID) > 5 And Not StringIsDigit($sHWID) Then
-                        _ArrayAdd($aMissingHWIDs, $sHWID)
-                    EndIf
+                    If StringLen($sHWID) > 5 And Not StringIsDigit($sHWID) Then _ArrayAdd($aMissingHWIDs, $sHWID)
                 Next
             ElseIf $oDevice.HardwareID <> "" Then
                 Local $sHWID = StringUpper(StringStripWS($oDevice.HardwareID, 3))
-                If StringLen($sHWID) > 5 And Not StringIsDigit($sHWID) Then
-                    _ArrayAdd($aMissingHWIDs, $sHWID)
-                EndIf
+                If StringLen($sHWID) > 5 And Not StringIsDigit($sHWID) Then _ArrayAdd($aMissingHWIDs, $sHWID)
             EndIf
         Next
         $aMissingHWIDs = _ArrayUnique($aMissingHWIDs)
-        RecordLogforDebug("* Thông tin: Tìm thấy " & UBound($aMissingHWIDs) & " ID phần cứng thiếu driver.")
+        RecordLogforDebug("* Thông tin: Tìm thấy " & UBound($aMissingHWIDs) & " ID thiếu driver.")
     Else
-        RecordLogforDebug("* Thông tin: Không tìm thấy thiết bị nào thiếu driver. Hoàn tất.")
+        RecordLogforDebug("* Thông tin: Không tìm thấy thiết bị nào thiếu driver.")
         Return True
     EndIf
 
-    ; --- Bước 3: Khởi tạo SQLite và chuẩn bị truy vấn ---
-    RecordLogforDebug("* Thông tin: Đang mở " & $sDbPath)
-
-	If @AutoItX64 = 1 Then
-		_SQLite_Startup('sqlite3_x64.dll', False, 1)
-	Else
-		_SQLite_Startup('sqlite3.dll', False, 1)
-	EndIf
-
-	If @error Then
-		RecordLogforDebug("SQLite3.dll Can't be Loaded!")
-		Exit -1
-	EndIf
+    ; --- Bước 3: Khởi tạo SQLite ---
+    If @AutoItX64 = 1 Then
+        _SQLite_Startup('sqlite3_x64.dll', False, 1)
+    Else
+        _SQLite_Startup('sqlite3.dll', False, 1)
+    EndIf
+    If @error Then
+        RecordLogforDebug("! Lỗi: Không load được SQLite3.dll")
+        Exit -1
+    EndIf
 
     Local $hDb = _SQLite_Open($sDbPath)
     If @error Then
-        RecordLogforDebug("! Lỗi: Không thể mở file db.sqlite. Mã lỗi: " & @error)
+        RecordLogforDebug("! Lỗi: Không mở được DB. Lỗi: " & @error)
         _SQLite_Shutdown()
         Return False
     EndIf
 
-    ; Lấy cả T_Driver.pack VÀ T_Driver.directory
-    Local $sQuery = "SELECT T_Driver.pack, T_Driver.directory " & _
-        "FROM Devices AS T_Device " & _
-        "INNER JOIN Usable AS T_Usable ON T_Device.id = T_Usable.deviceId " & _
-        "INNER JOIN Sections AS T_Section ON T_Usable.sectionId = T_Section.id " & _
-        "INNER JOIN Drivers AS T_Driver ON T_Section.driverId = T_Driver.id " & _
-        "ORDER BY T_Usable.rank DESC " & _
-        "LIMIT 1"
-
-
-    Local $hStmt
-    If _SQLite_Query($hDb, $sQuery, $hStmt) <> $SQLITE_OK Then
-        RecordLogforDebug("! Lỗi: Chuẩn bị câu lệnh SQL thất bại. Lỗi: " & _SQLite_ErrMsg($hDb))
-        _SQLite_Close($hDb)
-        _SQLite_Shutdown()
-        Return False
-    EndIf
-
-    ; --- Lấy thông tin HĐH (WinPE) đang chạy ---
+    ; --- Chuẩn bị thông tin HĐH ---
     Local $sOSVer
     Select
         Case @OSVersion = "WIN_11"
-            $sOSVer = "10.0" ; Win 11 vẫn dùng nhân 10.0
+            $sOSVer = "10.0"
         Case @OSVersion = "WIN_10"
             $sOSVer = "10.0"
         Case @OSVersion = "WIN_81"
@@ -2142,40 +2117,70 @@ Func _AutoExtractDrivers()
         Case @OSVersion = "WIN_7"
             $sOSVer = "6.1"
         Case Else
-            RecordLogforDebug("! Lỗi: Không nhận dạng được @OSVersion: " & @OSVersion & ". Giả định là '10.0'.")
-            $sOSVer = "10.0" ; Giá trị dự phòng an toàn nhất
+            $sOSVer = "10.0"
     EndSelect
 
-    ; Sửa lại định dạng chuỗi HĐH thành "10.0x64" cho khớp với CSDL
     Local $sSystemID = $sOSVer & StringLower(@OSArch)
-    Local $iOSBuild = @OSBuild ; Lấy số build hiện tại, ví dụ: 19041, 22000, 22621
-    Local $sEscSystemID = _SQLite_FastEscape($sSystemID) ; Escape chuỗi này
+    Local $iOSBuild = @OSBuild
+    Local $sEscSystemID = _SQLite_FastEscape($sSystemID)
 
-    RecordLogforDebug("* Thông tin: Sẽ lọc driver cho HĐH: " & $sSystemID & " (Build <= " & $iOSBuild & ")")
+    RecordLogforDebug("* Thông tin: Lọc driver cho OS: " & $sSystemID & " (Build <= " & $iOSBuild & ")")
 
-
-    ; --- Bước 4: Lặp qua HWIDs và truy vấn CSDL ---
+    ; --- Bước 4: Lặp qua HWIDs và truy vấn CSDL (ĐÃ NÂNG CẤP) ---
     Local $aPathsToExtract[0]
-	RecordLogforDebug("* Thông tin: Đang so khớp " & UBound($aMissingHWIDs) & " thiết bị thiếu với CSDL...")
 
-	For $sMissingHWID In $aMissingHWIDs
-		If $sMissingHWID = "" Or StringIsDigit($sMissingHWID) Or StringLen($sMissingHWID) < 5 Then ContinueLoop
+    For $sMissingHWID In $aMissingHWIDs
+        If $sMissingHWID = "" Or StringIsDigit($sMissingHWID) Or StringLen($sMissingHWID) < 5 Then ContinueLoop
 
-		; escape giá trị HWID an toàn
-		Local $sEscHWID = _SQLite_FastEscape($sMissingHWID)
+        ; 4a. Tạo các biến thể của ID (Candidate IDs) để tìm khớp trong DB
+        ; Mục đích: DB có thể chỉ lưu ID ngắn (VEN&DEV) trong khi OS trả về ID dài (có Subsys/Rev)
+        Local $aCandidates[0]
+        
+        ; Dạng 1: ID Gốc
+        _ArrayAdd($aCandidates, $sMissingHWID)
 
-		; Tạo câu truy vấn với HWID đã escape VÀ LỌC THEO HĐH
-        ; Ưu tiên RANK, BUILD, DATE, VÀ ưu tiên driver không có phụ thuộc
+        ; Dạng 2: Bỏ &REV_...
+        If StringInStr($sMissingHWID, "&REV_") Then
+            _ArrayAdd($aCandidates, StringRegExpReplace($sMissingHWID, "&REV_.*", ""))
+        EndIf
+
+        ; Dạng 3: Bỏ &SUBSYS_... (chỉ còn VEN và DEV có Prefix)
+        If StringInStr($sMissingHWID, "&SUBSYS_") Then
+            _ArrayAdd($aCandidates, StringRegExpReplace($sMissingHWID, "&SUBSYS_.*", ""))
+        EndIf
+
+        ; Dạng 4: Chỉ lấy cụm VEN_xxxx&DEV_xxxx (Core ID - Quan trọng nhất cho mainId)
+        ; Pattern tìm chuỗi VEN_...&DEV_... (4 ký tự hexa)
+        Local $aRegEx = StringRegExp($sMissingHWID, "(VEN_[0-9A-F]{4}&DEV_[0-9A-F]{4})", 3)
+        If IsArray($aRegEx) Then
+            _ArrayAdd($aCandidates, $aRegEx[0])
+        EndIf
+
+        $aCandidates = _ArrayUnique($aCandidates)
+
+        ; 4b. Tạo chuỗi danh sách cho SQL IN (...)
+        Local $sSqlList = ""
+        For $i = 0 To UBound($aCandidates) - 1
+            If $aCandidates[$i] <> "" Then
+                $sSqlList &= _SQLite_FastEscape($aCandidates[$i]) & ","
+            EndIf
+        Next
+        $sSqlList = StringTrimRight($sSqlList, 1) ; Xóa dấu phẩy cuối
+
+        If $sSqlList = "" Then ContinueLoop
+
+        ; 4c. Câu truy vấn tối ưu
+        ; Sử dụng IN (...) để tận dụng Index của deviceId và mainId
         Local $sQueryHWID = "SELECT T_Driver.pack, T_Driver.directory" & _
             " FROM Devices AS T_Device" & _
-            " INNER JOIN Usable AS T_Usable" & _
-                " ON T_Usable.deviceId = T_Device.id" & _
-            " INNER JOIN Sections AS T_Section" & _
-                " ON T_Section.id = T_Usable.sectionId" & _
-            " INNER JOIN Drivers AS T_Driver" & _
-                " ON T_Driver.id = T_Section.driverId" & _
+            " INNER JOIN Usable AS T_Usable ON T_Usable.deviceId = T_Device.id" & _
+            " INNER JOIN Sections AS T_Section ON T_Section.id = T_Usable.sectionId" & _
+            " INNER JOIN Drivers AS T_Driver ON T_Driver.id = T_Section.driverId" & _
             " WHERE" & _
-            " T_Device.deviceId = " & $sEscHWID & _
+            " (" & _
+                " T_Device.deviceId IN (" & $sSqlList & ")" & _
+                " OR T_Device.mainId IN (" & $sSqlList & ")" & _
+            " )" & _
             " AND T_Usable.system = " & $sEscSystemID & _
             " AND T_Section.build <= " & $iOSBuild & _
             " AND T_Section.sign = 2" & _
@@ -2188,52 +2193,41 @@ Func _AutoExtractDrivers()
             " T_Section.build DESC" & _
             " LIMIT 1"
 
-		Local $hQuery, $aRow[0]
+        Local $hQuery, $aRow[0]
+        If _SQLite_Query($hDb, $sQueryHWID, $hQuery) = $SQLITE_OK Then
+            If _SQLite_FetchData($hQuery, $aRow) = $SQLITE_OK Then
+                Local $sExtractPath = $aRow[0] & "\" & StringReplace($aRow[1], '/', '\')
+                RecordLogforDebug("==> TÌM THẤY! HWID gốc: " & $sMissingHWID & " -> Driver: " & $sExtractPath)
+                _ArrayAdd($aPathsToExtract, $sExtractPath)
+            EndIf
+            _SQLite_QueryFinalize($hQuery)
+        Else
+            RecordLogforDebug("! Lỗi Query cho HWID " & $sMissingHWID & ": " & _SQLite_ErrMsg($hDb))
+        EndIf
+    Next
 
-		; Chuẩn bị và thực thi câu truy vấn
-		If _SQLite_Query($hDb, $sQueryHWID, $hQuery) = $SQLITE_OK Then
-			; Lấy 1 hàng (nếu có)
-			If _SQLite_FetchData($hQuery, $aRow) = $SQLITE_OK Then
-				Local $sPack = $aRow[0]
-				Local $sDirectory = $aRow[1]
-				Local $sExtractPath = $sPack & "\" & StringReplace($sDirectory,'/','\')
-				RecordLogforDebug("==> TRÙNG KHỚP! Thiết bị: " & $sMissingHWID & " | Driver: " & $sExtractPath)
-				_ArrayAdd($aPathsToExtract, $sExtractPath)
-			EndIf
-
-			; Giải phóng query handle
-			_SQLite_QueryFinalize($hQuery)
-		Else
-			RecordLogforDebug("! Lỗi: chuẩn bị/thi hành query thất bại cho HWID " & $sMissingHWID & ". Lỗi: " & _SQLite_ErrMsg($hDb))
-		EndIf
-	Next
-
-    ; --- Bước 5: Dọn dẹp SQLite ---
+    ; --- Bước 5: Dọn dẹp ---
     _SQLite_Close($hDb)
     _SQLite_Shutdown()
-    RecordLogforDebug("* Thông tin: Đã đóng CSDL.")
 
-    ; --- Bước 6: Thực hiện trích xuất ---
+    ; --- Bước 6: Trích xuất ---
     If UBound($aPathsToExtract) = 0 Then
-        RecordLogforDebug("* Thông tin: Đã tìm kiếm xong nhưng không tìm thấy driver nào phù hợp trong " & $sRelativeArchivePath)
+        RecordLogforDebug("* Thông tin: Không tìm thấy driver phù hợp trong DB.")
         Return True
     EndIf
 
     Local $aUniquePaths = _ArrayUnique($aPathsToExtract)
-    RecordLogforDebug("* Thông tin: Chuẩn bị trích xuất " & UBound($aUniquePaths)-1 & " thư mục driver duy nhất...")
+    RecordLogforDebug("* Thông tin: Đang trích xuất " & UBound($aUniquePaths)-1 & " thư mục driver...")
 
     For $sPathToExtract In $aUniquePaths
-        If $sPathToExtract = "" OR StringInStr($sPathToExtract,'\') = 0 Then ContinueLoop
-
-        ; Lệnh 7z này giờ sẽ hoạt động chính xác với đường dẫn (ví dụ: "Chipset\Intel\FORCED...")
+        If $sPathToExtract = "" OR StringInStr($sPathToExtract, '\') = 0 Then ContinueLoop
         Local $sCommand = '"' & $s7zPath & '" x "' & $sArchivePath & '" -o"' & $sDestDir & '" "' & $sPathToExtract & '*" -y -r'
-        RecordLogforDebug("* Thông tin: Đang chạy: " & StringLeft($sCommand, 200) & "...")
         RunWait($sCommand, "", @SW_HIDE)
     Next
 
-    RecordLogforDebug("* Thành công: Quá trình giải nén driver đã hoàn tất.")
+    RecordLogforDebug("* Thành công: Hoàn tất trích xuất.")
     Return True
-EndFunc   ;==>_AutoExtractDrivers
+EndFunc
 
 ;===============================================================================
 ; Hàm: _FindFileOnDrives

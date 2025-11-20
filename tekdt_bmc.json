@@ -1,10 +1,10 @@
 {
     "device": "\\\\.\\PHYSICALDRIVE1",
-    "device_name": "VendorC ProductCode (29.30 GB) - USB",
+    "device_name": "SSK USB3.2 (58.24 GB) - USB",
     "partition_scheme": "GPT",
     "filesystem": "ExFAT",
     "theme": "Purple.zip",
-    "fill_space": true,
+    "fill_space": false,
     "iso_list": [
         {
             "path": "D:/Github/tekdtbmc/ISOs/Win11_24H2_English_x64.iso",
@@ -47,15 +47,15 @@
     "windows_edition": null,
     "windows_edition_index": null,
     "copy_ais_selection_only": true,
-    "prune_iso": false,
+    "prune_iso": true,
     "device_details": {
         "BusType": "USB",
         "DeviceID": "1",
-        "FriendlyName": "VendorC ProductCode",
+        "FriendlyName": "SSK USB3.2",
         "MediaType": "Unspecified",
         "ProductID": null,
-        "SerialNumber": "FC0317B94E0F1",
-        "Size": 31457280000,
+        "SerialNumber": "0000000005\u0006\u0018",
+        "Size": 62533927424,
         "VendorID": null
     },
     "install_mode": "DESTRUCTIVE",
