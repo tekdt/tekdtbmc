@@ -30,7 +30,7 @@ EndIf
 ; --- Cài đặt và Biến toàn cục ---
 Global Const $g_sIniFile = @ScriptDir & "\TekDTMenu.ini"
 Global $g_sTitle = IniRead($g_sIniFile, "Settings", "Title", "TekDT BMC")
-Global $RecordLog = True
+Global $RecordLog = False
 Global $RootDevice = SearchRootDevice()
 Global $g_iMainWidth = _Scale(260)
 Global $g_iMaxButtonsVisible = 5 ; Số nút tối đa hiển thị cùng lúc
@@ -821,8 +821,7 @@ Func _AnalyzePartitions()
                 If _IsRecoveryPartition($oWMI, $oDisk.Index, $iWMIIndex) Then
                     $bIsSystemType = True
                     $sNotes &= " ⚠️ Recovery"
-
-                ElseIf $iSizeMB > 8000 And _IsWindowsPartition($oWMI, $oDisk.Index, $iPartitionNum) Then
+				ElseIf $iSizeMB > 8000 And _IsWindowsPartition($oDisk.Index, $iPartitionNum, $sExistingLetter) Then
                     $sNotes &= " 💻 Windows cũ"
 
                 ElseIf $sExistingLetter <> "" Then
@@ -1028,7 +1027,7 @@ Func _AutoCleanPartitions()
             If $bIsKnownSystemType Then
                 $bShouldDelete = True
             ; [FIX QUAN TRỌNG] Thay $iWMIIndex bằng $iPartitionNum
-            ElseIf $bFoundInWMI And _IsWindowsPartition($oWMI, $oDisk.Index, $iPartitionNum) Then
+            ElseIf $bFoundInWMI And _IsWindowsPartition($oDisk.Index, $iPartitionNum, $sExistingLetter) Then
                 $sReason = "Windows cũ"
                 $bShouldDelete = True
             ElseIf $bFoundInWMI And _IsRecoveryPartition($oWMI, $oDisk.Index, $iWMIIndex) Then
@@ -1142,105 +1141,73 @@ Func _GetDriveLetterFromPartition($oWMIService, $sPartitionDeviceID)
     Return ""
 EndFunc
 
-;===============================================================================
-; Hàm: _IsWindowsPartition
-; Mục đích: Kiểm tra xem một phân vùng có chứa hệ điều hành Windows hay không
-;           bằng cách tạm thời gán ký tự và kiểm tra các tệp/thư mục hệ thống.
+; Hàm kiểm tra Windows
 ; Tham số:
-;    $iDiskNum  - Chỉ số của ổ đĩa.
-;    $iPartNum  - Chỉ số của phân vùng trên ổ đĩa đó.
-; Trả về:
-;    True      - Nếu có vẻ là phân vùng Windows.
-;    False     - Nếu không phải hoặc có lỗi.
-;===============================================================================
-
-Func _IsWindowsPartition($oWMIService, $iDiskIndex, $iPartitionIndex)
-    ; Lấy đối tượng WMI cho partition
-    Local $oPartition = $oWMIService.Get("Win32_DiskPartition.DeviceID='Disk #" & $iDiskIndex & ", Partition #" & $iPartitionIndex & "'")
-    If Not IsObj($oPartition) Then Return False
-
-    Local $sDriveLetter = _GetDriveLetterFromPartition($oWMIService, $oPartition.DeviceID)
+;   $iDiskIndex: Số thứ tự ổ đĩa (0, 1...)
+;   $iDiskPartIndex: Số thứ tự Partition theo DiskPart (1, 2, 3... - Lấy trực tiếp từ output DiskPart)
+;   $sExistingLetter: Ký tự ổ đĩa hiện có (Ví dụ "C:", lấy từ logic so khớp WMI ở vòng lặp chính). Nếu không có thì để rỗng "".
+Func _IsWindowsPartition($iDiskIndex, $iDiskPartIndex, $sExistingLetter = "")
     Local $bIsWindows = False
     Local $bNeedToUnmount = False
-    Local $sTempLetter = _GetFreeDriveLetter()
-    If $sTempLetter = "" Then Return False
-    Local $iDiskpartPartitionIndex = $iPartitionIndex + 1 ; WMI là 0-based, Diskpart là 1-based
+    Local $sCheckLetter = $sExistingLetter
 
-    If $sDriveLetter = "" Then
-        ; 1. Không có ký tự ổ đĩa -> Gán tạm
-        Local $sScriptFile = @TempDir & "\_assign_temp.txt"
+    ; Nếu chưa có ký tự ổ đĩa, ta phải mount tạm bằng DiskPart
+    If $sCheckLetter = "" Then
+        Local $sTempLetter = _GetFreeDriveLetter()
+        If $sTempLetter = "" Then Return False ; Hết ký tự để gán
+
+        Local $sScriptFile = @TempDir & "\_assign_temp_" & $iDiskIndex & "_" & $iDiskPartIndex & ".txt"
         Local $hFile = FileOpen($sScriptFile, 2)
         FileWriteLine($hFile, "select disk " & $iDiskIndex)
-        FileWriteLine($hFile, "select partition " & $iDiskpartPartitionIndex)
+        ; Lưu ý: $iDiskPartIndex truyền vào phải là số lấy từ DiskPart (1-based), nên không cần +1 ở đây nữa
+        FileWriteLine($hFile, "select partition " & $iDiskPartIndex)
 
-        ; *** SỬ DỤNG LỆNH DETAIL ĐỂ XEM THUỘC TÍNH VÀ CỐ GẮNG CLEAR CỜ GPT/MBR ***
-        FileWriteLine($hFile, "detail partition") ; Lấy thông tin chi tiết
-        FileWriteLine($hFile, "gpt attributes=0x0000000000000000") ; Cố gắng xóa cờ 'no mount' của GPT (sẽ fail trên MBR)
-        FileWriteLine($hFile, "set id=07 override") ; Cố gắng đặt ID NTFS cho MBR (sẽ fail trên GPT)
+        ; Các lệnh cố gắng hiện phân vùng ẩn
+        FileWriteLine($hFile, "detail partition")
+        FileWriteLine($hFile, "gpt attributes=0x0000000000000000")
+        FileWriteLine($hFile, "set id=07 override")
 
         FileWriteLine($hFile, "assign letter=" & $sTempLetter)
         FileWriteLine($hFile, "exit")
         FileClose($hFile)
 
-        Local $sOutput = ""
-        Local $hProcess = Run('diskpart /s "' & $sScriptFile & '"', "", @SW_HIDE, $STDOUT_CHILD)
-        While 1
-            $sOutput &= StdoutRead($hProcess)
-            If @error Then ExitLoop
-        WEnd
-        ProcessWaitClose($hProcess)
-        FileDelete($sScriptFile)
-        Sleep(1000)
-
-        ; Kiểm tra xem lệnh assign có thành công không (dựa trên việc có ký tự ổ đĩa sau 1 giây)
-        $sDriveLetter = $sTempLetter & ":"
-        Local $oFSO = ObjCreate("Scripting.FileSystemObject")
-        If Not $oFSO.DriveExists($sTempLetter) Then
-             ; Nếu vẫn không mount được, thì không phải Windows cũ
-             Return False
-        EndIf
-        $bNeedToUnmount = True
-    EndIf
-
-    ; Kiểm tra xem ổ đĩa có sẵn sàng không
-    Local $sRoot = $sDriveLetter & "\"
-    If Not FileExists($sRoot) Then
-        ; Khối Unmount bị thiếu logic khôi phục cờ MBR/GPT (Phải copy từ _IsRecoveryPartition)
-        If $bNeedToUnmount Then
-            Local $sScriptFileRemove = @TempDir & "\_remove_temp.txt"
-            ; Khôi phục MBR (Primary) và GPT (Primary) mặc định
-            FileWrite($sScriptFileRemove, "select disk " & $iDiskIndex & @CRLF & _
-                                  "select partition " & $iDiskpartPartitionIndex & @CRLF & _
-                                  "remove letter=" & $sTempLetter & @CRLF & _
-                                  "gpt attributes=0x0000000000000000" & @CRLF & _ ; GPT: Primary
-                                  "set id=07 override" & @CRLF & "exit") ; MBR: Primary (ID 07)
-            RunWait('diskpart /s "' & $sScriptFileRemove & '"', "", @SW_HIDE)
-            FileDelete($sScriptFileRemove)
-        EndIf
-        Return False
-    EndIf
-
-    ; 2. Kiểm tra file hệ thống (dù là ổ có sẵn hay ổ vừa gán)
-    If FileExists($sDriveLetter & "\Windows") Then
-        $bIsWindows = _CheckWindowsFiles($sDriveLetter)
-    EndIf
-
-    ; 3. Gỡ ký tự ổ đĩa nếu chúng ta đã gán tạm
-    If $bNeedToUnmount Then
-        Local $sScriptFile = @TempDir & "\_remove_temp.txt"
-        ; Khôi phục MBR (Primary) và GPT (Primary) mặc định
-        FileWrite($sScriptFile, "select disk " & $iDiskIndex & @CRLF & _
-                              "select partition " & $iDiskpartPartitionIndex & @CRLF & _
-                              "remove letter=" & $sTempLetter & @CRLF & _
-                              "gpt attributes=0x0000000000000000" & @CRLF & _ ; GPT: Primary
-                              "set id=07 override" & @CRLF & "exit") ; MBR: Primary (ID 07)
         RunWait('diskpart /s "' & $sScriptFile & '"', "", @SW_HIDE)
         FileDelete($sScriptFile)
+        Sleep(1000) ; Đợi hệ thống nhận ổ
+
+        Local $oFSO = ObjCreate("Scripting.FileSystemObject")
+        If $oFSO.DriveExists($sTempLetter) Then
+            $sCheckLetter = $sTempLetter & ":"
+            $bNeedToUnmount = True
+        Else
+            Return False ; Mount thất bại
+        EndIf
+    EndIf
+
+    ; Kiểm tra thư mục Windows
+    If FileExists($sCheckLetter & "\Windows") Then
+        $bIsWindows = _CheckWindowsFiles($sCheckLetter)
+    EndIf
+
+    ; Dọn dẹp: Unmount nếu nãy mình vừa gán
+    If $bNeedToUnmount Then
+        Local $sScriptFileRemove = @TempDir & "\_remove_temp_" & $iDiskIndex & "_" & $iDiskPartIndex & ".txt"
+        FileOpen($sScriptFileRemove, 2)
+        Local $hFileRemove = FileOpen($sScriptFileRemove, 2)
+        FileWriteLine($hFileRemove, "select disk " & $iDiskIndex)
+        FileWriteLine($hFileRemove, "select partition " & $iDiskPartIndex)
+        FileWriteLine($hFileRemove, "remove letter=" & StringLeft($sCheckLetter, 1))
+        ; Khôi phục thuộc tính ẩn (Tuỳ chọn, nhưng code cũ bạn có logic này thì nên giữ)
+        FileWriteLine($hFileRemove, "gpt attributes=0x8000000000000000") ; Attributes GPT ẩn mặc định
+        FileWriteLine($hFileRemove, "exit")
+        FileClose($hFileRemove)
+        
+        RunWait('diskpart /s "' & $sScriptFileRemove & '"', "", @SW_HIDE)
+        FileDelete($sScriptFileRemove)
     EndIf
 
     Return $bIsWindows
 EndFunc
-
 ;===============================================================================
 ; Hàm kiểm tra chuyên sâu cho Windows
 ;===============================================================================
