@@ -9,6 +9,11 @@ TekDT BMC là công cụ tạo thiết bị có thể chứa nhiều bộ cài h
 - Telegram: @tekdt1152
 - Facebook: @tekdtcom
 
+# Tải xuống
+Phiên bản mới nhất tại [https://github.com/tekdt/tekdtbmc/releases/download/v1.0.4/TekDT.BMC_v1.0.4.zip]
+Mã hash SHA256 của chữ ký của TekDT là: 4ef06065990138ab401948b95f536272. Nếu đúng mã hash thì mới chính xác từ TekDT.
+MD5 cho phiên bản v1.0.4: 7fecbf2cc89167f4af2937d0751bed7e
+
 # Hướng dẫn sử dụng
 Ở giao diện chương trình sẽ có tổng cộng 3 bước, bao gồm: CHỌN USB, CHỌN HOẶC TẢI ISO, THÊM PHẦN MỀM ĐƯỢC CÀI ĐẶT TỰ ĐỘNG SAU KHI CÀI WINDOWS
 - Bước 1: Chọn thiết bị USB
