@@ -3,8 +3,8 @@ TekDT BMC là công cụ tạo thiết bị có thể chứa nhiều bộ cài h
 - Tên phần mềm: TekDT BMC
 - Tác giả: TekDT
 - Mô tả: Phần mềm tạo USB boot tương thích với nhiều cấu hình máy tính khác nhau, tích hợp cài đặt phần mềm tự động sau khi cài đặt Windows.
-- Ngày phát hành: 22-08-2025
-- Phiên bản: 1.0.2
+- Ngày phát hành: 29-11-2025
+- Phiên bản: 1.0.4
 - Email: dinhtrungtek@gmail.com
 - Telegram: @tekdt1152
 - Facebook: @tekdtcom
@@ -22,13 +22,21 @@ TekDT BMC là công cụ tạo thiết bị có thể chứa nhiều bộ cài h
   + Tải các mục đã chọn: Sau khi chọn các phiên bản ISO muốn tải, thì nút này sẽ tải lần lượt hết tất cả những phiên bản ISO được tick.
 
 - Bước 3: Chọn phần mềm cài đặt tự động sau khi cài đặt Windows hoàn tất.
-  + Dựa vào danh sách phần mềm thì Tải (nếu phần mềm chưa có, cần internet) hoặc thêm vào danh sách được cài tự động
+  + Dựa vào danh sách phần mềm thì Tải (nếu phần mềm chưa có, cần internet) hoặc thêm vào danh sách được cài tự động. Chương trình sẽ tự động copy TekDT AIS vào thiết bị boot, và tự cấu hình gọi nó để cài đặt phần mềm cần thiết tự động, bạn không cần làm gì thêm.
   + Sau khi hoàn tất mọi thứ thì nhấn Bắt đầu để tạo USB.
+
+Có một số tuỳ chọn thêm ở nút Menu (góc trái trên giao diện):
+- Cấu trúc ổ đĩa: Mặc định chọn GPT để tương thích nhiều hơn (theo tài liệu Ventoy), nếu không tương thích hãy chọn MBR.
+- Định dạng: Mặc định là ExFAT, bạn cũng có thể chọn các định dạng khác.
+- Lấp đầy dung lượng: Mặc định là Có, nếu là Có thì USB của bạn sẽ được lấp đầy để trở thành 0 byte trống. Như vậy sẽ giảm thiệt hại do virus phá dữ liệu bên trong (đặc biệt virus shortcut) và tránh lây nhiêm virus cho máy khác.
+- Lược bỏ phiên bản không được chọn trong ISO: Mặc định là Có, nếu là Có thì ở bước 2 khi chọn một phiên bản Windows trong một ISO (chẳng hạn như chọn bản Pro), thì các phiên bản còn lại (như Home, Education,...) sẽ bị loại bỏ hoàn toàn, chỉ giữ lại mỗi phiên bản Pro. Tuy nhiên, điều này sẽ tốn thêm chút thời gian, để chương trình xử lý loại bỏ các phiên bản khác. Điều này sẽ lấy thêm được một ít dung lượng cho thiết bị của bạn, vì đã bỏ bớt các phiên bản không dùng.
+- Lọc và chỉ lấy những phần mềm được Thêm: Mặc định là Có, Ở bước thứ 3 của bạn sẽ chọn các phần mềm được Thêm vào danh sách sẽ được cài đặt sau khi cài Windows xong. Chương trình sẽ loại bỏ lại các phần mềm không được Thêm (không cần tự động cài đặt sau khi cài đặt Windows xong), để lấy thêm dung lượng ổ cứng, tránh lấy hết toàn bộ phần mềm không cần thiết.
+- Giao diện: Mặc định Không có (không chọn). Đây là tuỳ chọn ở màn hình boot, hỗ trợ cho Ventoy. Nếu bạn có giao diện đẹp hơn, hãy copy vào thư mục Themes của TekDT BMC.
 
 #Lưu ý: Chương trình này cần kết nối internet để hoạt động lần đầu tiên, do cần tải các công cụ cần thiết khác trong thư mục Tools như: Ventoy, 7z, aria2, wimlib, TekDT AIS,... Với giao diện thứ 3, giao diện này sẽ nhúng thêm giao diện chương trình TekDT AIS, cho nên nếu bạn muốn tải phần mềm mới thì cần có kết nối internet để tải, còn nếu trước đó đã tải một vài (hoặc toàn bộ) phần mềm đã đủ dùng thì không cần kết nối internet nữa.
 
 # Trách nhiệm
-TekDT không chịu trách nhiệm khi bạn sử dụng phần mềm/script này hoặc tải ở các nguồn khác được tuỳ biến, sửa đổi dựa trên script này. Bạn có thể sử dụng chương phần mềm/script miễn phí thì hãy tin nó. TekDT sẽ không thu thập thông tin hay làm hại đến máy tính của bạn.
+TekDT không chịu trách nhiệm khi bạn sử dụng phần mềm/script này hoặc tải ở các nguồn khác được tuỳ biến, sửa đổi dựa trên phần mềm/ này. Bạn có thể sử dụng chương phần mềm/script miễn phí thì hãy tin nó. TekDT sẽ không thu thập thông tin hay làm hại đến máy tính của bạn.
 Nếu bạn không tin tưởng phần mềm/script này, hãy xoá phần mềm/script đã tải.
 
 # Hỗ trợ:
