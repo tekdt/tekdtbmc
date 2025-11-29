@@ -10,9 +10,9 @@ TekDT BMC là công cụ tạo thiết bị có thể chứa nhiều bộ cài h
 - Facebook: @tekdtcom
 
 # Tải xuống
-Phiên bản mới nhất tại [https://github.com/tekdt/tekdtbmc/releases/download/v1.0.4/TekDT.BMC_v1.0.4.zip]
-Mã hash SHA256 của chữ ký của TekDT là: 4ef06065990138ab401948b95f536272. Nếu đúng mã hash thì mới chính xác từ TekDT.
-MD5 cho phiên bản v1.0.4: 7fecbf2cc89167f4af2937d0751bed7e
+- Phiên bản mới nhất tại [https://github.com/tekdt/tekdtbmc/releases/download/v1.0.4/TekDT.BMC_v1.0.4.zip]
+- Mã hash SHA256 của chữ ký của TekDT là: 4ef06065990138ab401948b95f536272. Nếu đúng mã hash thì mới chính xác từ TekDT.
+- MD5 cho phiên bản v1.0.4: 7fecbf2cc89167f4af2937d0751bed7e
 
 # Hướng dẫn sử dụng
 Ở giao diện chương trình sẽ có tổng cộng 3 bước, bao gồm: CHỌN USB, CHỌN HOẶC TẢI ISO, THÊM PHẦN MỀM ĐƯỢC CÀI ĐẶT TỰ ĐỘNG SAU KHI CÀI WINDOWS
@@ -41,8 +41,8 @@ Có một số tuỳ chọn thêm ở nút Menu (góc trái trên giao diện):
 #Lưu ý: Chương trình này cần kết nối internet để hoạt động lần đầu tiên, do cần tải các công cụ cần thiết khác trong thư mục Tools như: Ventoy, 7z, aria2, wimlib, TekDT AIS,... Với giao diện thứ 3, giao diện này sẽ nhúng thêm giao diện chương trình TekDT AIS, cho nên nếu bạn muốn tải phần mềm mới thì cần có kết nối internet để tải, còn nếu trước đó đã tải một vài (hoặc toàn bộ) phần mềm đã đủ dùng thì không cần kết nối internet nữa.
 
 # Trách nhiệm
-TekDT không chịu trách nhiệm khi bạn sử dụng phần mềm/script này hoặc tải ở các nguồn khác được tuỳ biến, sửa đổi dựa trên phần mềm/ này. Bạn có thể sử dụng chương phần mềm/script miễn phí thì hãy tin nó. TekDT sẽ không thu thập thông tin hay làm hại đến máy tính của bạn.
-Nếu bạn không tin tưởng phần mềm/script này, hãy xoá phần mềm/script đã tải.
+- TekDT không chịu trách nhiệm khi bạn sử dụng phần mềm/script này hoặc tải ở các nguồn khác được tuỳ biến, sửa đổi dựa trên phần mềm/ này. Bạn có thể sử dụng chương phần mềm/script miễn phí thì hãy tin nó.TekDT sẽ không thu thập thông tin hay làm hại đến máy tính của bạn.
+- Nếu bạn không tin tưởng phần mềm/script này, hãy xoá phần mềm/script đã tải.
 
 # Hỗ trợ:
 Mọi liên lạc của bạn với TekDT sẽ rất hoan nghênh và đón nhận để TekDT có thể cải tiến phần mềm/script này tốt hơn. Hãy thử liên hệ với TekDT bằng những cách sau:
