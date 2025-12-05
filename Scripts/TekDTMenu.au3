@@ -2019,7 +2019,11 @@ Func _AutoExtractDrivers()
             EndIf
         Next
         $aMissingHWIDs = _ArrayUnique($aMissingHWIDs)
-        RecordLogforDebug("* Thông tin: Tìm thấy " & UBound($aMissingHWIDs) & " ID thiếu driver.")
+        RecordLogforDebug("* Thông tin: Tìm thấy " & UBound($aMissingHWIDs) & " ID thiếu driver, như bên dưới.")
+        RecordLogforDebug(_ArrayToString($aMissingHWIDs,"|",Default,Default,@CRLF&@CRLF))
+		For $t = 0 To UBound($aMissingHWIDs) - 1
+			RecordLogforDebug($aMissingHWIDs[$t])
+		Next
     Else
         RecordLogforDebug("* Thông tin: Không tìm thấy thiết bị nào thiếu driver.")
         Return True
