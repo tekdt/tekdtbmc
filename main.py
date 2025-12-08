@@ -1,4 +1,4 @@
-import config, os, sys, subprocess, json, psutil, webbrowser, zipfile, requests
+import config, os, sys, subprocess, json, psutil, webbrowser, zipfile, requests, re
 from pathlib import Path
 from workers import Worker
 from ui.page_device import PageDeviceSelect
@@ -722,14 +722,16 @@ class USBBootCreator(QMainWindow):
         return total_size
 
     # def _update_capacity_check(self):
-        # """Tính toán tổng dung lượng cần thiết và cập nhật UI."""
+        # """Tính toán tổng dung lượng cần thiết và cập nhật UI chỉ khi có thay đổi."""
         # label = self.page3.capacity_status_label
         # start_button = self.page3.start_button
        
-        # label.setText("Đang tính toán dung lượng yêu cầu...")
-        # label.setStyleSheet("font-weight: bold; padding: 10px; color: #D8DEE9;")
-        # label.setVisible(True)
-        # QApplication.processEvents() # Force update UI
+        # # Không set "Đang tính toán..." để tránh nháy không cần thiết
+        # # label.setText("Đang tính toán dung lượng yêu cầu...")
+        # # label.setStyleSheet("font-weight: bold; padding: 10px; color: #D8DEE9;")
+        # # label.setVisible(True)
+        # # QApplication.processEvents() # Force update UI
+        
         # # --- Bắt đầu tính toán ---
         # total_required_size = 0
         # # 1. Dung lượng ISOs
@@ -820,50 +822,57 @@ class USBBootCreator(QMainWindow):
         # # --- So sánh và cập nhật UI ---
         # device_details = self.config.get('device_details')
         # if not device_details:
-            # label.setText("Vui lòng chọn một USB ở Bước 1.")
-            # label.setStyleSheet("font-weight: bold; padding: 10px; color: #EBCB8B;") # Vàng
-            # start_button.setEnabled(False)
-            # return
-        # install_mode = self.config.get("install_mode", "DESTRUCTIVE")
-        # disk_number = device_details.get('DeviceID') # Giả sử DeviceID là số Disk Number từ Get-PhysicalDisk
-        # if install_mode == "DESTRUCTIVE":
-            # # Chế độ phá hủy: Sử dụng toàn bộ dung lượng thiết bị (thường là USB)
-            # available_size = device_details.get('Size', 0)
-            # available_label = "Tổng dung lượng thiết bị"
+            # new_message = "Vui lòng chọn một USB ở Bước 1."
+            # new_style = "font-weight: bold; padding: 10px; color: #EBCB8B;"  # Vàng
+            # new_enabled = False
         # else:
-            # # Chế độ không phá hủy: Tính dung lượng trống ở cuối đĩa (tổng size đĩa - tổng size phân vùng hiện có)
-            # available_size = self._get_free_space_at_end(disk_number)
-            # available_label = "Dung lượng trống cuối đĩa"
-       
-        # # Chuyển đổi sang GB để hiển thị
-        # required_gb = total_required_size / (1024**3)
-        # available_gb = available_size / (1024**3)
-        # if total_required_size > available_size:
-            # message = (f"DUNG LƯỢNG KHÔNG ĐỦ!<br>"
-                       # f"Yêu cầu: <b>{required_gb:.2f} GB</b> / Sẵn có: <b>{available_gb:.2f} GB</b>")
-            # label.setText(message)
-            # label.setStyleSheet("font-weight: bold; padding: 10px; color: #BF616A;") # Đỏ
-            # start_button.setEnabled(False)
-        # else:
-            # message = (f"Đủ dung lượng<br>"
-                       # f"Yêu cầu: <b>{required_gb:.2f} GB</b> / Sẵn có: <b>{available_gb:.2f} GB</b>")
-            # label.setText(message)
-            # label.setStyleSheet("font-weight: bold; padding: 10px; color: #A3BE8C;") # Xanh
-            # start_button.setEnabled(True)
+            # install_mode = self.config.get("install_mode", "DESTRUCTIVE")
+            # disk_number = device_details.get('DeviceID') # Giả sử DeviceID là số Disk Number từ Get-PhysicalDisk
+            # if install_mode == "DESTRUCTIVE":
+                # # Chế độ phá hủy: Sử dụng toàn bộ dung lượng thiết bị (thường là USB)
+                # available_size = device_details.get('Size', 0)
+                # available_label = "Tổng dung lượng thiết bị"
+            # else:
+                # # Chế độ không phá hủy: Tính dung lượng trống ở cuối đĩa (tổng size đĩa - tổng size phân vùng hiện có)
+                # available_size = self._get_free_space_at_end(disk_number)
+                # available_label = "Dung lượng trống cuối đĩa"
+           
+            # # Chuyển đổi sang GB để hiển thị
+            # required_gb = total_required_size / (1024**3)
+            # available_gb = available_size / (1024**3)
+            # if total_required_size > available_size:
+                # new_message = (f"DUNG LƯỢNG KHÔNG ĐỦ!<br>"
+                           # f"Yêu cầu: <b>{required_gb:.2f} GB</b> / Sẵn có: <b>{available_gb:.2f} GB</b>")
+                # new_style = "font-weight: bold; padding: 10px; color: #BF616A;"  # Đỏ
+                # new_enabled = False
+            # else:
+                # new_message = (f"Đủ dung lượng<br>"
+                           # f"Yêu cầu: <b>{required_gb:.2f} GB</b> / Sẵn có: <b>{available_gb:.2f} GB</b>")
+                # new_style = "font-weight: bold; padding: 10px; color: #A3BE8C;"  # Xanh
+                # new_enabled = True
+        
+        # # Lấy text và style hiện tại
+        # current_message = label.text()
+        # current_style = label.styleSheet()
+        # current_enabled = start_button.isEnabled()
+        
+        # # Chỉ cập nhật nếu có thay đổi
+        # if new_message != current_message or new_style != current_style:
+            # label.setText(new_message)
+            # label.setStyleSheet(new_style)
+            # label.setVisible(True)
+        
+        # if new_enabled != current_enabled:
+            # start_button.setEnabled(new_enabled)
 
     def _update_capacity_check(self):
         """Tính toán tổng dung lượng cần thiết và cập nhật UI chỉ khi có thay đổi."""
         label = self.page3.capacity_status_label
         start_button = self.page3.start_button
        
-        # Không set "Đang tính toán..." để tránh nháy không cần thiết
-        # label.setText("Đang tính toán dung lượng yêu cầu...")
-        # label.setStyleSheet("font-weight: bold; padding: 10px; color: #D8DEE9;")
-        # label.setVisible(True)
-        # QApplication.processEvents() # Force update UI
-        
         # --- Bắt đầu tính toán ---
         total_required_size = 0
+        
         # 1. Dung lượng ISOs
         for iso in self.config.get('iso_list', []):
             try:
@@ -871,58 +880,48 @@ class USBBootCreator(QMainWindow):
             except FileNotFoundError:
                 self.show_error(f"Không tìm thấy file ISO: {iso['path']}. Vui lòng xóa khỏi danh sách.")
                 return
-        # 2. Dung lượng Drivers
+
+        # 2. Dung lượng Drivers (Hỗ trợ Monolithic và Modular Pack)
         drivers_dir = config.DRIVERS_DIR
         if drivers_dir.exists():
             drivers_subdir = drivers_dir / "Drivers"
             if drivers_subdir.exists():
-                direct_drivers = drivers_subdir / "Drivers.7z"
-                if direct_drivers.exists():
-                    try:
-                        total_required_size += os.path.getsize(direct_drivers)
-                    except Exception as e:
-                        print(f"Lỗi khi lấy kích thước Drivers.7z: {e}")
-                else:
-                    # Quét tất cả các file split .001, .002, ... .101, etc.
-                    driver_files = [
-                        f for f in drivers_subdir.glob("Drivers.7z.*")
-                        if f.is_file() and f.suffix[1:].isdigit() # f.suffix[1:] để bỏ dấu '.'
-                    ]
-                    if driver_files:
-                        # print(f"Tìm thấy {len(driver_files)} file Drivers, đang tính dung lượng...")
-                        for f in driver_files:
-                            try:
-                                total_required_size += os.path.getsize(f)
-                            except Exception as e:
-                                # Bỏ qua nếu có lỗi đọc file (ví dụ: file bị khóa)
-                                print(f"Lỗi khi lấy kích thước file driver {f}: {e}")
-            # 2.1 Dung lượng DB
+                # Duyệt qua tất cả các file trong thư mục Drivers
+                # Logic này sẽ bắt được: Drivers.7z, DP_MassStorage.7z, Drivers.7z.001, DP_VGA.7z.001...
+                try:
+                    for f in drivers_subdir.iterdir():
+                        if f.is_file():
+                            # Regex bắt đuôi .7z hoặc .7z.số (ví dụ .7z.001)
+                            if re.match(r".+\.7z(\.\d+)?$", f.name, re.IGNORECASE):
+                                try:
+                                    total_required_size += os.path.getsize(f)
+                                except Exception as e:
+                                    print(f"Lỗi khi lấy kích thước file driver {f.name}: {e}")
+                except Exception as e:
+                    print(f"Lỗi khi duyệt thư mục drivers: {e}")
+
+            # 2.1 Dung lượng DB (Tương tự như Driver để đảm bảo tính tất cả các phần)
             db_subdir = drivers_dir / "DB"
             if db_subdir.exists():
-                direct_db = db_subdir / "db.sqlite"
-                if direct_db.exists():
-                    try:
-                        total_required_size += os.path.getsize(direct_db)
-                    except Exception as e:
-                        print(f"Lỗi khi lấy kích thước db.sqlite: {e}")
-                else:
-                    # Quét tất cả các file split .001, .002, ... .101, etc.
-                    db_files = [
-                        f for f in db_subdir.glob("db.sqlite.*")
-                        if f.is_file() and f.suffix[1:].isdigit() # f.suffix[1:] để bỏ dấu '.'
-                    ]
-                    if db_files:
-                        for f in db_files:
-                            try:
-                                total_required_size += os.path.getsize(f)
-                            except Exception as e:
-                                print(f"Lỗi khi lấy kích thước file db {f}: {e}")
+                try:
+                    for f in db_subdir.iterdir():
+                        if f.is_file():
+                            # Bắt db.sqlite hoặc db.sqlite.001
+                            if f.name.lower() == "db.sqlite" or re.match(r"db\.sqlite\.\d+$", f.name, re.IGNORECASE):
+                                try:
+                                    total_required_size += os.path.getsize(f)
+                                except Exception as e:
+                                    print(f"Lỗi khi lấy kích thước file db {f.name}: {e}")
+                except Exception as e:
+                    print(f"Lỗi khi duyệt thư mục DB: {e}")
+
         # 3. Dung lượng Theme
         if self.config.get('theme'):
             theme_path = config.THEMES_DIR / self.config['theme']
             if theme_path.exists():
                 total_required_size += os.path.getsize(theme_path)
-        # 4. Dung lượng TekDT AIS (phức tạp hơn)
+
+        # 4. Dung lượng TekDT AIS
         if config.TEKDTAIS_DIR.exists():
             if not self.config.get("copy_ais_selection_only", True):
                 # Sao chép toàn bộ
@@ -946,9 +945,11 @@ class USBBootCreator(QMainWindow):
                         return [item for item in contents if item not in apps_to_copy]
                     return []
                 total_required_size += self._get_dir_size(config.TEKDTAIS_DIR, ignore_func=ignore_apps)
+
         # 5. Dung lượng dự phòng (Ventoy, file config, metadata...) - ~500MB
         overhead = 500 * 1024 * 1024
         total_required_size += overhead
+
         # --- So sánh và cập nhật UI ---
         device_details = self.config.get('device_details')
         if not device_details:
@@ -957,15 +958,11 @@ class USBBootCreator(QMainWindow):
             new_enabled = False
         else:
             install_mode = self.config.get("install_mode", "DESTRUCTIVE")
-            disk_number = device_details.get('DeviceID') # Giả sử DeviceID là số Disk Number từ Get-PhysicalDisk
+            disk_number = device_details.get('DeviceID') 
             if install_mode == "DESTRUCTIVE":
-                # Chế độ phá hủy: Sử dụng toàn bộ dung lượng thiết bị (thường là USB)
                 available_size = device_details.get('Size', 0)
-                available_label = "Tổng dung lượng thiết bị"
             else:
-                # Chế độ không phá hủy: Tính dung lượng trống ở cuối đĩa (tổng size đĩa - tổng size phân vùng hiện có)
                 available_size = self._get_free_space_at_end(disk_number)
-                available_label = "Dung lượng trống cuối đĩa"
            
             # Chuyển đổi sang GB để hiển thị
             required_gb = total_required_size / (1024**3)
@@ -981,12 +978,11 @@ class USBBootCreator(QMainWindow):
                 new_style = "font-weight: bold; padding: 10px; color: #A3BE8C;"  # Xanh
                 new_enabled = True
         
-        # Lấy text và style hiện tại
+        # Chỉ cập nhật nếu có thay đổi để tránh nháy UI
         current_message = label.text()
         current_style = label.styleSheet()
         current_enabled = start_button.isEnabled()
         
-        # Chỉ cập nhật nếu có thay đổi
         if new_message != current_message or new_style != current_style:
             label.setText(new_message)
             label.setStyleSheet(new_style)

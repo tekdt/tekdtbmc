@@ -40,7 +40,7 @@ if not str(BASE_DIR).startswith(tempfile.gettempdir()):
     pass
 
 # --- Cấu hình và Hằng số ---
-APP_VERSION = "1.0.4"
+APP_VERSION = "1.0.5"
 CONFIG_FILE = BASE_DIR / "tekdt_bmc.json"
 ICON_PATH = BASE_DIR / "logo.ico"
 

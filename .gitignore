@@ -7,6 +7,7 @@ secret_key.au3
 secret_key.a3x
 Tools
 build
+Drivers_Backup
 build.bat
 tekdt_bmc.exe
 TekDT.BMC_v1.0.4.zip

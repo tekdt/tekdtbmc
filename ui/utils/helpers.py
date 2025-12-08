@@ -48,70 +48,96 @@ def _copy_with_progress(worker, src, dst, total_copy_size, copied_so_far, base_p
 
 def _process_driver_archive(main_app, usb_mount_point):
     """
-    Xử lý kho driver và công cụ TekDT_PE:
-    - Nếu có sẵn Drivers.7z -> copy thẳng.
-    - Nếu không -> gộp các file Drivers.7z.001, .002, .003, ... thành Drivers.7z rồi copy.
-    - Cuối cùng sao chép TekDT_PE.7z.
+    Xử lý kho driver (Monolithic hoặc Modular) và công cụ TekDT_PE.
     """
     main_app.creation_worker.status.emit("Đang xử lý kho driver và công cụ TekDT_PE...")
     drivers_dir = config.DRIVERS_DIR
     tekdt_pe = drivers_dir / "TekDT_PE.7z"
     usb_ventoy_dir = Path(usb_mount_point) / "ventoy"
-    final_archive_path = usb_ventoy_dir / "Drivers.7z"
-    tekdt_pe_archive_path = usb_ventoy_dir / "TekDT_PE.7z"
+    
+    # Path cố định cho file DB
     final_db_path = usb_ventoy_dir / "db.sqlite"
+
     if not drivers_dir.exists():
         msg = "Thư mục Drivers không tồn tại. Bỏ qua."
         main_app.creation_worker.status.emit(msg)
         print(msg)
         return
+
     os.makedirs(usb_ventoy_dir, exist_ok=True)
-    # --- Xử lý Drivers.7z ---
+
+    # --- PHẦN 1: XỬ LÝ DRIVERS (HỖ TRỢ CẢ MONOLITHIC VÀ MODULAR) ---
     try:
         drivers_subdir = drivers_dir / "Drivers"
         if not drivers_subdir.exists():
-            msg = "Thư mục Drivers/Drivers không tồn tại. Bỏ qua Drivers.7z."
+            msg = "Thư mục Drivers/Drivers không tồn tại. Bỏ qua driver packs."
             main_app.creation_worker.status.emit(msg)
             print(msg)
         else:
-            direct_drivers = drivers_subdir / "Drivers.7z"
-            if direct_drivers.exists():
-                main_app.creation_worker.status.emit("Đang sao chép Drivers.7z vào USB...")
-                shutil.copy(direct_drivers, final_archive_path)
-                print("Đã sao chép Drivers.7z thành công.")
+            # 1. Tìm tất cả các ứng viên file .7z và .7z.001
+            # Chúng ta sẽ dùng Dictionary để nhóm các phần split lại với nhau
+            # Key: Tên file đích trên USB (ví dụ: Drivers.7z hoặc DP_Video.7z)
+            # Value: List các file nguồn [(index, path), ...]
+            archive_groups = {}
+
+            all_files = list(drivers_subdir.glob("*.7z*"))
+            
+            for p in all_files:
+                name = p.name
+                # Kiểm tra dạng file thường: Name.7z
+                if name.lower().endswith(".7z"):
+                    target_name = name
+                    if target_name not in archive_groups: archive_groups[target_name] = []
+                    archive_groups[target_name].append((0, p)) # Index 0 cho file đơn
+                
+                # Kiểm tra dạng split: Name.7z.001
+                # Regex tìm .7z.số (vd: Drivers.7z.001 hoặc DP_VGA.7z.001)
+                m = re.match(r"^(.*\.7z)\.(\d+)$", name, re.IGNORECASE)
+                if m:
+                    base_name = m.group(1) # Drivers.7z
+                    idx = int(m.group(2))  # 001 -> 1
+                    if base_name not in archive_groups: archive_groups[base_name] = []
+                    archive_groups[base_name].append((idx, p))
+
+            # 2. Xử lý copy/gộp
+            if not archive_groups:
+                 main_app.creation_worker.status.emit("Không tìm thấy gói driver (.7z) nào.")
             else:
-                # Tìm mọi file dạng Drivers.7z.*
-                candidates = [p for p in drivers_subdir.glob("Drivers.7z.*") if p.is_file()]
-                # Lọc chỉ giữ các file có phần đuôi hoàn toàn là chữ số (ví dụ .001, .010, .123)
-                parts_with_index = []
-                pattern = re.compile(r"^Drivers\.7z\.(\d+)$")
-                for p in candidates:
-                    m = pattern.match(p.name)
-                    if m:
-                        idx = int(m.group(1))
-                        parts_with_index.append((idx, p))
-                if not parts_with_index:
-                    msg = "Không tìm thấy Drivers.7z hoặc các phần phân mảnh có định dạng số. Bỏ qua."
-                    main_app.creation_worker.status.emit(msg)
-                    print(msg)
-                else:
-                    # Sắp xếp theo chỉ số (numeric) để đảm bảo thứ tự đúng: 000, 001, ..., 009, 010, 011,...
-                    parts_with_index.sort(key=lambda t: t[0])
-                    parts = [p for _, p in parts_with_index]
-                    main_app.creation_worker.status.emit("Đang gộp các phần Drivers.7z.*...")
-                    print(f"Bắt đầu gộp {len(parts)} phần thành {final_archive_path}")
-                    with open(final_archive_path, "wb") as outfile:
-                        for part in parts:
-                            with open(part, "rb") as infile:
-                                shutil.copyfileobj(infile, outfile)
-                    main_app.creation_worker.status.emit("Đã gộp và sao chép Drivers.7z vào USB thành công.")
-                    print("Gộp và sao chép Drivers.7z hoàn tất.")
+                for target_name, parts in archive_groups.items():
+                    final_path = usb_ventoy_dir / target_name
+                    
+                    # Sắp xếp các phần: (0, path) hoặc (1, path), (2, path)...
+                    parts.sort(key=lambda x: x[0])
+                    source_files = [x[1] for x in parts]
+
+                    main_app.creation_worker.status.emit(f"Đang xử lý gói: {target_name}...")
+                    print(f"Processing package {target_name} with {len(source_files)} parts.")
+
+                    # Nếu chỉ có 1 file và không phải là split part (hoặc split part nhưng chỉ có 1 file .001 lẻ loi)
+                    # Tuy nhiên logic ở đây là: Nếu file gốc là .7z -> Copy. 
+                    # Nếu file gốc là .7z.001 -> Merge vào .7z đích (để AutoIt dễ xử lý hơn, hoặc giữ nguyên).
+                    # Để tương thích tốt nhất với logic AutoIt (ưu tiên tìm .7z), ta sẽ MERGE các file .001 thành .7z
+                    
+                    if len(source_files) == 1 and parts[0][0] == 0:
+                        # Đây là file .7z chuẩn, copy thẳng
+                        shutil.copy(source_files[0], final_path)
+                    else:
+                        # Đây là file split (.001...), hoặc logic gộp nhiều file
+                        # Gộp tất cả vào file đích .7z (loại bỏ đuôi .001 trên USB)
+                        with open(final_path, "wb") as outfile:
+                            for part in source_files:
+                                with open(part, "rb") as infile:
+                                    shutil.copyfileobj(infile, outfile)
+                    
+                main_app.creation_worker.status.emit("Đã hoàn tất sao chép các gói Driver.")
+
     except Exception as e:
-        msg = f"Lỗi khi xử lý Drivers.7z: {e}"
+        msg = f"Lỗi khi xử lý Drivers: {e}"
         main_app.creation_worker.status.emit(msg)
         print(msg)
         raise
-    # --- Xử lý db.sqlite ---
+
+    # --- PHẦN 2: XỬ LÝ DB.SQLITE ---
     try:
         db_subdir = drivers_dir / "DB"
         if not db_subdir.exists():
@@ -119,54 +145,47 @@ def _process_driver_archive(main_app, usb_mount_point):
             main_app.creation_worker.status.emit(msg)
             print(msg)
         else:
+            # Logic tìm db.sqlite hoặc db.sqlite.001
+            parts_with_index = []
             direct_db = db_subdir / "db.sqlite"
+            
             if direct_db.exists():
-                main_app.creation_worker.status.emit("Đang sao chép db.sqlite vào USB...")
-                shutil.copy(direct_db, final_db_path)
-                print("Đã sao chép db.sqlite thành công.")
+                parts_with_index.append((0, direct_db))
             else:
-                # Tìm mọi file dạng db.sqlite.*
                 candidates = [p for p in db_subdir.glob("db.sqlite.*") if p.is_file()]
-                # Lọc chỉ giữ các file có phần đuôi hoàn toàn là chữ số (ví dụ .001, .010, .123)
-                parts_with_index = []
                 pattern = re.compile(r"^db\.sqlite\.(\d+)$")
                 for p in candidates:
                     m = pattern.match(p.name)
                     if m:
                         idx = int(m.group(1))
                         parts_with_index.append((idx, p))
-                if not parts_with_index:
-                    msg = "Không tìm thấy db.sqlite hoặc các phần phân mảnh có định dạng số. Bỏ qua."
-                    main_app.creation_worker.status.emit(msg)
-                    print(msg)
-                else:
-                    # Sắp xếp theo chỉ số (numeric) để đảm bảo thứ tự đúng: 000, 001, ..., 009, 010, 011,...
-                    parts_with_index.sort(key=lambda t: t[0])
-                    parts = [p for _, p in parts_with_index]
-                    main_app.creation_worker.status.emit("Đang gộp các phần db.sqlite.*...")
-                    print(f"Bắt đầu gộp {len(parts)} phần thành {final_db_path}")
-                    with open(final_db_path, "wb") as outfile:
-                        for part in parts:
-                            with open(part, "rb") as infile:
-                                shutil.copyfileobj(infile, outfile)
-                    main_app.creation_worker.status.emit("Đã gộp và sao chép db.sqlite vào USB thành công.")
-                    print("Gộp và sao chép db.sqlite hoàn tất.")
+            
+            if parts_with_index:
+                parts_with_index.sort(key=lambda t: t[0])
+                parts = [p for _, p in parts_with_index]
+                
+                main_app.creation_worker.status.emit("Đang sao chép Database driver...")
+                with open(final_db_path, "wb") as outfile:
+                    for part in parts:
+                        with open(part, "rb") as infile:
+                            shutil.copyfileobj(infile, outfile)
+                print("Sao chép db.sqlite hoàn tất.")
+
     except Exception as e:
         msg = f"Lỗi khi xử lý db.sqlite: {e}"
         main_app.creation_worker.status.emit(msg)
         print(msg)
         raise
-    # --- Xử lý TekDT_PE.7z ---
+
+    # --- PHẦN 3: XỬ LÝ TEKDT_PE.7Z ---
     try:
+        tekdt_pe_archive_path = usb_ventoy_dir / "TekDT_PE.7z"
         if tekdt_pe.exists():
-            main_app.creation_worker.status.emit("Đang sao chép TekDT_PE.7z vào USB...")
+            main_app.creation_worker.status.emit("Đang sao chép TekDT_PE.7z...")
             shutil.copy(tekdt_pe, tekdt_pe_archive_path)
-            main_app.creation_worker.status.emit("Đã sao chép TekDT_PE.7z vào USB thành công.")
             print("Sao chép TekDT_PE.7z hoàn tất.")
         else:
-            msg = "Không tìm thấy TekDT_PE.7z. Bỏ qua."
-            main_app.creation_worker.status.emit(msg)
-            print(msg)
+            print("Không tìm thấy TekDT_PE.7z.")
     except Exception as e:
         msg = f"Lỗi khi sao chép TekDT_PE.7z: {e}"
         main_app.creation_worker.status.emit(msg)
