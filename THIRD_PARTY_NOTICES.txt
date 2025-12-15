@@ -1,0 +1,48 @@
+THÔNG BÁO VỀ PHẦN MỀM BÊN THỨ BA
+
+Phần mềm này bao gồm các thành phần được phát triển và cấp phép bởi các bên thứ ba. Việc sử dụng các thành phần này tuân theo các điều khoản cấp phép tương ứng của chúng, không phải EULA của Phần mềm.
+
+1. TEKDT BMC & TEKDT AIS (Bản quyền [Năm] [Tên hoặc Công ty của Bạn])
+   - Giấy phép: GNU General Public License v3.0
+   - Nguồn: https://github.com/tekdt/tekdtbmc, https://github.com/tekdt/tekdtais
+
+2. VENTOY (Nền tảng Boot)
+   - Giấy phép: GPLv3 (GNU General Public License, Version 3)
+   - Thông báo: Bạn có thể tìm thấy bản sao Giấy phép GPLv3 tại https://github.com/ventoy/Ventoy.
+
+3. WIMLIB
+   - Giấy phép: GPLv2 (GNU General Public License, Version 2) hoặc LGPLv2.1
+   - Thông báo: Việc sử dụng WIMLIB để thao tác các tệp hình ảnh Windows tuân theo giấy phép này.
+
+4. WINCDEMU
+   - Giấy phép: GNU Lesser General Public License (LGPL)
+   - Nguồn: https://github.com/sysprogs/WinCDEmu
+
+5. OSCDIMG (Công cụ của Microsoft)
+   - Giấy phép: Thường được bao gồm trong Windows ADK hoặc tương tự. Việc sử dụng phải tuân thủ các điều khoản cấp phép của Microsoft cho công cụ này.
+   - Lưu ý: Được sử dụng để xây dựng các tệp hình ảnh ISO.
+
+6. FIDO (Công cụ Tải xuống ISO)
+   - Giấy phép: MIT License (Được sử dụng chính thức trong Rufus)
+   - Thông báo: Một tập lệnh được sử dụng để lấy link tải xuống tệp ISO chính thức của Microsoft.
+
+7. ARIA2C (Trình Tải xuống)
+   - Giấy phép: GPLv2 (GNU General Public License, Version 2)
+   - Nguồn: https://aria2.github.io/
+
+8. 7-ZIP (Trình Giải nén)
+   - Giấy phép: GNU LGPL (phần lớn mã), Bán phần là giấy phép BSD.
+   - Nguồn: https://www.7-zip.org/
+
+9. DRIVER PACK SOLUTION (Gói Driver)
+   - Giấy phép: Các gói driver thường được cung cấp miễn phí để phân phối lại (Miễn phí hoặc Tự do) và tuân theo giấy phép riêng của từng nhà cung cấp driver.
+   - Nguồn: driverpack.io
+   - Lưu ý quan trọng: Người dùng nên xem xét tính hợp pháp của việc sử dụng các gói driver này trong khu vực của họ. TekDT từ chối mọi trách nhiệm pháp lý liên quan đến việc cấp phép driver cá nhân.
+
+10. MICROSOFT OFFICE DEPLOYMENT TOOL (ODT)
+    - Giấy phép: Công cụ của Microsoft, việc sử dụng tuân theo các điều khoản cấp phép của Microsoft.
+    - Lưu ý: Được sử dụng để tạo và tải xuống các gói cài đặt Office chính thức. Phần mềm không can thiệp vào quá trình kích hoạt Office.
+
+***
+
+**Lưu ý về Giấy phép:** Bạn có trách nhiệm đảm bảo rằng bạn tuân thủ tất cả các điều khoản của các giấy phép mã nguồn mở này, bao gồm việc cung cấp văn bản đầy đủ của giấy phép (ví dụ: GPL, MIT) cùng với phần mềm, nếu giấy phép đó yêu cầu.

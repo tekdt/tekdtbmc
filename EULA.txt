@@ -1,0 +1,35 @@
+THỎA THUẬN CẤP PHÉP NGƯỜI DÙNG CUỐI (EULA)
+
+BẢN QUYỀN (c) 2025 TekDT
+
+QUAN TRỌNG: VUI LÒNG ĐỌC KỸ THỎA THUẬN CẤP PHÉP NÀY TRƯỚC KHI SỬ DỤNG PHẦN MỀM.
+
+1. ĐỊNH NGHĨA
+   - "Phần mềm": Là phần mềm được đóng gói trên USB này, bao gồm TekDT BMC, TekDT AIS, các tập lệnh, các tệp dữ liệu, và tài liệu liên quan.
+   - "Bạn" hoặc "Người dùng": Cá nhân hoặc tổ chức tải, cài đặt, hoặc sử dụng Phần mềm này.
+
+2. CẤP PHÉP
+   TekDT cấp cho Bạn một giấy phép phi độc quyền, không thể chuyển nhượng để sử dụng Phần mềm trên một thiết bị (USB) duy nhất để hỗ trợ cài đặt hệ điều hành Windows và các phần mềm liên quan.
+   a. Bạn được phép sử dụng Phần mềm cho mục đích cá nhân hoặc thương mại.
+   b. Bạn không được phép sao chép, sửa đổi, phân phối, hoặc tạo ra các tác phẩm phái sinh từ Phần mềm, ngoại trừ các thành phần mã nguồn mở được cấp phép rõ ràng (xem THIRD_PARTY_NOTICES.txt).
+
+3. SỞ HỮU TRÍ TUỆ
+   a. Bạn thừa nhận rằng Phần mềm (bao gồm các repo TekDT BMC và TekDT AIS) là tài sản độc quyền của TekDT và được bảo vệ bởi luật bản quyền.
+   b. Bạn không được xóa hoặc thay đổi bất kỳ thông báo bản quyền nào trong Phần mềm.
+
+4. PHẦN MỀM CỦA BÊN THỨ BA (THIRD-PARTY SOFTWARE)
+   a. Phần mềm này bao gồm hoặc sử dụng các thành phần của bên thứ ba, bao gồm các công cụ mã nguồn mở và các gói driver. Việc sử dụng các thành phần này tuân theo các điều khoản cấp phép riêng của chúng, được liệt kê chi tiết trong file **THIRD_PARTY_NOTICES.txt**.
+   b. Phần mềm này là một công cụ hỗ trợ và **không bao gồm giấy phép** cho hệ điều hành Microsoft Windows hoặc Microsoft Office. Bạn chịu trách nhiệm hoàn toàn trong việc đảm bảo bạn có giấy phép hợp lệ cho tất cả các phần mềm của Microsoft mà bạn cài đặt hoặc sử dụng thông qua Phần mềm này.
+
+5. TỪ CHỐI BẢO HÀNH
+   Phần mềm được cung cấp **"NGUYÊN TRẠNG"**, không có bất kỳ bảo hành nào, dù rõ ràng hay ngụ ý, bao gồm nhưng không giới hạn ở các bảo hành về khả năng bán được, sự phù hợp cho một mục đích cụ thể và không vi phạm. TekDT không đảm bảo Phần mềm sẽ đáp ứng yêu cầu của Bạn, hoạt động không bị gián đoạn, hoặc không có lỗi.
+
+6. GIỚI HẠN TRÁCH NHIỆM PHÁP LÝ
+   Trong mọi trường hợp, TekDT sẽ không chịu trách nhiệm về bất kỳ thiệt hại ngẫu nhiên, đặc biệt, gián tiếp hoặc do hậu quả nào phát sinh từ việc sử dụng hoặc không thể sử dụng Phần mềm này.
+
+7. CHẤM DỨT
+   Thỏa thuận cấp phép này có hiệu lực cho đến khi bị chấm dứt. Thỏa thuận này sẽ tự động chấm dứt nếu Bạn không tuân thủ bất kỳ điều khoản nào.
+
+8. VẤN ĐỀ VỀ MICROSOFT
+   a. Phần mềm này sử dụng Ventoy làm nền tảng boot và sử dụng các công cụ như WIMLIB/WinCDEmu/oscdimg để tùy chỉnh tệp ISO của người dùng theo lựa chọn của họ. **Phần mềm không sửa đổi bất kỳ tệp lõi nào của Microsoft** và hoạt động tuân thủ các điều khoản cấp phép công cụ của Microsoft (nếu có).
+   b. Phần mềm hỗ trợ người dùng tải xuống tệp cài đặt Windows/Office chính thức thông qua các API/công cụ công khai như FIDO hoặc ODT. **Người dùng chịu trách nhiệm duy nhất** về việc sử dụng các tệp này và việc có giấy phép hợp lệ của Microsoft.
