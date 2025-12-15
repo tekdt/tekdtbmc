@@ -1,0 +1,73 @@
+THỎA THUẬN CẤP PHÉP NGƯỜI DÙNG CUỐI (EULA)
+
+BẢN QUYỀN (c) 2025 TekDT
+
+QUAN TRỌNG: VUI LÒNG ĐỌC KỸ THỎA THUẬN NÀY TRƯỚC KHI SỬ DỤNG PHẦN MỀM.
+
+---
+
+1. ĐỊNH NGHĨA
+   "Phần mềm" là bộ công cụ TekDT, bao gồm TekDT BMC, TekDT AIS, các tập lệnh, cấu hình và tài liệu liên quan do TekDT phát triển.
+   "Người dùng" là cá nhân hoặc tổ chức tải, cài đặt hoặc sử dụng Phần mềm.
+
+---
+
+2. GIẤY PHÉP VÀ PHẠM VI ÁP DỤNG
+   2.1. Phần mềm TekDT được phát hành theo Giấy phép GNU General Public License phiên bản 3 (GPL-3.0).
+   2.2. Người dùng được quyền sao chép, sửa đổi, phân phối và tạo tác phẩm phái sinh đối với Phần mềm theo đúng điều khoản của GPL-3.0.
+   2.3. Các hạn chế trong EULA này chỉ áp dụng cho phần tài liệu, nhãn hiệu, tên thương mại và cách phân phối thương mại của TekDT, và KHÔNG được hiểu là hạn chế các quyền được cấp theo GPL-3.0.
+
+---
+
+3. QUYỀN SỞ HỮU TRÍ TUỆ
+   3.1. TekDT là chủ sở hữu quyền tác giả đối với Phần mềm.
+   3.2. Việc cấp phép sử dụng Phần mềm được điều chỉnh bởi GPL-3.0; TekDT không hạn chế các quyền mà GPL-3.0 đã cấp cho Người dùng.
+   3.3. Người dùng không được xóa hoặc thay đổi các thông báo bản quyền và giấy phép hiện có.
+
+---
+
+4. PHẦN MỀM VÀ DỊCH VỤ CỦA BÊN THỨ BA
+   4.1. Phần mềm có thể sử dụng hoặc tích hợp các công cụ của bên thứ ba, bao gồm phần mềm mã nguồn mở và công cụ của Microsoft.
+   4.2. Các thành phần này được cấp phép theo giấy phép riêng của chúng, được liệt kê trong file THIRD_PARTY_NOTICES.txt.
+   4.3. TekDT không cung cấp, không bán và không cấp phép Microsoft Windows, Microsoft Office hoặc bất kỳ phần mềm thương mại nào khác.
+   4.4. Đối với phần mềm TekDT AIS, TekDT tổng hợp các phần mềm theo file app_list.json (https://raw.githubusercontent.com/tekdt/tekdtais/refs/heads/main/app_list.json) bao gồm liên kết tải xuống. TekDT AIS cung cấp link đến các installer chính thức. TekDT không cung cấp, phân phối hoặc hỗ trợ các công cụ kích hoạt, bypass license, hoặc phần mềm trái phép. Người dùng tự chịu trách nhiệm tuân thủ luật bản quyền và điều khoản sử dụng của từng phần mềm..
+
+---
+
+5. TUYÊN BỐ LIÊN QUAN ĐẾN MICROSOFT
+   5.1. Phần mềm chỉ hỗ trợ kỹ thuật triển khai, tự động hóa cài đặt và tải xuống các gói cài đặt chính thức thông qua các công cụ hợp pháp như Ventoy, FIDO và Microsoft Office Deployment Tool (ODT).
+   5.2. Phần mềm không chỉnh sửa, không phân phối và không kích hoạt sẵn bất kỳ sản phẩm nào của Microsoft.
+   5.3. Người dùng hoàn toàn chịu trách nhiệm về việc sở hữu giấy phép hợp lệ cho Windows, Office và các sản phẩm khác của Microsoft.
+
+---
+
+6. TUYÊN BỐ MIỄN TRỪ TRÁCH NHIỆM PHÁP LÝ
+   6.1. Phần mềm được cung cấp "NGUYÊN TRẠNG" (AS IS), không kèm theo bất kỳ bảo hành nào.
+   6.2. Phần mềm có thể bao gồm hoặc sử dụng các trình điều khiển phần cứng (drivers) của bên thứ ba. Các driver này thuộc quyền sở hữu của nhà sản xuất phần cứng tương ứng. TekDT không cấp phép lại, không bảo đảm tính tương thích và không chịu trách nhiệm pháp lý liên quan đến việc sử dụng các driver này.
+   6.3. Phần mềm có thể sử dụng các khóa cài đặt chung (Generic Installation Keys) do Microsoft công khai nhằm mục đích lựa chọn phiên bản Windows trong quá trình cài đặt. Các khóa này không có chức năng kích hoạt, không cấp phép sử dụng Windows, và không thay thế giấy phép hợp lệ của Microsoft. Người dùng chịu trách nhiệm đảm bảo rằng họ có giấy phép hợp lệ cho phiên bản Windows đã cài đặt.
+   6.4. TekDT AIS có chứa một số công cụ thay đổi thiết lập hệ thống. TekDT không chịu trách nhiệm cho việc sử dụng sai mục đích hoặc làm hỏng hệ thống.
+   6.5. TekDT không chịu trách nhiệm đối với:
+
+* Mất dữ liệu, hỏng hệ thống, lỗi khởi động hoặc hư hại phần cứng;
+* Việc Người dùng vi phạm giấy phép phần mềm, luật bản quyền hoặc quy định pháp luật địa phương;
+* Thiệt hại phát sinh từ việc sử dụng hoặc không thể sử dụng Phần mềm.
+
+---
+
+7. GIỚI HẠN TRÁCH NHIỆM
+   Trong mọi trường hợp, TekDT không chịu trách nhiệm cho bất kỳ thiệt hại gián tiếp, đặc biệt, ngẫu nhiên hoặc do hậu quả nào.
+
+---
+
+8. NGUỒN MÃ
+   Mã nguồn đầy đủ của TekDT được cung cấp công khai theo GPL-3.0 tại:
+   [https://github.com/tekdt/](https://github.com/tekdt/)
+
+---
+
+9. CHẤM DỨT
+   Thỏa thuận này chấm dứt nếu Người dùng vi phạm điều khoản GPL-3.0.
+
+---
+
+BẰNG VIỆC SỬ DỤNG PHẦN MỀM, BẠN XÁC NHẬN ĐÃ ĐỌC, HIỂU VÀ ĐỒNG Ý VỚI CÁC ĐIỀU KHOẢN TRÊN.

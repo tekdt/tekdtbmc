@@ -1,0 +1,57 @@
+THIRD-PARTY SOFTWARE NOTICES
+
+TekDT sử dụng hoặc tương tác với các phần mềm và công cụ của bên thứ ba. Các thành phần này KHÔNG thuộc sở hữu của TekDT và được cấp phép theo các điều khoản riêng của chúng.
+Một số tool (ví dụ trình thay đổi hệ thống) có ảnh hưởng đến hoạt động Windows. TekDT không chịu trách nhiệm về việc sử dụng sai mục đích của các tool này.
+
+---
+
+1. Ventoy
+   License: GNU General Public License v3.0
+   Source: [https://github.com/ventoy/Ventoy](https://github.com/ventoy/Ventoy)
+
+2. aria2
+   License: GNU General Public License v2.0
+   Source: [https://aria2.github.io/](https://aria2.github.io/)
+
+3. wimlib
+   License: GNU General Public License v2.0 hoặc LGPL v2.1
+   Source: [https://wimlib.net/](https://wimlib.net/)
+
+4. WinCDEmu
+   License: GNU Lesser General Public License (LGPL)
+   Source: [https://github.com/sysprogs/WinCDEmu](https://github.com/sysprogs/WinCDEmu)
+
+5. 7-Zip
+   License: GNU LGPL / BSD (tùy thành phần)
+   Source: [https://www.7-zip.org/](https://www.7-zip.org/)
+
+6. FIDO Script
+   License: MIT License
+   Source: [https://github.com/pbatard/Fido](https://github.com/pbatard/Fido)
+
+7. Microsoft OSCDIMG
+   License: Công cụ thuộc Microsoft Windows ADK
+   Note: Việc sử dụng tuân theo điều khoản cấp phép của Microsoft. TekDT không cấp phép lại, không phân phối lại và không sửa đổi các công cụ này; việc sử dụng hoàn toàn tuân theo điều khoản của Microsoft.
+
+8. Microsoft Office Deployment Tool (ODT)
+   License: Công cụ của Microsoft
+   Note: Được sử dụng để tải và xây dựng bộ cài Office chính thức. TekDT không cấp phép lại, không phân phối lại và không sửa đổi các công cụ này; việc sử dụng hoàn toàn tuân theo điều khoản của Microsoft.
+
+9. Driver Packages
+   TekDT KHÔNG phân phối driver, việc tải xuống và tích hợp driver chỉ được thực hiện khi người dùng chủ động lựa chọn và xác nhận.
+   Một số driver được cung cấp chỉ nhằm mục đích đảm bảo khả năng khởi động và nhận diện phần cứng cơ bản trong môi trường tiền cài đặt (WinPE). Việc sử dụng các driver này phải tuân theo điều khoản cấp phép của từng nhà sản xuất phần cứng. TekDT không tuyên bố quyền phân phối lại các driver này ngoài phạm vi hỗ trợ kỹ thuật.
+   Phần mềm chỉ hỗ trợ người dùng tải driver từ các nguồn bên thứ ba theo lựa chọn của họ.
+   Người dùng chịu trách nhiệm tuân thủ giấy phép của từng driver và luật pháp địa phương.
+
+10. Snappy Driver Installer
+   License: Creative Commons Attribution License, GNU General Public License version 3.0 (GPLv3)
+   Source: [https://sourceforge.net/projects/snappy-driver-installer/](https://sourceforge.net/projects/snappy-driver-installer/)
+
+11. Microsoft Windows Product Others
+   Note: Generic Windows Installation Keys được Microsoft công bố công khai cho mục đích triển khai và lựa chọn phiên bản trong quá trình cài đặt Windows.
+
+---
+
+GPL-3.0 yêu cầu người nhận phần mềm phải được cung cấp quyền truy cập mã nguồn.
+Mã nguồn TekDT được cung cấp tại:
+[https://github.com/tekdt/](https://github.com/tekdt/)
