@@ -53,6 +53,7 @@ SCRIPTS_DIR = BASE_DIR / "Scripts"
 VENTOY_DIR = TOOLS_DIR / "Ventoy"
 FIDO_DIR = TOOLS_DIR / "Fido"
 ARIA2_DIR = TOOLS_DIR / "aria2"
+SEVENZIP_DIR = TOOLS_DIR / "7z"
 WINCDEMU_DIR = TOOLS_DIR / "WinCDEmu"
 TEKDTAIS_DIR = TOOLS_DIR / "TekDT_AIS"
 WIMLIB_DIR = TOOLS_DIR / "wimlib"
@@ -60,6 +61,7 @@ OSCDIMG_DIR = TOOLS_DIR / "oscdimg"
 
 # Đường dẫn đến các file thực thi
 ARIA2_EXE = ARIA2_DIR / "aria2c.exe"
+SEVENZIP_EXE = SEVENZIP_DIR / "7z.exe"
 WINCDEMU_EXE = WINCDEMU_DIR / "wcdemu.exe"
 WIMLIB_EXE = WIMLIB_DIR / "wimlib-imagex.exe"
 TEKDTAIS_EXE = TEKDTAIS_DIR / "tekdt_ais.exe"
@@ -70,7 +72,7 @@ OSCDIMG_EXE = OSCDIMG_DIR / "oscdimg.exe"
 ISO_ANALYSIS_CACHE = ISOS_DIR / "iso_cache.json"
 SHUTDOWN_SIGNAL_TEKDTAIS = TEKDTAIS_DIR / "shutdown_signal.txt"
 
-directories_to_create = [TOOLS_DIR, FIDO_DIR, ISOS_DIR, SCRIPTS_DIR, WINCDEMU_DIR, TEKDTAIS_DIR, OSCDIMG_DIR]
+directories_to_create = [TOOLS_DIR, FIDO_DIR, ISOS_DIR, SCRIPTS_DIR, ARIA2_DIR, SEVENZIP_DIR, WINCDEMU_DIR, TEKDTAIS_DIR, WIMLIB_DIR, OSCDIMG_DIR]
 for path in directories_to_create:
     path.mkdir(parents=True, exist_ok=True)
     
@@ -82,13 +84,13 @@ for dir_path in required_dirs:
 # API and Download URLs
 VENTOY_API_URL = "https://api.github.com/repos/ventoy/Ventoy/releases/latest"
 ARIA2_API_URL = "https://api.github.com/repos/aria2/aria2/releases/latest"
+SEVENZIP_API_URL = "https://api.github.com/repos/ip7z/7zip/releases/latest"
 FIDO_PS1_URL = "https://github.com/pbatard/Fido/raw/refs/heads/master/Fido.ps1"
 WIMLIB_URL = "https://wimlib.net/downloads/wimlib-1.14.4-windows-x86_64-bin.zip"
 WINCDEMU_API_URL = "https://api.github.com/repos/sysprogs/WinCDEmu/releases/latest"
 TEKDTAIS_API_URL = "https://api.github.com/repos/tekdt/tekdtais/releases/latest"
 SELF_UPDATE_API_URL = "https://api.github.com/repos/tekdt/tekdtbmc/releases/latest"
 OSCDIMG_EXE_URL = "https://msdl.microsoft.com/download/symbols/oscdimg.exe/3D44737265000/oscdimg.exe"
-
 
 WINDOWS_SERVER_2016_URL = "https://go.microsoft.com/fwlink/p/?LinkID=2195174&clcid=0x409&culture=en-us&country=US"
 WINDOWS_SERVER_2022_URL = "https://go.microsoft.com/fwlink/p/?LinkID=2195280&clcid=0x409&culture=en-us&country=US"

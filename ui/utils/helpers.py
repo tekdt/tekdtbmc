@@ -1245,53 +1245,69 @@ def parse_torrent_files(torrent_path):
         print(f"Lỗi phân tích torrent: {e}")
         return []
 
-def extract_db_from_driverpack(archive_path, dest_db_path):
-    """Giải nén file db.sqlite từ bên trong file DriverPack_*.7z."""
-    sz_path = tool_manager.get_tool_path("7z") or "7z.exe"
-    dest_dir = os.path.dirname(dest_db_path)
-    os.makedirs(dest_dir, exist_ok=True)
-    
-    try:
-        # Lệnh: 7z e "archive.7z" "index/db.sqlite" -o"dest" -y
-        # e: extract without paths (để db.sqlite nằm ngay trong thư mục đích)
-        subprocess.run([sz_path, "e", str(archive_path), "index/db.sqlite", f"-o{dest_dir}", "-y"], 
-                       check=True, capture_output=True)
-        return True
-    except Exception as e:
-        print(f"Lỗi giải nén DB: {e}")
-        return False
-
-def extract_sqlite_from_7z(archive_path, dest_dir):
-    """Giải nén duy nhất file db.sqlite từ file .7z vào thư mục đích."""
+def extract_db_from_driverpack(archive_path, dest_db_file):
+    """Giải nén duy nhất file db.sqlite từ DriverPack_*.7z"""
     seven_zip_path = tool_manager.get_tool_path("7z")
-    if not seven_zip_path:
-        return False
-    
+    dest_dir = os.path.dirname(dest_db_file)
+    os.makedirs(dest_dir, exist_ok=True)
     try:
-        os.makedirs(dest_dir, exist_ok=True)
-        # Lệnh: 7z e "path.7z" -o"dest" "db.sqlite" -y
-        # e: extract, -y: yes to all
-        result = subprocess.run(
-            [seven_zip_path, "e", archive_path, f"-o{dest_dir}", "db.sqlite", "-y"],
-            capture_output=True, text=True, creationflags=subprocess.CREATE_NO_WINDOW
-        )
-        return result.returncode == 0
-    except Exception as e:
-        print(f"Lỗi giải nén sqlite: {e}")
+        # e: extract, -o: output, -y: overwrite, db.sqlite: file cần lấy, -r: tìm đệ quy
+        cmd = [seven_zip_path, "e", str(archive_path), f"-o{dest_dir}", "db.sqlite", "-r", "-y"]
+        subprocess.run(cmd, capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW)
+        return os.path.exists(dest_db_file)
+    except:
         return False
 
-def get_aria2_download_cmd(aria2_path, torrent_path, select_indices, download_dir):
-    """Tạo lệnh aria2c để tải các file được chọn vào thư mục tạm."""
-    indices_str = ",".join(select_indices)
+def process_downloaded_drivers(temp_dir):
+    """
+    Quét thư mục tạm để 'nhặt' file, đưa về đúng chỗ và xóa thư mục tạm.
+    Giải quyết vấn đề aria2 tự tạo folder lồng nhau.
+    """
+    final_drivers_dir = os.path.join(config.BASE_DIR, "Drivers", "Drivers")
+    db_file = os.path.join(config.BASE_DIR, "Drivers", "DB", "db.sqlite")
+    
+    # Quét sạch mọi folder con mà aria2 đã tạo ra trong temp_dir
+    for root, dirs, files in os.walk(temp_dir):
+        for file in files:
+            file_path = os.path.join(root, file)
+            
+            # Nếu là file DriverPack_... -> Lấy DB
+            if file.startswith("DriverPack_") and file.endswith(".7z"):
+                if extract_db_from_driverpack(file_path, db_file):
+                    # Sau khi lấy được DB, lưu version (như logic cũ của bạn)
+                    v_info = {"db_version": file}
+                    v_path = os.path.join(config.BASE_DIR, "Drivers", "driver_versions.json")
+                    with open(v_path, "w") as jf:
+                        json.dump(v_info, jf)
+                # File DriverPack_ này không cần giữ lại trong folder Drivers
+                os.remove(file_path) 
+            
+            # Nếu là file Driver (DB_... hoặc DP_...) -> Chép vào \Drivers\Drivers
+            elif (file.startswith("DB_") or file.startswith("DP_")) and file.endswith(".7z"):
+                dest_path = os.path.join(final_drivers_dir, file)
+                os.makedirs(final_drivers_dir, exist_ok=True)
+                if os.path.exists(dest_path): os.remove(dest_path)
+                shutil.move(file_path, dest_path)
+
+    # Xóa sạch thư mục tạm sau khi xử lý
+    try:
+        shutil.rmtree(temp_dir)
+    except:
+        pass
+
+def get_aria2_download_cmd(torrent_path, download_dir, select_indices):
+    """Tạo lệnh aria2c và sửa lỗi treo 99%"""
+    aria2_path = tool_manager.get_tool_path("aria2c")
     return [
         aria2_path,
-        "--allow-overwrite=true",
         f"--dir={download_dir}",
-        f"--select-file={indices_str}",
-        "--seed-time=0",               # QUAN TRỌNG: Thoát ngay khi tải xong 100%
-        "--summary-interval=0",
-        "--bt-stop-timeout=60",        # Tự dừng nếu không có peer sau 60s
-        "--check-integrity=false",     # Bỏ qua kiểm tra mã băm nếu muốn nhanh (tùy chọn)
+        f"--select-file={select_indices}",
+        "--seed-time=0",
+        "--bt-stop-timeout=60",        # Thoát nếu sau 60s không có data mới
+        "--file-allocation=none",
+        "--allow-overwrite=true",
+        "--bt-seed-unverified=true",
+        "--bt-save-metadata=false",
         str(torrent_path)
     ]
 

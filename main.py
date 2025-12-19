@@ -98,16 +98,15 @@ class DriverDownloadDialog(QDialog):
         self.progress_bar.setVisible(True)
         self.progress_bar.setValue(0)
         
-        # Logic tải bằng aria2c qua Worker
-        # Vì yêu cầu tải nhiều file, chúng ta sẽ lặp hoặc dùng aria2c input file.
-        # Ở đây dùng logic đơn giản: tải từng file hoặc gọi aria2c với danh sách idx.
         idxs = ",".join([f['idx'] for f in to_download])
         torrent_path = os.path.join(config.BASE_DIR, "Drivers", "DriverPack-Offline.torrent")
-        save_dir = os.path.join(config.BASE_DIR, "Drivers", "Drivers")
-        os.makedirs(save_dir, exist_ok=True)
         
-        aria2_path = tool_manager.get_tool_path("aria2c")
-        cmd = [aria2_path, "--select-file=" + idxs, "--dir=" + save_dir, torrent_path, "--summary-interval=1"]
+        # Dùng thư mục tạm thay vì Drivers\Drivers trực tiếp
+        self.temp_dir = os.path.join(config.BASE_DIR, "Drivers", "TempDownload")
+        os.makedirs(self.temp_dir, exist_ok=True)
+        
+        # Lấy command đã tối ưu từ helpers
+        cmd = helpers.get_aria2_download_cmd(torrent_path, self.temp_dir, idxs)
         
         self.download_worker = self.main_app._create_and_start_worker(
             "DriverDownloader", self._run_aria2_task, args=[cmd],
@@ -116,39 +115,28 @@ class DriverDownloadDialog(QDialog):
         )
 
     def _run_aria2_task(self, cmd):
-        # Hàm chạy trong thread
+        # Chạy trong background thread
         proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, 
                                 text=True, creationflags=subprocess.CREATE_NO_WINDOW)
         self.aria2_proc = proc
         for line in proc.stdout:
-            # Parse tiến trình từ aria2c output: [#<gid> <downloaded>/<total>(<percent>%)]
             match = re.search(r"\((\d+)%\)", line)
             if match:
                 self.download_worker.progress.emit(int(match.group(1)))
         proc.wait()
+        
+        # Sau khi aria2 thoát, tiến hành dọn dẹp và di chuyển file ngay trong thread này
+        if proc.returncode == 0:
+            helpers.process_downloaded_drivers(self.temp_dir)
+            
         return proc.returncode == 0
 
     def _on_download_finished(self, success):
         if success:
-            # Xử lý sau tải: giải nén DB nếu có DriverPack_*.7z
-            drivers_dir = os.path.join(config.BASE_DIR, "Drivers", "Drivers")
-            db_dir = os.path.join(config.BASE_DIR, "Drivers", "DB")
-            
-            for f in os.listdir(drivers_dir):
-                if f.startswith("DriverPack_") and f.endswith(".7z"):
-                    src = os.path.join(drivers_dir, f)
-                    dst = os.path.join(db_dir, "db.sqlite")
-                    if helpers.extract_db_from_driverpack(src, dst):
-                        # Lưu version vào json
-                        v_info = {"db_version": f}
-                        with open(os.path.join(config.BASE_DIR, "Drivers", "driver_versions.json"), "w") as jf:
-                            json.dump(v_info, jf)
-                        os.remove(src) # Xóa file .7z sau khi lấy DB
-            
-            self.main_app.show_themed_message("Thành công", "Đã tải và cập nhật DriverPack thành công!")
+            self.main_app.show_themed_message("Thành công", "Đã tải và cập nhật Driver thành công!")
             self.accept()
         else:
-            self.main_app.show_themed_message("Lỗi", "Quá trình tải xuống gặp lỗi.")
+            self.main_app.show_themed_message("Lỗi", "Quá trình tải xuống gặp lỗi hoặc bị hủy.")
             self.btn_download.setEnabled(True)
 
 class AboutDialog(QDialog):
