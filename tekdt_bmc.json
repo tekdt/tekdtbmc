@@ -1,10 +1,10 @@
 {
     "device": "\\\\.\\PHYSICALDRIVE1",
-    "device_name": "JetFlash Transcend 8GB (7.35 GB) - USB",
+    "device_name": "SSK USB3.2 (58.24 GB) - USB",
     "partition_scheme": "GPT",
     "filesystem": "ExFAT",
     "theme": "Purple.zip",
-    "fill_space": true,
+    "fill_space": false,
     "iso_list": [
         {
             "path": "D:/Github/tekdtbmc/ISOs/Win10_22H2_English_x64v1.iso",
@@ -47,6 +47,15 @@
     "windows_edition_index": null,
     "copy_ais_selection_only": true,
     "prune_iso": true,
-    "device_details": null,
+    "device_details": {
+        "BusType": "USB",
+        "DeviceID": "1",
+        "FriendlyName": "SSK USB3.2",
+        "MediaType": "Unspecified",
+        "ProductID": null,
+        "SerialNumber": "0000000005\u0006\u0018",
+        "Size": 62533926912,
+        "VendorID": null
+    },
     "install_mode": "DESTRUCTIVE"
 }

@@ -244,3 +244,39 @@ def _unzip_and_move(main_window, zip_path, dest_dir):
     # Chỉ cần đổi tên thư mục tạm thành thư mục đích.
     shutil.move(temp_extract_dir, dest_dir)
 
+def get_tool_path(name):
+    """
+    Trả về đường dẫn tuyệt đối của các công cụ hỗ trợ hoặc các thư mục/file dữ liệu driver.
+    Hàm này giúp quản lý tập trung các đường dẫn trong dự án.
+    """
+    base_dir = config.BASE_DIR
+    
+    # 1. Nhóm các công cụ thực thi (Executables)
+    if name == "aria2c":
+        # Mặc định aria2c nằm trong thư mục Tools/aria2c
+        path = os.path.join(base_dir, "Tools", "aria2", "aria2c.exe")
+        return path if os.path.exists(path) else None
+    
+    if name == "7z":
+        # Mặc định 7z nằm trong thư mục Tools/7z, nếu không thấy sẽ trả về '7z.exe' để gọi từ PATH hệ thống
+        path = os.path.join(base_dir, "Tools", "7z", "7z.exe")
+        return path if os.path.exists(path) else "7z.exe"
+
+    # 2. Nhóm các đường dẫn dữ liệu Driver và Database
+    if name == "db_file":
+        # File SQLite chứa bản đồ Driver
+        return os.path.join(base_dir, "Drivers", "DB", "db.sqlite")
+    
+    if name == "drivers_dir":
+        # Thư mục chứa các file nén DP_*.7z
+        return os.path.join(base_dir, "Drivers", "Drivers")
+        
+    if name == "torrent_file":
+        # File torrent gốc để phân tích danh sách driver
+        return os.path.join(base_dir, "Drivers", "DriverPack-Offline.torrent")
+    
+    if name == "version_json":
+        # File lưu vết phiên bản driver đã tải
+        return os.path.join(base_dir, "Drivers", "driver_versions.json")
+
+    return None

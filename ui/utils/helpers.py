@@ -1,7 +1,7 @@
-import json, os, shutil, time, subprocess, ctypes, zipfile, config, tempfile, re, hashlib, traceback
+import json, os, shutil, time, subprocess, ctypes, zipfile, config, tempfile, re, hashlib, traceback, sqlite3
 from ctypes import wintypes
 from pathlib import Path
-from ui.utils import secret_key
+from ui.utils import secret_key, tool_manager
 
 def _copy_with_progress(worker, src, dst, total_copy_size, copied_so_far, base_progress, progress_range):
     """
@@ -1185,3 +1185,144 @@ def _create_and_hide_signature_partition(phy_drive_num, partition_scheme):
     except subprocess.CalledProcessError as e:
         error_message = f"Diskpart thất bại khi tạo phân vùng chữ ký. Lỗi:\n{e.stdout}\n{e.stderr}"
         raise IOError(error_message)
+
+def parse_torrent_files(torrent_path):
+    """Sử dụng aria2c để lấy danh sách file bằng cách phân đoạn khối văn bản."""
+    aria2_path = tool_manager.get_tool_path("aria2c")
+    if not aria2_path or not os.path.exists(torrent_path):
+        return []
+
+    try:
+        # Chạy lệnh aria2c và lấy toàn bộ output
+        result = subprocess.run(
+            [aria2_path, "--show-files", str(torrent_path)],
+            capture_output=True, 
+            text=True, 
+            encoding='utf-8', 
+            errors='ignore',
+            creationflags=subprocess.CREATE_NO_WINDOW
+        )
+        
+        # Làm sạch nội dung: thay thế ký tự trắng lạ (\xa0) thành khoảng trắng chuẩn
+        content = result.stdout.replace('\xa0', ' ')
+        
+        # Chia nhỏ nội dung dựa trên các đường kẻ phân cách của aria2 (--- hoặc ===)
+        # Mỗi phần tử trong 'blocks' sẽ chứa thông tin của duy nhất 1 file
+        blocks = re.split(r'[=-]+\+[=-]+', content)
+        
+        files_list = []
+
+        for block in blocks:
+            # 1. Tìm Index và Đường dẫn (Lấy các số ở đầu và phần .7z)
+            # Ví dụ khớp: " 104|./.../DP_TV_Beholder_25000.7z"
+            path_match = re.search(r"(\d+)\s*\|\s*(.*?\.7z)", block)
+            
+            # 2. Tìm dung lượng (Lấy phần chữ trước dấu ngoặc đơn)
+            # Ví dụ khớp: "|1.4MiB (1,482,947)" -> lấy "1.4MiB"
+            size_match = re.search(r"\|\s*([\d\.]+\s*[KMG]?i?B)\s*\(", block)
+
+            if path_match and size_match:
+                idx = path_match.group(1).strip()
+                full_path = path_match.group(2).strip()
+                size_display = size_match.group(1).strip() # GiB, MiB, KiB hoặc B
+                
+                filename = os.path.basename(full_path)
+                
+                # Lọc theo tiền tố DriverPack yêu cầu
+                if filename.startswith(("DP_", "DriverPack_")):
+                    files_list.append({
+                        "idx": idx,
+                        "name": filename,
+                        "size": size_display # Chỉ lấy dung lượng đã làm tròn
+                    })
+
+        # Sắp xếp lại danh sách theo tên file để dễ tìm kiếm
+        files_list.sort(key=lambda x: x['name'])
+        print(f"Hệ thống tìm thấy: {len(files_list)} gói Driver phù hợp.")
+        return files_list
+        
+    except Exception as e:
+        print(f"Lỗi phân tích torrent: {e}")
+        return []
+
+def extract_db_from_driverpack(archive_path, dest_db_path):
+    """Giải nén file db.sqlite từ bên trong file DriverPack_*.7z."""
+    sz_path = tool_manager.get_tool_path("7z") or "7z.exe"
+    dest_dir = os.path.dirname(dest_db_path)
+    os.makedirs(dest_dir, exist_ok=True)
+    
+    try:
+        # Lệnh: 7z e "archive.7z" "index/db.sqlite" -o"dest" -y
+        # e: extract without paths (để db.sqlite nằm ngay trong thư mục đích)
+        subprocess.run([sz_path, "e", str(archive_path), "index/db.sqlite", f"-o{dest_dir}", "-y"], 
+                       check=True, capture_output=True)
+        return True
+    except Exception as e:
+        print(f"Lỗi giải nén DB: {e}")
+        return False
+
+def extract_sqlite_from_7z(archive_path, dest_dir):
+    """Giải nén duy nhất file db.sqlite từ file .7z vào thư mục đích."""
+    seven_zip_path = tool_manager.get_tool_path("7z")
+    if not seven_zip_path:
+        return False
+    
+    try:
+        os.makedirs(dest_dir, exist_ok=True)
+        # Lệnh: 7z e "path.7z" -o"dest" "db.sqlite" -y
+        # e: extract, -y: yes to all
+        result = subprocess.run(
+            [seven_zip_path, "e", archive_path, f"-o{dest_dir}", "db.sqlite", "-y"],
+            capture_output=True, text=True, creationflags=subprocess.CREATE_NO_WINDOW
+        )
+        return result.returncode == 0
+    except Exception as e:
+        print(f"Lỗi giải nén sqlite: {e}")
+        return False
+
+def get_aria2_download_cmd(aria2_path, torrent_path, select_indices, download_dir):
+    """Tạo lệnh aria2c để tải các file được chọn vào thư mục tạm."""
+    indices_str = ",".join(select_indices)
+    return [
+        aria2_path,
+        "--allow-overwrite=true",
+        f"--dir={download_dir}",
+        f"--select-file={indices_str}",
+        "--seed-time=0",               # QUAN TRỌNG: Thoát ngay khi tải xong 100%
+        "--summary-interval=0",
+        "--bt-stop-timeout=60",        # Tự dừng nếu không có peer sau 60s
+        "--check-integrity=false",     # Bỏ qua kiểm tra mã băm nếu muốn nhanh (tùy chọn)
+        str(torrent_path)
+    ]
+
+def validate_drivers_with_db(db_path, drivers_dir):
+    """Kiểm tra các file DP_ hiện có trong Drivers/Drivers có khớp với bảng Drivers trong db.sqlite không."""
+    if not os.path.exists(db_path):
+        return False, "Thiếu file cơ sở dữ liệu db.sqlite."
+    
+    try:
+        conn = sqlite3.connect(db_path)
+        cursor = conn.cursor()
+        
+        # Lấy danh sách file .7z hiện có (bỏ đuôi .7z để so sánh với trường 'pack')
+        local_files = [f for f in os.listdir(drivers_dir) if f.startswith("DP_") and f.endswith(".7z")]
+        
+        for f in local_files:
+            pack_name = f[:-3] # Xóa .7z
+            cursor.execute("SELECT 1 FROM Drivers WHERE pack = ?", (pack_name,))
+            if not cursor.fetchone():
+                conn.close()
+                return False, f"Gói driver '{f}' không hợp lệ hoặc không có trong cơ sở dữ liệu."
+        
+        conn.close()
+        return True, ""
+    except Exception as e:
+        return False, f"Lỗi truy vấn DB: {e}"
+
+def is_internet_available():
+    """Kiểm tra kết nối internet nhanh."""
+    try:
+        requests.get("https://8.8.8.8", timeout=3)
+        return True
+    except:
+        return False

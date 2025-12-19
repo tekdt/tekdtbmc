@@ -8,7 +8,8 @@ from ui.utils import windows_api, tool_manager, helpers
 
 # --- Import thư viện PySide6 ---
 from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QDialog, QComboBox, QDialogButtonBox,
-                             QStackedWidget, QLabel, QMessageBox, QMenu, QGraphicsOpacityEffect, QPushButton, QLineEdit)
+                             QStackedWidget, QLabel, QMessageBox, QMenu, QGraphicsOpacityEffect, QPushButton, QLineEdit,
+                             QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView, QCheckBox, QFrame, QProgressBar)
 from PySide6.QtGui import QIcon, QAction, QActionGroup
 from PySide6.QtCore import Qt, QPropertyAnimation, QEasingCurve, QThread, Signal, QTimer, qInstallMessageHandler, QFileSystemWatcher
 
@@ -27,6 +28,203 @@ def qt_message_handler(mode, context, message):
     # Điều này giúp giữ lại các thông báo lỗi quan trọng khác.
     original_handler = sys.stderr.write
     original_handler(f"{message}\n")
+
+class DriverDownloadDialog(QDialog):
+    def __init__(self, parent, torrent_files):
+        super().__init__(parent)
+        self.main_app = parent
+        self.torrent_files = torrent_files
+        self.selected_indices = []
+        self.aria2_proc = None
+        self.init_ui()
+
+    def init_ui(self):
+        self.setWindowTitle("Tải trình điều khiển")
+        self.setMinimumSize(700, 500)
+        layout = QVBoxLayout(self)
+        
+        # Bảng danh sách
+        self.table = QTableWidget(len(self.torrent_files), 2)
+        self.table.setHorizontalHeaderLabels(["Tên file", "Dung lượng"])
+        self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
+        self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        
+        for i, file_info in enumerate(self.torrent_files):
+            # Checkbox item
+            chk_item = QTableWidgetItem(file_info['name'])
+            chk_item.setFlags(Qt.ItemIsUserCheckable | Qt.ItemIsEnabled)
+            chk_item.setCheckState(Qt.Unchecked)
+            self.table.setItem(i, 0, chk_item)
+            self.table.setItem(i, 1, QTableWidgetItem(file_info['size']))
+            
+        layout.addWidget(self.table)
+
+        # Progress bar
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setVisible(False)
+        layout.addWidget(self.progress_bar)
+
+        # Buttons
+        btn_layout = QHBoxLayout()
+        self.btn_download = QPushButton("Tải xuống")
+        self.btn_cancel = QPushButton("Hủy bỏ")
+        self.btn_download.clicked.connect(self.start_download)
+        self.btn_cancel.clicked.connect(self.reject)
+        btn_layout.addStretch()
+        btn_layout.addWidget(self.btn_download)
+        btn_layout.addWidget(self.btn_cancel)
+        btn_layout.addStretch()
+        layout.addLayout(btn_layout)
+        
+        self.setStyleSheet(self.main_app.styleSheet()) # Kế thừa style từ main app
+
+    def start_download(self):
+        # Lấy danh sách idx được chọn
+        to_download = []
+        for i in range(self.table.rowCount()):
+            if self.table.item(i, 0).checkState() == Qt.Checked:
+                to_download.append(self.torrent_files[i])
+        
+        # Nếu không chọn gì, tự động chọn DriverPack_*.7z và DP_MassStorage_*.7z
+        if not to_download:
+            for f in self.torrent_files:
+                if f['name'].startswith("DriverPack_") or "MassStorage" in f['name']:
+                    to_download.append(f)
+        
+        if not to_download: return
+
+        self.btn_download.setEnabled(False)
+        self.progress_bar.setVisible(True)
+        self.progress_bar.setValue(0)
+        
+        # Logic tải bằng aria2c qua Worker
+        # Vì yêu cầu tải nhiều file, chúng ta sẽ lặp hoặc dùng aria2c input file.
+        # Ở đây dùng logic đơn giản: tải từng file hoặc gọi aria2c với danh sách idx.
+        idxs = ",".join([f['idx'] for f in to_download])
+        torrent_path = os.path.join(config.BASE_DIR, "Drivers", "DriverPack-Offline.torrent")
+        save_dir = os.path.join(config.BASE_DIR, "Drivers", "Drivers")
+        os.makedirs(save_dir, exist_ok=True)
+        
+        aria2_path = tool_manager.get_tool_path("aria2c")
+        cmd = [aria2_path, "--select-file=" + idxs, "--dir=" + save_dir, torrent_path, "--summary-interval=1"]
+        
+        self.download_worker = self.main_app._create_and_start_worker(
+            "DriverDownloader", self._run_aria2_task, args=[cmd],
+            on_finished=self._on_download_finished,
+            on_progress=self.progress_bar.setValue
+        )
+
+    def _run_aria2_task(self, cmd):
+        # Hàm chạy trong thread
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, 
+                                text=True, creationflags=subprocess.CREATE_NO_WINDOW)
+        self.aria2_proc = proc
+        for line in proc.stdout:
+            # Parse tiến trình từ aria2c output: [#<gid> <downloaded>/<total>(<percent>%)]
+            match = re.search(r"\((\d+)%\)", line)
+            if match:
+                self.download_worker.progress.emit(int(match.group(1)))
+        proc.wait()
+        return proc.returncode == 0
+
+    def _on_download_finished(self, success):
+        if success:
+            # Xử lý sau tải: giải nén DB nếu có DriverPack_*.7z
+            drivers_dir = os.path.join(config.BASE_DIR, "Drivers", "Drivers")
+            db_dir = os.path.join(config.BASE_DIR, "Drivers", "DB")
+            
+            for f in os.listdir(drivers_dir):
+                if f.startswith("DriverPack_") and f.endswith(".7z"):
+                    src = os.path.join(drivers_dir, f)
+                    dst = os.path.join(db_dir, "db.sqlite")
+                    if helpers.extract_db_from_driverpack(src, dst):
+                        # Lưu version vào json
+                        v_info = {"db_version": f}
+                        with open(os.path.join(config.BASE_DIR, "Drivers", "driver_versions.json"), "w") as jf:
+                            json.dump(v_info, jf)
+                        os.remove(src) # Xóa file .7z sau khi lấy DB
+            
+            self.main_app.show_themed_message("Thành công", "Đã tải và cập nhật DriverPack thành công!")
+            self.accept()
+        else:
+            self.main_app.show_themed_message("Lỗi", "Quá trình tải xuống gặp lỗi.")
+            self.btn_download.setEnabled(True)
+
+class AboutDialog(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Thông tin phần mềm")
+        self.setFixedSize(450, 400)
+        self.init_ui()
+
+    def init_ui(self):
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(30, 30, 30, 30)
+        layout.setSpacing(15)
+
+        # Tiêu đề phần mềm (Tên phần mềm thường nằm trong config, nếu không có tôi sẽ ghi tạm là TekDT USB Boot Creator)
+        title_label = QLabel("TekDT USB Boot Creator")
+        title_label.setStyleSheet("font-size: 20px; font-weight: bold; color: #0078D4;")
+        title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(title_label)
+
+        # Phiên bản
+        version_label = QLabel(f"Phiên bản: {config.APP_VERSION}")
+        version_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        version_label.setStyleSheet("font-style: italic; color: #666;")
+        layout.addWidget(version_label)
+
+        # Đường kẻ ngang
+        line = QFrame()
+        line.setFrameShape(QFrame.Shape.HLine)
+        line.setFrameShadow(QFrame.Shadow.Sunken)
+        line.setStyleSheet("color: #ddd;")
+        layout.addWidget(line)
+
+        # Mô tả phần mềm
+        description = (
+            "<b>TekDT USB Boot Creator</b> là giải pháp toàn diện dành cho các kỹ thuật viên và người dùng "
+            "muốn tối ưu hóa quá trình cài đặt hệ điều hành. Phần mềm được thiết kế với giao diện trực quan, "
+            "cho phép tạo thiết bị boot đa năng dựa trên công nghệ Ventoy mạnh mẽ.<br><br>"
+            "Điểm nổi bật của công cụ là khả năng tích hợp và quản lý DriverPack thông minh, tự động "
+            "cập nhật trình điều khiển ổ cứng và linh kiện phần cứng, đảm bảo quá trình cài đặt Windows "
+            "diễn ra mượt mà. Kết hợp với bộ cài đặt phần mềm tự động (AIS), đây là công cụ đắc lực giúp "
+            "tiết kiệm thời gian và nâng cao hiệu suất bảo trì máy tính chuyên nghiệp."
+        )
+        desc_label = QLabel(description)
+        desc_label.setWordWrap(True)
+        desc_label.setAlignment(Qt.AlignmentFlag.AlignJustify)
+        layout.addWidget(desc_label)
+
+        # Thông tin tác giả & Liên hệ
+        info_layout = QVBoxLayout()
+        info_layout.setSpacing(5)
+        
+        author_label = QLabel(f"<b>Tác giả:</b> TekDT")
+        email_label = QLabel(f"<b>Email:</b> dinhtrungtek@gmail.com")
+        donate_label = QLabel(f"<b>Ủng hộ (Paypal):</b> dinhtrungtek@gmail.com")
+        
+        for lbl in [author_label, email_label, donate_label]:
+            lbl.setStyleSheet("font-size: 13px;")
+            info_layout.addWidget(lbl)
+        
+        layout.addLayout(info_layout)
+        layout.addStretch()
+
+        # Nút đóng (Optional, vì có nút X hệ thống nhưng nút này giúp giao diện cân đối hơn)
+        close_btn = QPushButton("Đóng")
+        close_btn.setFixedWidth(100)
+        close_btn.clicked.connect(self.accept)
+        btn_layout = QHBoxLayout()
+        btn_layout.addStretch()
+        btn_layout.addWidget(close_btn)
+        btn_layout.addStretch()
+        layout.addLayout(btn_layout)
+
+        # Kế thừa style chung của ứng dụng
+        if self.parent():
+            self.setStyleSheet(self.parent().styleSheet())
 
 # --- Lớp chính của ứng dụng ---
 class USBBootCreator(QMainWindow):
@@ -721,150 +919,6 @@ class USBBootCreator(QMainWindow):
                     total_size += os.path.getsize(fp)
         return total_size
 
-    # def _update_capacity_check(self):
-        # """Tính toán tổng dung lượng cần thiết và cập nhật UI chỉ khi có thay đổi."""
-        # label = self.page3.capacity_status_label
-        # start_button = self.page3.start_button
-       
-        # # Không set "Đang tính toán..." để tránh nháy không cần thiết
-        # # label.setText("Đang tính toán dung lượng yêu cầu...")
-        # # label.setStyleSheet("font-weight: bold; padding: 10px; color: #D8DEE9;")
-        # # label.setVisible(True)
-        # # QApplication.processEvents() # Force update UI
-        
-        # # --- Bắt đầu tính toán ---
-        # total_required_size = 0
-        # # 1. Dung lượng ISOs
-        # for iso in self.config.get('iso_list', []):
-            # try:
-                # total_required_size += os.path.getsize(iso['path'])
-            # except FileNotFoundError:
-                # self.show_error(f"Không tìm thấy file ISO: {iso['path']}. Vui lòng xóa khỏi danh sách.")
-                # return
-        # # 2. Dung lượng Drivers
-        # drivers_dir = config.DRIVERS_DIR
-        # if drivers_dir.exists():
-            # drivers_subdir = drivers_dir / "Drivers"
-            # if drivers_subdir.exists():
-                # direct_drivers = drivers_subdir / "Drivers.7z"
-                # if direct_drivers.exists():
-                    # try:
-                        # total_required_size += os.path.getsize(direct_drivers)
-                    # except Exception as e:
-                        # print(f"Lỗi khi lấy kích thước Drivers.7z: {e}")
-                # else:
-                    # # Quét tất cả các file split .001, .002, ... .101, etc.
-                    # driver_files = [
-                        # f for f in drivers_subdir.glob("Drivers.7z.*")
-                        # if f.is_file() and f.suffix[1:].isdigit() # f.suffix[1:] để bỏ dấu '.'
-                    # ]
-                    # if driver_files:
-                        # # print(f"Tìm thấy {len(driver_files)} file Drivers, đang tính dung lượng...")
-                        # for f in driver_files:
-                            # try:
-                                # total_required_size += os.path.getsize(f)
-                            # except Exception as e:
-                                # # Bỏ qua nếu có lỗi đọc file (ví dụ: file bị khóa)
-                                # print(f"Lỗi khi lấy kích thước file driver {f}: {e}")
-            # # 2.1 Dung lượng DB
-            # db_subdir = drivers_dir / "DB"
-            # if db_subdir.exists():
-                # direct_db = db_subdir / "db.sqlite"
-                # if direct_db.exists():
-                    # try:
-                        # total_required_size += os.path.getsize(direct_db)
-                    # except Exception as e:
-                        # print(f"Lỗi khi lấy kích thước db.sqlite: {e}")
-                # else:
-                    # # Quét tất cả các file split .001, .002, ... .101, etc.
-                    # db_files = [
-                        # f for f in db_subdir.glob("db.sqlite.*")
-                        # if f.is_file() and f.suffix[1:].isdigit() # f.suffix[1:] để bỏ dấu '.'
-                    # ]
-                    # if db_files:
-                        # for f in db_files:
-                            # try:
-                                # total_required_size += os.path.getsize(f)
-                            # except Exception as e:
-                                # print(f"Lỗi khi lấy kích thước file db {f}: {e}")
-        # # 3. Dung lượng Theme
-        # if self.config.get('theme'):
-            # theme_path = config.THEMES_DIR / self.config['theme']
-            # if theme_path.exists():
-                # total_required_size += os.path.getsize(theme_path)
-        # # 4. Dung lượng TekDT AIS (phức tạp hơn)
-        # if config.TEKDTAIS_DIR.exists():
-            # if not self.config.get("copy_ais_selection_only", True):
-                # # Sao chép toàn bộ
-                # total_required_size += self._get_dir_size(config.TEKDTAIS_DIR)
-            # else:
-                # # Sao chép chọn lọc
-                # config_path = config.TEKDTAIS_DIR / "app_config.json"
-                # source_apps_dir = config.TEKDTAIS_DIR / "Apps"
-                # apps_to_copy = []
-                # if config_path.exists():
-                    # try:
-                        # with open(config_path, 'r', encoding='utf-8') as f:
-                            # app_config = json.load(f)
-                        # apps_to_copy = [name for name, settings in app_config.get("app_items", {}).items() if settings.get("auto_install")]
-                    # except Exception as e:
-                        # print(f"Lỗi đọc app_config.json, sẽ tính toàn bộ size: {e}")
-                        # total_required_size += self._get_dir_size(config.TEKDTAIS_DIR)
-               
-                # def ignore_apps(directory, contents):
-                    # if config.Path(directory).resolve() == source_apps_dir.resolve():
-                        # return [item for item in contents if item not in apps_to_copy]
-                    # return []
-                # total_required_size += self._get_dir_size(config.TEKDTAIS_DIR, ignore_func=ignore_apps)
-        # # 5. Dung lượng dự phòng (Ventoy, file config, metadata...) - ~500MB
-        # overhead = 500 * 1024 * 1024
-        # total_required_size += overhead
-        # # --- So sánh và cập nhật UI ---
-        # device_details = self.config.get('device_details')
-        # if not device_details:
-            # new_message = "Vui lòng chọn một USB ở Bước 1."
-            # new_style = "font-weight: bold; padding: 10px; color: #EBCB8B;"  # Vàng
-            # new_enabled = False
-        # else:
-            # install_mode = self.config.get("install_mode", "DESTRUCTIVE")
-            # disk_number = device_details.get('DeviceID') # Giả sử DeviceID là số Disk Number từ Get-PhysicalDisk
-            # if install_mode == "DESTRUCTIVE":
-                # # Chế độ phá hủy: Sử dụng toàn bộ dung lượng thiết bị (thường là USB)
-                # available_size = device_details.get('Size', 0)
-                # available_label = "Tổng dung lượng thiết bị"
-            # else:
-                # # Chế độ không phá hủy: Tính dung lượng trống ở cuối đĩa (tổng size đĩa - tổng size phân vùng hiện có)
-                # available_size = self._get_free_space_at_end(disk_number)
-                # available_label = "Dung lượng trống cuối đĩa"
-           
-            # # Chuyển đổi sang GB để hiển thị
-            # required_gb = total_required_size / (1024**3)
-            # available_gb = available_size / (1024**3)
-            # if total_required_size > available_size:
-                # new_message = (f"DUNG LƯỢNG KHÔNG ĐỦ!<br>"
-                           # f"Yêu cầu: <b>{required_gb:.2f} GB</b> / Sẵn có: <b>{available_gb:.2f} GB</b>")
-                # new_style = "font-weight: bold; padding: 10px; color: #BF616A;"  # Đỏ
-                # new_enabled = False
-            # else:
-                # new_message = (f"Đủ dung lượng<br>"
-                           # f"Yêu cầu: <b>{required_gb:.2f} GB</b> / Sẵn có: <b>{available_gb:.2f} GB</b>")
-                # new_style = "font-weight: bold; padding: 10px; color: #A3BE8C;"  # Xanh
-                # new_enabled = True
-        
-        # # Lấy text và style hiện tại
-        # current_message = label.text()
-        # current_style = label.styleSheet()
-        # current_enabled = start_button.isEnabled()
-        
-        # # Chỉ cập nhật nếu có thay đổi
-        # if new_message != current_message or new_style != current_style:
-            # label.setText(new_message)
-            # label.setStyleSheet(new_style)
-            # label.setVisible(True)
-        
-        # if new_enabled != current_enabled:
-            # start_button.setEnabled(new_enabled)
-
     def _update_capacity_check(self):
         """Tính toán tổng dung lượng cần thiết và cập nhật UI chỉ khi có thay đổi."""
         label = self.page3.capacity_status_label
@@ -1186,6 +1240,24 @@ class USBBootCreator(QMainWindow):
         theme_group = QActionGroup(self)
         theme_group.addAction(no_theme_action)
         
+        menu.addSeparator()
+
+        # --- Download Drivers ---
+        driver_action = QAction("Tải trình điều khiển", self)
+        driver_action.triggered.connect(self.open_driver_downloader)
+        menu.addAction(driver_action)
+        
+        menu.addSeparator()
+
+        # --- About ---
+        # Thêm Menu Thông tin phần mềm
+        about_action = QAction("Thông tin phần mềm", self)
+        about_action.triggered.connect(self.show_about_dialog)
+        menu.addAction(about_action)
+
+        # Hiển thị menu tại vị trí chuột
+        menu.exec(self.menu_button.mapToGlobal(self.menu_button.rect().bottomLeft()))
+        
         try:
             if not config.THEMES_DIR.exists():
                 print("Thư mục Themes không tồn tại, bỏ qua việc tải theme.")
@@ -1233,6 +1305,41 @@ class USBBootCreator(QMainWindow):
         self.save_config()
         # Tính toán lại dung lượng vì nó sẽ thay đổi
         self._update_capacity_check()
+    
+    def open_driver_downloader(self):
+        torrent_path = tool_manager.get_tool_path("torrent_file")
+        aria2_path = tool_manager.get_tool_path("aria2c")
+        
+        # Kiểm tra công cụ trước
+        if not aria2_path:
+            self.show_themed_message("Lỗi Hệ Thống", "Không tìm thấy aria2c.exe trong thư mục Tools/aria2/.\nVui lòng kiểm tra lại cấu trúc thư mục phần mềm.", icon=QMessageBox.Icon.Critical)
+            return
+
+        if not os.path.exists(torrent_path):
+            self.show_themed_message("Lỗi", f"Không tìm thấy file torrent tại:\n{torrent_path}", icon=QMessageBox.Icon.Warning)
+            return
+            
+        # Thêm hiệu ứng chờ đợi nếu file torrent quá lớn
+        files = helpers.parse_torrent_files(torrent_path)
+        
+        if files:
+            dlg = DriverDownloadDialog(self, files)
+            dlg.exec()
+        else:
+            # Thông báo chi tiết hơn để debug
+            msg = (
+                "Không tìm thấy dữ liệu driver trong file torrent.\n\n"
+                "Nguyên nhân có thể do:\n"
+                "1. File torrent không chứa các gói DP_*.7z.\n"
+                "2. aria2c không thể đọc được nội dung file torrent.\n"
+                "3. Lỗi phân giải (Regex) dữ liệu."
+            )
+            self.show_themed_message("Thông báo", msg, icon=QMessageBox.Icon.Information)
+
+    def show_about_dialog(self):
+        """Hiển thị cửa sổ giới thiệu phần mềm."""
+        dlg = AboutDialog(self)
+        dlg.exec()
     
     def check_for_updates(self):
         self.update_worker = self._create_and_start_worker(
@@ -1339,6 +1446,48 @@ class USBBootCreator(QMainWindow):
             self.show_themed_message("Lỗi", "Vui lòng chọn một ổ đĩa USB!", icon=QMessageBox.Icon.Warning)
             return
 
+        # Kiểm tra sự tồn tại của file DB và MassStorage
+        db_path = os.path.join(config.BASE_DIR, "Drivers", "DB", "db.sqlite")
+        drivers_dir = os.path.join(config.BASE_DIR, "Drivers", "Drivers")
+        os.makedirs(drivers_dir, exist_ok=True)
+        
+        # Tìm file MassStorage
+        has_mass_storage = any("MassStorage" in f for f in os.listdir(drivers_dir) if f.startswith("DP_"))
+        
+        # Nếu thiếu dữ liệu cốt lõi
+        if not os.path.exists(db_path) or not has_mass_storage:
+            self.show_themed_message("Thiếu Driver", "Cơ sở dữ liệu hoặc Driver ổ cứng (MassStorage) bị thiếu. Vui lòng tải xuống trước khi bắt đầu.")
+            self.open_driver_downloader()
+            return
+
+        # Kiểm tra tính hợp lệ của các gói DP_ hiện có với DB
+        valid, msg = helpers.validate_drivers_with_db(db_path, drivers_dir)
+        if not valid:
+            self.show_themed_message("Lỗi Driver", f"{msg}\nVui lòng cập nhật lại DriverPack.", icon=QMessageBox.Icon.Critical)
+            self.open_driver_downloader()
+            return
+
+        # Kiểm tra Version nếu có Internet (so sánh với Torrent)
+        if helpers.is_internet_available():
+            torrent_path = os.path.join(config.BASE_DIR, "Drivers", "DriverPack-Offline.torrent")
+            torrent_files = helpers.parse_torrent_files(torrent_path)
+            
+            # Lấy version DB hiện tại từ file json
+            current_v = ""
+            v_json = os.path.join(config.BASE_DIR, "Drivers", "driver_versions.json")
+            if os.path.exists(v_json):
+                with open(v_json, "r") as f: current_v = json.load(f).get("db_version", "")
+            
+            # Tìm tên file DriverPack_ mới nhất trong torrent
+            latest_db_file = next((f['name'] for f in torrent_files if f['name'].startswith("DriverPack_")), "")
+            
+            if latest_db_file and latest_db_file != current_v:
+                reply = self.show_themed_message("Cập nhật", "Đã có phiên bản Driver mới trên máy chủ. Bạn có muốn cập nhật không?", 
+                                               buttons=QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+                if reply == QMessageBox.StandardButton.Yes:
+                    self.open_driver_downloader()
+                    return
+        
         if not self.config.get("iso_list"):
             self.show_themed_message("Lỗi", "Vui lòng chọn hoặc tải ít nhất một file ISO!", icon=QMessageBox.Icon.Warning)
             return
