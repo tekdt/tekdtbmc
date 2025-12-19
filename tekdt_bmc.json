@@ -1,6 +1,6 @@
 {
     "device": "\\\\.\\PHYSICALDRIVE1",
-    "device_name": "JetFlash Transcend 8GB (7.35 GB) - USB",
+    "device_name": "USB SanDisk 3.2Gen1 (28.65 GB) - USB",
     "partition_scheme": "GPT",
     "filesystem": "ExFAT",
     "theme": "Purple.zip",
@@ -17,6 +17,30 @@
             "windows_edition_lang": "en-US",
             "alias": "Windows 11 Pro (Win11_25H2_English_x64.iso)",
             "product_key": "W269N-WFGWX-YVC9B-4J6C9-T83GX"
+        },
+        {
+            "path": "D:/Github/tekdtbmc/ISOs/Win10_22H2_English_x64v1.iso",
+            "filename": "Win10_22H2_English_x64v1.iso",
+            "edition_index": null,
+            "edition_name": null,
+            "windows_edition_index": "6",
+            "windows_edition_name": "Windows 10 Pro",
+            "windows_edition_arch": "amd64",
+            "windows_edition_lang": "en-US",
+            "alias": "Windows 10 Pro (Win10_22H2_English_x64v1.iso)",
+            "product_key": "VK7JG-NPHTM-C97JM-9MPGT-3V66T"
+        },
+        {
+            "path": "D:/Github/tekdtbmc/ISOs/Win11_24H2_English_x64.iso",
+            "filename": "Win11_24H2_English_x64.iso",
+            "edition_index": null,
+            "edition_name": null,
+            "windows_edition_index": "6",
+            "windows_edition_name": "Windows 11 Pro",
+            "windows_edition_arch": "amd64",
+            "windows_edition_lang": "en-US",
+            "alias": "Windows 11 Pro (Win11_24H2_English_x64.iso)",
+            "product_key": "W269N-WFGWX-YVC9B-4J6C9-T83GX"
         }
     ],
     "windows_edition": null,
@@ -26,11 +50,11 @@
     "device_details": {
         "BusType": "USB",
         "DeviceID": "1",
-        "FriendlyName": "JetFlash Transcend 8GB",
+        "FriendlyName": "USB SanDisk 3.2Gen1",
         "MediaType": "Unspecified",
         "ProductID": null,
-        "SerialNumber": "AA00000000000489",
-        "Size": 7893680128,
+        "SerialNumber": "0901f927ee6a0ff74fa1",
+        "Size": 30765219840,
         "VendorID": null
     },
     "install_mode": "DESTRUCTIVE"
