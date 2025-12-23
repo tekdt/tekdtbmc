@@ -34,6 +34,7 @@ class DriverDownloadDialog(QDialog):
         super().__init__(parent)
         self.main_app = parent
         self.torrent_files = torrent_files
+        self.auto_select_massstorage = auto_select_massstorage
         self.selected_indices = []
         self.aria2_proc = None
         self.init_ui()
@@ -112,7 +113,14 @@ class DriverDownloadDialog(QDialog):
             # Checkbox item
             chk_item = QTableWidgetItem(file_info['name'])
             chk_item.setFlags(Qt.ItemIsUserCheckable | Qt.ItemIsEnabled)
-            chk_item.setCheckState(Qt.Unchecked)
+            if (
+                self.auto_select_massstorage
+                and file_info['name'].startswith("DP_")
+                and "MassStorage" in file_info['name']
+            ):
+                chk_item.setCheckState(Qt.Checked)
+            else:
+                chk_item.setCheckState(Qt.Unchecked)
             self.table.setItem(i, 0, chk_item)
             self.table.setItem(i, 1, QTableWidgetItem(file_info['size']))
             
