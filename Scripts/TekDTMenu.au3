@@ -721,7 +721,7 @@ Func _AnalyzePartitions()
                 $aWMIParts[$iIdx][3] = $oPartition.BootPartition
                 $aWMIParts[$iIdx][4] = $oPartition.DeviceID
                 $aWMIParts[$iIdx][5] = ""
-                $aWMIParts[$iIdx][6] = 0 
+                $aWMIParts[$iIdx][6] = 0
             Next
             RecordLogforDebug(_ArrayToString($aWMIParts))
         EndIf
@@ -856,19 +856,19 @@ Func _AnalyzePartitions()
             $aPartitions[$iIdx][4] = "(Không tìm thấy phân vùng nào trên ổ đĩa này)"
         EndIf
     Next
-	
+
     Local $iTotalItems = UBound($aPartitions)
     Local $iNewHeight = 150 + ($iTotalItems * 20)
     If $iNewHeight < 200 Then $iNewHeight = 200
     If $iNewHeight > 500 Then $iNewHeight = 500
     Local $iMinWidth = 600
-    Local $iMaxWidth = 1000 
+    Local $iMaxWidth = 1000
     Local $iNewWidth = $iMinWidth
 
     Local $hGUI = GUICreate("Phân Tích Phân Vùng", $iNewWidth, $iNewHeight, -1, -1, BitOR($WS_SIZEBOX, $WS_SYSMENU))
     Local $hList = GUICtrlCreateListView("Disk|Partition|Type|Size|Notes", 10, 10, $iNewWidth - 20, $iNewHeight - 60)
     _GUICtrlListView_SetExtendedListViewStyle($hList, $LVS_EX_FULLROWSELECT)
-    Local $hClose = GUICtrlCreateButton("Đóng", ($iNewWidth / 2) - 50, $iNewHeight - 40, 100, 30) 
+    Local $hClose = GUICtrlCreateButton("Đóng", ($iNewWidth / 2) - 50, $iNewHeight - 40, 100, 30)
     Local $aButtons[1] = [$hClose]
 
     GUISetState(@SW_SHOW, $hGUI)
@@ -879,7 +879,7 @@ Func _AnalyzePartitions()
 
     Local $iTotalColumnWidth = 0
     For $i = 0 To 4
-        _GUICtrlListView_SetColumnWidth($hList, $i, $LVSCW_AUTOSIZE) 
+        _GUICtrlListView_SetColumnWidth($hList, $i, $LVSCW_AUTOSIZE)
         $iTotalColumnWidth += _GUICtrlListView_GetColumnWidth($hList, $i)
     Next
 
@@ -889,9 +889,9 @@ Func _AnalyzePartitions()
 
     WinMove($hGUI, "", Default, Default, $iNewWidth, $iNewHeight)
     GUICtrlSetPos($hList, 10, 10, $iNewWidth - 20, $iNewHeight - 60)
-    GUICtrlSetPos($hClose, ($iNewWidth / 2) - 50, $iNewHeight - 40) 
+    GUICtrlSetPos($hClose, ($iNewWidth / 2) - 50, $iNewHeight - 40)
 
-    _AdjustPopupLayout($hGUI, $hList, $aButtons) 
+    _AdjustPopupLayout($hGUI, $hList, $aButtons)
 
     While 1
         Local $iMsg = GUIGetMsg()
@@ -944,7 +944,7 @@ Func _AutoCleanPartitions()
                 $aWMIParts[$iIdx][3] = $oPartition.DeviceID
                 $aWMIParts[$iIdx][4] = _GetDriveLetterFromPartition($oWMI, $oPartition.DeviceID)
                 $aWMIParts[$iIdx][5] = $oPartition.BootPartition
-                $aWMIParts[$iIdx][6] = 0 
+                $aWMIParts[$iIdx][6] = 0
             Next
         EndIf
 
@@ -965,7 +965,7 @@ Func _AutoCleanPartitions()
             Local $iWMIIndex = -1
 
             Local $iBestMatchWMI_Index = -1
-            Local $iLowestTolerance = 9223372036854775807 
+            Local $iLowestTolerance = 9223372036854775807
 
             For $iW = 0 To UBound($aWMIParts) - 1
                 If $aWMIParts[$iW][6] = 1 Then ContinueLoop
@@ -977,10 +977,10 @@ Func _AutoCleanPartitions()
                 EndIf
             Next
 
-            Local $iMaxTolerance = _Max(104857600, $iSizeBytes * 0.01) 
+            Local $iMaxTolerance = _Max(104857600, $iSizeBytes * 0.01)
             If $iBestMatchWMI_Index <> -1 And $iLowestTolerance < $iMaxTolerance Then
                 $bFoundInWMI = True
-                $aWMIParts[$iBestMatchWMI_Index][6] = 1 
+                $aWMIParts[$iBestMatchWMI_Index][6] = 1
 
                 $iWMIIndex = $aWMIParts[$iBestMatchWMI_Index][0]
                 $sPartType = $aWMIParts[$iBestMatchWMI_Index][1]
@@ -1053,7 +1053,7 @@ Func _AutoCleanPartitions()
             EndIf
         Next
     Next
-    
+
     If UBound($aToDelete) <= 0 Then
         MsgBox(64, "Thông báo", "Không tìm thấy phân vùng nào phù hợp để xóa tự động.")
         Return
@@ -1064,13 +1064,13 @@ Func _AutoCleanPartitions()
     If $iNewHeight < 200 Then $iNewHeight = 200
     If $iNewHeight > 400 Then $iNewHeight = 400
     Local $iMinWidth = 600
-    Local $iMaxWidth = 1000 
+    Local $iMaxWidth = 1000
     Local $iNewWidth = $iMinWidth
 
     Local $hGUI = GUICreate("Xác Nhận Xóa Phân Vùng", $iNewWidth, $iNewHeight, -1, -1, BitOR($WS_SIZEBOX, $WS_SYSMENU))
     Local $hList = GUICtrlCreateListView("Disk|Partition|Type|Size|Reason", 10, 10, $iNewWidth - 20, $iNewHeight - 60)
     _GUICtrlListView_SetExtendedListViewStyle($hList, $LVS_EX_FULLROWSELECT)
-    Local $hYes = GUICtrlCreateButton("Xóa", ($iNewWidth / 2) - 105, $iNewHeight - 40, 100, 30) 
+    Local $hYes = GUICtrlCreateButton("Xóa", ($iNewWidth / 2) - 105, $iNewHeight - 40, 100, 30)
     Local $hNo = GUICtrlCreateButton("Hủy", ($iNewWidth / 2) + 5, $iNewHeight - 40, 100, 30)
     Local $aButtons[2] = [$hYes, $hNo]
     GUISetState(@SW_SHOW, $hGUI)
@@ -1094,7 +1094,7 @@ Func _AutoCleanPartitions()
     GUICtrlSetPos($hYes, ($iNewWidth / 2) - 105, $iNewHeight - 40)
     GUICtrlSetPos($hNo, ($iNewWidth / 2) + 5, $iNewHeight - 40)
 
-    _AdjustPopupLayout($hGUI, $hList, $aButtons) 
+    _AdjustPopupLayout($hGUI, $hList, $aButtons)
 
     While 1
         Local $iMsg = GUIGetMsg()
@@ -1202,7 +1202,7 @@ Func _IsWindowsPartition($iDiskIndex, $iDiskPartIndex, $sExistingLetter = "")
         FileWriteLine($hFileRemove, "gpt attributes=0x8000000000000000") ; Attributes GPT ẩn mặc định
         FileWriteLine($hFileRemove, "exit")
         FileClose($hFileRemove)
-        
+
         RunWait('diskpart /s "' & $sScriptFileRemove & '"', "", @SW_HIDE)
         FileDelete($sScriptFileRemove)
     EndIf
@@ -1974,14 +1974,14 @@ Func _AutoExtractDrivers()
     Local Const $sDestDir = $CurrentDevice&":\Drivers"
     Local $s7zPath = StringReplace(@ScriptDir & "\Tools\7z" & (@OSArch = "X64" ? "64" : "32") & "\7za.exe", '\\', '\')
     Local $sDbPath, $sVentoyDir
-    
+
     ; Tìm ổ đĩa boot (RootDevice)
     If $RootDevice = "" Then $RootDevice = SearchRootDevice()
     If $RootDevice = "" Then
         RecordLogforDebug("! Lỗi: Không tìm thấy thiết bị Boot.")
         Return False
     EndIf
-    
+
     $sVentoyDir = $RootDevice & "\ventoy"
     $sDbPath = $sVentoyDir & "\db.sqlite"
 
@@ -1998,7 +1998,7 @@ Func _AutoExtractDrivers()
     ; Kiểm tra xem đang dùng cấu trúc cũ (Drivers.7z) hay mới
     Local $sLegacyArchive = $sVentoyDir & "\Drivers.7z"
     Local $bUseLegacyStructure = FileExists($sLegacyArchive)
-    
+
     If $bUseLegacyStructure Then
         RecordLogforDebug("* Chế độ: Sử dụng cấu trúc Drivers.7z cũ (Monolithic).")
     Else
@@ -2077,7 +2077,7 @@ Func _AutoExtractDrivers()
 
     ; --- Bước 4: Lặp qua HWIDs và truy vấn CSDL ---
     ; Mảng lưu trữ: [PackName, DirectoryInsidePack]
-    Local $aDriversToExtract[0][2] 
+    Local $aDriversToExtract[0][2]
 
     For $sMissingHWID In $aMissingHWIDs
         If $sMissingHWID = "" Or StringIsDigit($sMissingHWID) Or StringLen($sMissingHWID) < 5 Then ContinueLoop
@@ -2143,13 +2143,13 @@ Func _AutoExtractDrivers()
     ; --- Bước 6: Trích xuất thông minh ---
     ; Chúng ta cần loại bỏ trùng lặp dựa trên combo Pack + Directory
     ; Tuy nhiên, để đơn giản và an toàn, ta cứ chạy lệnh xả nén (7zip sẽ tự skip nếu file đã có hoặc overwrite -y)
-    
+
     Local $sProcessedSignatures = "|" ; Để check trùng lặp
 
     For $i = 0 To UBound($aDriversToExtract) - 1
         Local $sPackName = $aDriversToExtract[$i][0]
         Local $sDirInside = $aDriversToExtract[$i][1]
-        
+
         Local $sSignature = $sPackName & "@" & $sDirInside
         If StringInStr($sProcessedSignatures, "|" & $sSignature & "|") Then ContinueLoop
         $sProcessedSignatures &= $sSignature & "|"
@@ -2173,13 +2173,13 @@ Func _AutoExtractDrivers()
                 RecordLogforDebug("! Lỗi: Không tìm thấy gói driver: " & $sPackName & " (.7z hoặc .7z.001)")
                 ContinueLoop
             EndIf
-            
+
             ; Trong gói driver rời, thư mục driver thường nằm ngay root hoặc chính là directory
             $sExtractFilter = $sDirInside
         EndIf
 
         RecordLogforDebug("-> Trích xuất: " & $sExtractFilter & " từ " & $sArchiveFile)
-        
+
         ; Lệnh: 7za x "Archive" -o"Dest" "PathToExtract*" -y -r
         Local $sCommand = '"' & $s7zPath & '" x "' & $sArchiveFile & '" -o"' & $sDestDir & '" "' & $sExtractFilter & '*" -y -r'
         RunWait($sCommand, "", @SW_HIDE)
@@ -2230,11 +2230,8 @@ EndFunc
 
 Func SearchCurrentDevice()
 	Local $sDrive, $sDir, $sFileName, $sExtension
-	If StringLeft(_PathSplit(@ScriptFullPath, ByRef $sDrive, ByRef $sDir, ByRef $sFileName, ByRef $sExtension)[1],1) = "X" Then
-		Return "X"
-	Else
-		Return StringLeft(_PathSplit(@ScriptFullPath, ByRef $sDrive, ByRef $sDir, ByRef $sFileName, ByRef $sExtension)[1],1)
-	EndIf
+	$Partition_Char = StringLeft(_PathSplit(@ScriptFullPath, $sDrive, $sDir, $sFileName, $sExtension)[1],1)
+	Return $Partition_Char
 EndFunc
 
 Func _GetReservedPartitionOffset($iDiskNum)
