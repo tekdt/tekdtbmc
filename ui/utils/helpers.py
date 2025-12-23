@@ -769,6 +769,43 @@ def create_usb_task(main_app):
         
         worker.progress.emit(80) # Hoàn tất sao chép file
         
+        # ====== Giai đoạn tạo file khởi động lại vào BIOS ======
+        bios_tool_path = os.path.join(usb_mount_point, "Access_BIOS.bat")
+
+        batch_content = r"""@echo off
+        title CONG CU TRUY CAP BIOS/UEFI
+        :: Kiem tra quyen Admin
+        net session >nul 2>&1
+        if %errorlevel% neq 0 (
+            echo Vui long chay file nay bang quyen Administrator!
+            pause
+            exit
+        )
+
+        :: 1. Kiem tra che do UEFI bang cach tim kiem path winload.efi trong bcdedit
+        bcdedit | findstr /i "winload.efi" >nul
+        if %errorlevel% neq 0 (
+            echo He thong dang chay o che do Legacy (BIOS). 
+            echo Lenh shutdown /fw chi ho tro che do UEFI.
+            pause
+            exit
+        )
+
+        :: 2. Bat WinRE de tranh loi 203 (The system could not find the environment option...)
+        echo Dang kiem tra va kich hoat WinRE...
+        reagentc /enable >nul
+
+        :: 3. Thuc thi lenh khoi dong vao BIOS
+        echo May tinh se khoi dong lai vao BIOS trong giay lat...
+        shutdown /r /fw /t 3
+        """
+
+        try:
+            with open(bios_tool_path, "w", encoding="cp850") as f:
+                f.write(batch_content)
+        except Exception as e:
+            print(f"Lỗi tạo file BIOS tool: {e}")
+        
         # --- GIAI ĐOẠN 4: LẤP ĐẦY DUNG LƯỢNG TRỐNG (80% -> 95%) ---
         if main_app.config.get("fill_space", True):
             worker.status.emit("Đang tính toán dung lượng trống...")
@@ -1187,63 +1224,55 @@ def _create_and_hide_signature_partition(phy_drive_num, partition_scheme):
         raise IOError(error_message)
 
 def parse_torrent_files(torrent_path):
-    """Sử dụng aria2c để lấy danh sách file bằng cách phân đoạn khối văn bản."""
+    """Parse output của `aria2c --show-files` dòng-thứ-dòng, trả về list dict {idx,name,size}."""
     aria2_path = tool_manager.get_tool_path("aria2c")
     if not aria2_path or not os.path.exists(torrent_path):
         return []
 
     try:
-        # Chạy lệnh aria2c và lấy toàn bộ output
         result = subprocess.run(
             [aria2_path, "--show-files", str(torrent_path)],
-            capture_output=True, 
-            text=True, 
-            encoding='utf-8', 
+            capture_output=True,
+            text=True,
+            encoding='utf-8',
             errors='ignore',
             creationflags=subprocess.CREATE_NO_WINDOW
         )
-        
-        # Làm sạch nội dung: thay thế ký tự trắng lạ (\xa0) thành khoảng trắng chuẩn
-        content = result.stdout.replace('\xa0', ' ')
-        
-        # Chia nhỏ nội dung dựa trên các đường kẻ phân cách của aria2 (--- hoặc ===)
-        # Mỗi phần tử trong 'blocks' sẽ chứa thông tin của duy nhất 1 file
-        blocks = re.split(r'[=-]+\+[=-]+', content)
-        
+        lines = result.stdout.splitlines()
         files_list = []
 
-        for block in blocks:
-            # 1. Tìm Index và Đường dẫn (Lấy các số ở đầu và phần .7z)
-            # Ví dụ khớp: " 104|./.../DP_TV_Beholder_25000.7z"
-            path_match = re.search(r"(\d+)\s*\|\s*(.*?\.7z)", block)
-            
-            # 2. Tìm dung lượng (Lấy phần chữ trước dấu ngoặc đơn)
-            # Ví dụ khớp: "|1.4MiB (1,482,947)" -> lấy "1.4MiB"
-            size_match = re.search(r"\|\s*([\d\.]+\s*[KMG]?i?B)\s*\(", block)
+        # Duyệt từng dòng, tìm dòng "idx|path" rồi lấy size từ dòng kế tiếp nếu có
+        for i, ln in enumerate(lines):
+            m = re.match(r'^\s*(\d+)\|\s*(.+)$', ln)
+            if not m:
+                continue
+            idx = m.group(1).strip()
+            full_path = m.group(2).strip()
+            filename = os.path.basename(full_path)
 
-            if path_match and size_match:
-                idx = path_match.group(1).strip()
-                full_path = path_match.group(2).strip()
-                size_display = size_match.group(1).strip() # GiB, MiB, KiB hoặc B
-                
-                filename = os.path.basename(full_path)
-                
-                # Lọc theo tiền tố DriverPack yêu cầu
-                if filename.startswith(("DP_", "DriverPack_")):
-                    files_list.append({
-                        "idx": idx,
-                        "name": filename,
-                        "size": size_display # Chỉ lấy dung lượng đã làm tròn
-                    })
+            # Lấy dung lượng từ dòng kế tiếp (nếu có)
+            size = "?"
+            if i + 1 < len(lines):
+                sm = re.search(r'\|\s*([\d\.,]+\s*[KMG]?i?B)', lines[i+1])
+                if sm:
+                    size = sm.group(1).strip()
 
-        # Sắp xếp lại danh sách theo tên file để dễ tìm kiếm
+            # Lọc theo tiền tố DriverPack/DP_
+            if filename.startswith(("DP_", "DriverPack_")):
+                files_list.append({
+                    "idx": idx,
+                    "name": filename,
+                    "size": size
+                })
+
         files_list.sort(key=lambda x: x['name'])
         print(f"Hệ thống tìm thấy: {len(files_list)} gói Driver phù hợp.")
         return files_list
-        
+
     except Exception as e:
         print(f"Lỗi phân tích torrent: {e}")
         return []
+
 
 def extract_db_from_driverpack(archive_path, dest_db_file):
     """Giải nén duy nhất file db.sqlite từ DriverPack_*.7z"""
@@ -1258,42 +1287,52 @@ def extract_db_from_driverpack(archive_path, dest_db_file):
     except:
         return False
 
-def process_downloaded_drivers(temp_dir):
-    """
-    Quét thư mục tạm để 'nhặt' file, đưa về đúng chỗ và xóa thư mục tạm.
-    Giải quyết vấn đề aria2 tự tạo folder lồng nhau.
-    """
-    final_drivers_dir = os.path.join(config.BASE_DIR, "Drivers", "Drivers")
-    db_file = os.path.join(config.BASE_DIR, "Drivers", "DB", "db.sqlite")
-    
-    # Quét sạch mọi folder con mà aria2 đã tạo ra trong temp_dir
-    for root, dirs, files in os.walk(temp_dir):
-        for file in files:
-            file_path = os.path.join(root, file)
-            
-            # Nếu là file DriverPack_... -> Lấy DB
-            if file.startswith("DriverPack_") and file.endswith(".7z"):
-                if extract_db_from_driverpack(file_path, db_file):
-                    # Sau khi lấy được DB, lưu version (như logic cũ của bạn)
-                    v_info = {"db_version": file}
-                    v_path = os.path.join(config.BASE_DIR, "Drivers", "driver_versions.json")
-                    with open(v_path, "w") as jf:
-                        json.dump(v_info, jf)
-                # File DriverPack_ này không cần giữ lại trong folder Drivers
-                os.remove(file_path) 
-            
-            # Nếu là file Driver (DB_... hoặc DP_...) -> Chép vào \Drivers\Drivers
-            elif (file.startswith("DB_") or file.startswith("DP_")) and file.endswith(".7z"):
-                dest_path = os.path.join(final_drivers_dir, file)
-                os.makedirs(final_drivers_dir, exist_ok=True)
-                if os.path.exists(dest_path): os.remove(dest_path)
-                shutil.move(file_path, dest_path)
+def process_downloaded_drivers(temp_dir, selected_names=None):
+    FINAL_DRIVER_DIR = os.path.join(config.BASE_DIR, "Drivers", "Drivers")
+    DB_DIR = os.path.join(config.BASE_DIR, "Drivers", "DB")
+    os.makedirs(FINAL_DRIVER_DIR, exist_ok=True)
+    os.makedirs(DB_DIR, exist_ok=True)
 
-    # Xóa sạch thư mục tạm sau khi xử lý
-    try:
-        shutil.rmtree(temp_dir)
-    except:
-        pass
+    moved = []
+
+    for root, _, files in os.walk(temp_dir):
+        for fname in files:
+            src = os.path.join(root, fname)
+
+            # ===== CASE 1: FILE DB ĐẶC BIỆT =====
+            if fname.startswith("DriverPack_") and fname.endswith(".7z"):
+                # Giải nén db.sqlite
+                try:
+                    subprocess.run([
+                        tool_manager.get_tool_path("7z"),
+                        "e",
+                        src,
+                        "index/db.sqlite",
+                        f"-o{DB_DIR}",
+                        "-y"
+                    ], creationflags=subprocess.CREATE_NO_WINDOW)
+
+                    print(f"[DB] extracted db.sqlite from {fname}")
+                except Exception as e:
+                    print(f"[DB] extract failed: {e}")
+                continue
+
+            # ===== CASE 2: DRIVER THƯỜNG =====
+            if selected_names and fname not in selected_names:
+                continue
+
+            if fname.startswith("DP_") and fname.endswith(".7z"):
+                dst = os.path.join(FINAL_DRIVER_DIR, fname)
+                if os.path.exists(dst):
+                    os.remove(dst)
+                shutil.move(src, dst)
+                moved.append(fname)
+
+    print(f"[process_downloaded_drivers] moved: {moved}")
+
+    # ✅ XÓA TEMP
+    shutil.rmtree(temp_dir, ignore_errors=True)
+    return moved
 
 def get_aria2_download_cmd(torrent_path, download_dir, select_indices):
     """Tạo lệnh aria2c và sửa lỗi treo 99%"""

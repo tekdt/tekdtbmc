@@ -37,6 +37,64 @@ class DriverDownloadDialog(QDialog):
         self.selected_indices = []
         self.aria2_proc = None
         self.init_ui()
+        self.setStyleSheet("""
+            QDialog {
+                background-color: #2E3440;
+            }
+            QLabel {
+                font-size: 12pt;
+            }
+            QLabel#TitleLabel {
+                font-size: 20pt;
+                font-weight: bold;
+                color: #88C0D0;
+                padding-bottom: 10px;
+            }
+            /* CSS cho label thông báo trạng thái */
+            QLabel#DownloadStatusLabel {
+                color: #A3BE8C; /* Màu xanh lá cây sáng, dễ đọc */
+                font-weight: bold;
+                padding-top: 5px;
+            }
+            QPushButton {
+                background-color: #5E81AC;
+                border-radius: 5px;
+                padding: 10px;
+                font-size: 12pt;
+                font-weight: bold;
+                border: 1px solid #4C566A;
+            }
+            QPushButton:hover {
+                background-color: #81A1C1;
+            }
+            QPushButton:pressed {
+                background-color: #88C0D0;
+            }
+            QPushButton:disabled {
+                background-color: #4C566A;
+                color: #6a7180;
+            }
+            QTableWidget {
+                background-color: #2E3440;
+                color: #cccccc;
+                gridline-color: #3d3d3d;
+                border: 1px solid #3d3d3d;
+            }
+            QHeaderView::section {
+                background-color: #2E3440;
+                color: white;
+                padding: 4px;
+                border: 1px solid #3d3d3d;
+                font-weight: bold;
+            }
+            QCheckBox {
+                spacing: 10px;
+            }
+            QCheckBox::indicator {
+                width: 20px;
+                height: 20px;
+            }
+        """)
 
     def init_ui(self):
         self.setWindowTitle("Tải trình điều khiển")
@@ -77,7 +135,7 @@ class DriverDownloadDialog(QDialog):
         btn_layout.addStretch()
         layout.addLayout(btn_layout)
         
-        self.setStyleSheet(self.main_app.styleSheet()) # Kế thừa style từ main app
+        self.setStyleSheet(self.main_app.styleSheet())
 
     def start_download(self):
         # Lấy danh sách idx được chọn
@@ -92,7 +150,14 @@ class DriverDownloadDialog(QDialog):
                 if f['name'].startswith("DriverPack_") or "MassStorage" in f['name']:
                     to_download.append(f)
         
-        if not to_download: return
+        if not to_download:
+            return
+
+        # --- NEW: lưu set tên file được chọn (dùng sau khi aria2 tải xong)
+        self.selected_names = {f['name'] for f in to_download}
+        # debug nhanh: in idx và name để kiểm tra parse có đúng không
+        for f in to_download:
+            print(f"[DEBUG] will download idx={f['idx']} name={f['name']}")
 
         self.btn_download.setEnabled(False)
         self.progress_bar.setVisible(True)
@@ -127,10 +192,12 @@ class DriverDownloadDialog(QDialog):
         
         # Sau khi aria2 thoát, tiến hành dọn dẹp và di chuyển file ngay trong thread này
         if proc.returncode == 0:
-            helpers.process_downloaded_drivers(self.temp_dir)
+            # Truyền selected_names để chỉ move những file người dùng chọn
+            selected = getattr(self, "selected_names", None)
+            helpers.process_downloaded_drivers(self.temp_dir, selected)
             
         return proc.returncode == 0
-
+    
     def _on_download_finished(self, success):
         if success:
             self.main_app.show_themed_message("Thành công", "Đã tải và cập nhật Driver thành công!")
@@ -143,8 +210,55 @@ class AboutDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Thông tin phần mềm")
-        self.setFixedSize(450, 400)
+        # self.setFixedSize(450, 400)
+        self.adjustSize()
+        self.setMinimumWidth(450)
         self.init_ui()
+        self.setStyleSheet("""
+            QDialog {
+                background-color: #2E3440;
+            }
+            QLabel {
+                font-size: 12pt;
+            }
+            QLabel#TitleLabel {
+                font-size: 20pt;
+                font-weight: bold;
+                color: #88C0D0;
+                padding-bottom: 10px;
+            }
+            /* CSS cho label thông báo trạng thái */
+            QLabel#DownloadStatusLabel {
+                color: #A3BE8C; /* Màu xanh lá cây sáng, dễ đọc */
+                font-weight: bold;
+                padding-top: 5px;
+            }
+            QPushButton {
+                background-color: #5E81AC;
+                border-radius: 5px;
+                padding: 10px;
+                font-size: 12pt;
+                font-weight: bold;
+                border: 1px solid #4C566A;
+            }
+            QPushButton:hover {
+                background-color: #81A1C1;
+            }
+            QPushButton:pressed {
+                background-color: #88C0D0;
+            }
+            QPushButton:disabled {
+                background-color: #4C566A;
+                color: #6a7180;
+            }
+            QCheckBox {
+                spacing: 10px;
+            }
+            QCheckBox::indicator {
+                width: 20px;
+                height: 20px;
+            }
+        """)
 
     def init_ui(self):
         layout = QVBoxLayout(self)
@@ -191,9 +305,11 @@ class AboutDialog(QDialog):
         
         author_label = QLabel(f"<b>Tác giả:</b> TekDT")
         email_label = QLabel(f"<b>Email:</b> dinhtrungtek@gmail.com")
-        donate_label = QLabel(f"<b>Ủng hộ (Paypal):</b> dinhtrungtek@gmail.com")
+        donate_label1 = QLabel(f"<b>Ủng hộ (MOMO):</b> https://me.momo.vn/TekDT1152")
+        donate_label2 = QLabel(f"<b>Ủng hộ (Binance ID):</b> 877691831")
+        donate_label3 = QLabel(f"<b>Ủng hộ (Crypto USDT - BEP20):</b> 0x53a4f3c22de1caf465ee7b5b6ef26aed9749c721")
         
-        for lbl in [author_label, email_label, donate_label]:
+        for lbl in [author_label, email_label, donate_label1, donate_label2, donate_label3]:
             lbl.setStyleSheet("font-size: 13px;")
             info_layout.addWidget(lbl)
         
@@ -1228,6 +1344,21 @@ class USBBootCreator(QMainWindow):
         theme_group = QActionGroup(self)
         theme_group.addAction(no_theme_action)
         
+        try:
+            if not config.THEMES_DIR.exists():
+                print("Thư mục Themes không tồn tại, bỏ qua việc tải theme.")
+            else:
+                for theme_file in os.listdir(config.THEMES_DIR):
+                    if theme_file.endswith(".zip"):
+                        theme_name = os.path.splitext(theme_file)[0]
+                        action = QAction(theme_name, self, checkable=True)
+                        action.setChecked(self.config["theme"] == theme_file)
+                        action.triggered.connect(lambda checked, t=theme_file: self.set_theme(t))
+                        theme_group.addAction(action)
+                        theme_menu.addAction(action)
+        except FileNotFoundError:
+            pass
+        
         menu.addSeparator()
 
         # --- Download Drivers ---
@@ -1244,23 +1375,6 @@ class USBBootCreator(QMainWindow):
         menu.addAction(about_action)
 
         # Hiển thị menu tại vị trí chuột
-        menu.exec(self.menu_button.mapToGlobal(self.menu_button.rect().bottomLeft()))
-        
-        try:
-            if not config.THEMES_DIR.exists():
-                print("Thư mục Themes không tồn tại, bỏ qua việc tải theme.")
-            else:
-                for theme_file in os.listdir(config.THEMES_DIR):
-                    if theme_file.endswith(".zip"):
-                        theme_name = os.path.splitext(theme_file)[0]
-                        action = QAction(theme_name, self, checkable=True)
-                        action.setChecked(self.config["theme"] == theme_file)
-                        action.triggered.connect(lambda checked, t=theme_file: self.set_theme(t))
-                        theme_group.addAction(action)
-                        theme_menu.addAction(action)
-        except FileNotFoundError:
-            pass
-
         menu.exec(self.menu_button.mapToGlobal(self.menu_button.rect().bottomLeft()))
 
     def set_partition_scheme(self, scheme):

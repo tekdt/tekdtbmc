@@ -32,7 +32,6 @@ Global Const $g_sIniFile = @ScriptDir & "\TekDTMenu.ini"
 Global $g_sTitle = IniRead($g_sIniFile, "Settings", "Title", "TekDT BMC")
 Global $RecordLog = False
 Global $RootDevice = SearchRootDevice()
-Global $CurrentDevice = SearchCurrentDevice()
 Global $g_iMainWidth = _Scale(260)
 Global $g_iMaxButtonsVisible = 5 ; Số nút tối đa hiển thị cùng lúc
 Global $g_iButtonHeight = _Scale(50)
@@ -1971,7 +1970,8 @@ EndFunc
 ; --- HÀM CHÍNH ---
 Func _AutoExtractDrivers()
     ; --- Bước 1: Khai báo và xác định vị trí ---
-    Local Const $sDestDir = $CurrentDevice&":\Drivers"
+	Local $sDrive = StringLeft(@ScriptDir, 2) ; Lấy ký tự ổ đĩa hiện tại (ví dụ: D:)
+    Local Const $sDestDir = $sDrive & "\Drivers"
     Local $s7zPath = StringReplace(@ScriptDir & "\Tools\7z" & (@OSArch = "X64" ? "64" : "32") & "\7za.exe", '\\', '\')
     Local $sDbPath, $sVentoyDir
 
@@ -2226,12 +2226,6 @@ Func SearchRootDevice()
 	For $t = 1 To $aString[0]
 		If FileExists($aString[$t]&":\ventoy\TekDT_PE.7z") Then Return $aString[$t]&":"
 	Next
-EndFunc
-
-Func SearchCurrentDevice()
-	Local $sDrive, $sDir, $sFileName, $sExtension
-	$Partition_Char = StringLeft(_PathSplit(@ScriptFullPath, $sDrive, $sDir, $sFileName, $sExtension)[1],1)
-	Return $Partition_Char
 EndFunc
 
 Func _GetReservedPartitionOffset($iDiskNum)
