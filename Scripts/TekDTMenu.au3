@@ -30,7 +30,7 @@ EndIf
 ; --- Cài đặt và Biến toàn cục ---
 Global Const $g_sIniFile = @ScriptDir & "\TekDTMenu.ini"
 Global $g_sTitle = IniRead($g_sIniFile, "Settings", "Title", "TekDT BMC")
-Global $RecordLog = True
+Global $RecordLog = False
 Global $RootDevice = SearchRootDevice()
 Global $g_iMainWidth = _Scale(260)
 Global $g_iMaxButtonsVisible = 5 ; Số nút tối đa hiển thị cùng lúc
@@ -45,7 +45,6 @@ Global $g_aButtons_All[0][8] ; Mảng chứa TẤT CẢ các nút từ INI
 Global $g_hGUI, $g_hShrinkLabel, $hTitleBar, $hTitleText, $g_hFooterLabel
 Global $g_hScrollUp, $g_hScrollDown
 Global $g_iScrollOffset = 0 ; Vị trí cuộn hiện tại (index của nút đầu tiên)
-Global $CPU = RegRead("HKEY_LOCAL_MACHINE\HARDWARE\DESCRIPTION\System\CentralProcessor\0", "ProcessorNameString")
 Global $exclusion_keywords[9] = ["USB", "FLASH", "CARD READER", "SD", "MMC", "VIRTUAL", "CD-ROM", "DVD", "REMOVABLE"]
 
 Global $g_bIsShrunken = False
@@ -2222,7 +2221,7 @@ Func RecordLogforDebug($Data)
 EndFunc
 
 Func SearchRootDevice()
-	$aString = StringSplit('A,B,C,D,F,G,H,J,K,L,M,N,P,Q,R,S,T,V,X,Z,W,Y',',')
+	$aString = StringSplit('A,B,C,D,E,F,G,H,I,J,K,L,M,N,O,P,Q,R,S,T,V,X,Z,W,Y',',')
 	For $t = 1 To $aString[0]
 		If FileExists($aString[$t]&":\ventoy\TekDT_PE.7z") Then Return $aString[$t]&":"
 	Next
