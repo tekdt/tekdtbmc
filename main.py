@@ -30,7 +30,7 @@ def qt_message_handler(mode, context, message):
     original_handler(f"{message}\n")
 
 class DriverDownloadDialog(QDialog):
-    def __init__(self, parent, torrent_files):
+    def __init__(self, parent, torrent_files, auto_select_massstorage=False):
         super().__init__(parent)
         self.main_app = parent
         self.torrent_files = torrent_files
@@ -96,6 +96,8 @@ class DriverDownloadDialog(QDialog):
                 height: 20px;
             }
         """)
+        if self.auto_select_massstorage:
+            QTimer.singleShot(0, self.start_download)
 
     def init_ui(self):
         self.setWindowTitle("Tải trình điều khiển")
@@ -115,8 +117,9 @@ class DriverDownloadDialog(QDialog):
             chk_item.setFlags(Qt.ItemIsUserCheckable | Qt.ItemIsEnabled)
             if (
                 self.auto_select_massstorage
-                and file_info['name'].startswith("DP_")
-                and "MassStorage" in file_info['name']
+                and ((file_info['name'].startswith("DP_")
+                and "MassStorage" in file_info['name'])
+                or file_info['name'].startswith("DriverPack_"))
             ):
                 chk_item.setCheckState(Qt.Checked)
             else:
@@ -1416,7 +1419,7 @@ class USBBootCreator(QMainWindow):
         # Tính toán lại dung lượng vì nó sẽ thay đổi
         self._update_capacity_check()
     
-    def open_driver_downloader(self):
+    def open_driver_downloader(self, auto_select_massstorage=False):
         torrent_path = tool_manager.get_tool_path("torrent_file")
         aria2_path = tool_manager.get_tool_path("aria2c")
         
@@ -1433,7 +1436,7 @@ class USBBootCreator(QMainWindow):
         files = helpers.parse_torrent_files(torrent_path)
         
         if files:
-            dlg = DriverDownloadDialog(self, files)
+            dlg = DriverDownloadDialog(self, files, auto_select_massstorage)
             dlg.exec()
         else:
             # Thông báo chi tiết hơn để debug
@@ -1565,10 +1568,12 @@ class USBBootCreator(QMainWindow):
         has_mass_storage = any("MassStorage" in f for f in os.listdir(drivers_dir) if f.startswith("DP_"))
         
         # Nếu thiếu dữ liệu cốt lõi
-        if not os.path.exists(db_path) or not has_mass_storage:
-            self.show_themed_message("Thiếu Driver", "Cơ sở dữ liệu hoặc Driver ổ cứng (MassStorage) bị thiếu. Vui lòng tải xuống trước khi bắt đầu.")
-            self.open_driver_downloader()
-            return
+        if not os.path.exists(db_path) or not has_mass_storage:            
+            download_driver_confirm = self.show_themed_message("Thiếu Driver", "Cơ sở dữ liệu hoặc Driver ổ cứng (MassStorage) đang bị thiếu, nên không thể tiếp tục.\n\nBạn có muốn tải xuống ngay bây giờ không?", buttons=QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+            if download_driver_confirm == QMessageBox.StandardButton.Yes:
+                self.open_driver_downloader(auto_select_massstorage=True)
+            else:
+                return
 
         # Kiểm tra tính hợp lệ của các gói DP_ hiện có với DB
         valid, msg = helpers.validate_drivers_with_db(db_path, drivers_dir)
