@@ -773,32 +773,32 @@ def create_usb_task(main_app):
         bios_tool_path = os.path.join(usb_mount_point, "Access_BIOS.bat")
 
         batch_content = r"""@echo off
-        title CONG CU TRUY CAP BIOS/UEFI
-        :: Kiem tra quyen Admin
-        net session >nul 2>&1
-        if %errorlevel% neq 0 (
-            echo Vui long chay file nay bang quyen Administrator!
-            pause
-            exit
-        )
+title CONG CU TRUY CAP BIOS/UEFI
+:: Kiem tra quyen Admin
+net session >nul 2>&1
+if %errorlevel% neq 0 (
+    echo Vui long chay file nay bang quyen Administrator!
+    pause
+    exit
+)
 
-        :: 1. Kiem tra che do UEFI bang cach tim kiem path winload.efi trong bcdedit
-        bcdedit | findstr /i "winload.efi" >nul
-        if %errorlevel% neq 0 (
-            echo He thong dang chay o che do Legacy (BIOS). 
-            echo Lenh shutdown /fw chi ho tro che do UEFI.
-            pause
-            exit
-        )
+:: 1. Kiem tra che do UEFI bang cach tim kiem path winload.efi trong bcdedit
+bcdedit | findstr /i "winload.efi" >nul
+if %errorlevel% neq 0 (
+    echo He thong dang chay o che do Legacy (BIOS). 
+    echo Lenh shutdown /fw chi ho tro che do UEFI.
+    pause
+    exit
+)
 
-        :: 2. Bat WinRE de tranh loi 203 (The system could not find the environment option...)
-        echo Dang kiem tra va kich hoat WinRE...
-        reagentc /enable >nul
+:: 2. Bat WinRE de tranh loi 203 (The system could not find the environment option...)
+echo Dang kiem tra va kich hoat WinRE...
+reagentc /enable >nul
 
-        :: 3. Thuc thi lenh khoi dong vao BIOS
-        echo May tinh se khoi dong lai vao BIOS trong giay lat...
-        shutdown /r /fw /t 3
-        """
+:: 3. Thuc thi lenh khoi dong vao BIOS
+echo May tinh se khoi dong lai vao BIOS trong giay lat...
+shutdown /r /fw /t 3
+"""
 
         try:
             with open(bios_tool_path, "w", encoding="cp850") as f:

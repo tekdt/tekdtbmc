@@ -30,7 +30,7 @@ EndIf
 ; --- Cài đặt và Biến toàn cục ---
 Global Const $g_sIniFile = @ScriptDir & "\TekDTMenu.ini"
 Global $g_sTitle = IniRead($g_sIniFile, "Settings", "Title", "TekDT BMC")
-Global $RecordLog = False
+Global $RecordLog = True
 Global $RootDevice = SearchRootDevice()
 Global $g_iMainWidth = _Scale(260)
 Global $g_iMaxButtonsVisible = 5 ; Số nút tối đa hiển thị cùng lúc
