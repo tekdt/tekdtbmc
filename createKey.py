@@ -36,7 +36,7 @@ def export_windows_rsa_blob(key):
 
 # --- CHƯƠNG TRÌNH CHÍNH ---
 print("--- CÔNG CỤ QUẢN LÝ KHÓA TEKDT BMC ---")
-master_password = r"<Điền_khoá_mã_hoá_của_bạn_vào_đây>"
+master_password = r"<@INPUT_SECRET_KEY_HERE!>"
 
 if not master_password:
     print("Mật khẩu không được để trống!")

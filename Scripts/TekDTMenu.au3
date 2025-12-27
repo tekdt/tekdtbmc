@@ -60,7 +60,7 @@ Global $g_iTitleBarColor = 0x0070C0 ; Màu xanh dương đậm cho title bar
 ; Mảng màu pastel (hoàn toàn không trong suốt)
 Global $aPastelColors = [0xFFD700, 0xFF6347, 0x98FB98, 0xDDA0DD, 0xAFEEEE, 0xF0E68C, 0xFFB6C1, 0xE6E6FA]
 
-Global Const $g_sPublicKeyBase64 = "UlNBMQAIAAADAAAAAAEAAAAAAAAAAAAAAQABsj/uXs7xfhqm1hKPFmh7tl7yRgVoRhnjVhMdCysPQXCyRNXqSzYajxqV6tfproFSvD/xM3X90cSkb2onev9AJnTlMDSmxtBYx1BqPxeRgWiPHEtrQTbG3b8+42DbtM6Skc8yUcwFYZXyJEDDXc5itecyAYKLGw1dwoY2vEcasiifJ362jdHXUfZn/1u10vIU/eQ/+3nGypJJyBjpWyIoUMpAPQqg/q56/8cPoCtTECvV4NSBBSooLJLaQAGrn5S9nGlhaqvXvbl2YKKV3QE//6MQ5pvs+D5O1k1Nj58XVKvAUARniTn5Ol6Y5rbm7F5wc0n8jEBTqMKB5692AddSBQ=="
+Global Const $g_sPublicKeyBase64 = "UlNBMQAIAAADAAAAAAEAAAAAAAAAAAAAAQABkgvLcgASSQG1S6jgzv+nAcdKMhVLf0LkTGJFcbSlIwEJ25Po0M+z2flGMyB1xnjF+GCqqWvXUillt7Yyj/Ua+NaKiNuIQrGElNWCDEVly3ap2ioX5zzxsMICIPzbRpWpNoskqXGjogyqyugtC6Wpt5yhsXGDfrzRtwjd/cFkNf+rX36najYil7VNLMHJhhOGTXpfy4INx94wxX1nsqrdPLAyNI27WZEp40ePviLgbVm0bh0SyU0hLz5CkNIU9s0c5RLOM1mXmGHgcqR/YUMlpOGjWzXRI1pQv37Mv3Ytuwl6ccbab7cnnOR2XxAK0UHc2wg6XM+8xcwAg+HEuuyXHw=="
 
 If FileExists($RootDevice&'\ventoy\DebugLog.txt') = 1 Then FileDelete($RootDevice&'\ventoy\DebugLog.txt')
 
@@ -1716,10 +1716,10 @@ Func _VerifyUSBSignature()
             ContinueLoop
         EndIf
 
-        ; BƯỚC 4: Tạo hash mong đợi
-        Local $sStringToHash = $sDiskIdentifier & $g_sSecretKey
-        Local $sExpectedHash = StringLower(_Crypt_HashData($sStringToHash, $CALG_SHA_256))
-        RecordLogforDebug("Hash mong đợi: " & $sExpectedHash)
+        ; ; BƯỚC 4: Tạo hash mong đợi
+        ; Local $sStringToHash = $sDiskIdentifier & $g_sSecretKey
+        ; Local $sExpectedHash = StringLower(_Crypt_HashData($sStringToHash, $CALG_SHA_256))
+        ; RecordLogforDebug("Hash mong đợi: " & $sExpectedHash)
 
         ; BƯỚC 5: Đọc 256 bytes (độ dài chữ ký RSA-2048)
 		Local $bStoredSignature = _ReadSectorData("\\.\PhysicalDrive" & $iPhysicalDriveNum, $iTargetOffset, 256)
