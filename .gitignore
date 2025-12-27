@@ -6,7 +6,7 @@ secret_key.py
 secret_key.au3
 secret_key.a3x
 Tools
-build
+output
 Drivers_Backup
 build.bat
 tekdt_bmc.exe
@@ -24,3 +24,4 @@ Videos/TekDTBMC_VIDEO.tscproj/20251117_172714.mp4
 Drivers/Drivers
 Drivers/DB
 tekdt_bmc.json
+sign.bat
