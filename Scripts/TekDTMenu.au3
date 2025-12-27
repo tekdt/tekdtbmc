@@ -11,11 +11,10 @@
 #include <WinAPIFiles.au3>
 #include <WinAPIHObj.au3>
 #include <WinAPISys.au3>
-#include <Memory.au3>
 #include <Crypt.au3>
 #include <GuiListView.au3>
 #include <SQLite.au3>
-#include "secret_key.a3x"
+; #include "secret_key.a3x"
 
 FileInstall("sqlite3.dll",@ScriptDir&'\sqlite3.dll')
 FileInstall("sqlite3_x64.dll",@ScriptDir&'\sqlite3_x64.dll')
@@ -60,6 +59,8 @@ Global $g_iTitleBarColor = 0x0070C0 ; Màu xanh dương đậm cho title bar
 
 ; Mảng màu pastel (hoàn toàn không trong suốt)
 Global $aPastelColors = [0xFFD700, 0xFF6347, 0x98FB98, 0xDDA0DD, 0xAFEEEE, 0xF0E68C, 0xFFB6C1, 0xE6E6FA]
+
+Global Const $g_sPublicKeyBase64 = "UlNBMQAIAAADAAAAAAEAAAAAAAAAAAAAAQABsj/uXs7xfhqm1hKPFmh7tl7yRgVoRhnjVhMdCysPQXCyRNXqSzYajxqV6tfproFSvD/xM3X90cSkb2onev9AJnTlMDSmxtBYx1BqPxeRgWiPHEtrQTbG3b8+42DbtM6Skc8yUcwFYZXyJEDDXc5itecyAYKLGw1dwoY2vEcasiifJ362jdHXUfZn/1u10vIU/eQ/+3nGypJJyBjpWyIoUMpAPQqg/q56/8cPoCtTECvV4NSBBSooLJLaQAGrn5S9nGlhaqvXvbl2YKKV3QE//6MQ5pvs+D5O1k1Nj58XVKvAUARniTn5Ol6Y5rbm7F5wc0n8jEBTqMKB5692AddSBQ=="
 
 If FileExists($RootDevice&'\ventoy\DebugLog.txt') = 1 Then FileDelete($RootDevice&'\ventoy\DebugLog.txt')
 
@@ -1592,6 +1593,82 @@ EndFunc
 ; Mục đích: Kiểm tra xem USB đang chạy có phải là USB gốc được tạo bởi chương trình không.
 ; Trả về: True nếu hợp lệ, False nếu không.
 ; ;===============================================================================
+; Func _VerifyUSBSignature()
+	; If $RecordLog = True Then Return True
+    ; RecordLogforDebug("--- Bắt đầu kiểm tra chữ ký (phương pháp WMI) ---")
+    ; Local $aDisks = _GetAllPhysicalDiskNumbers()
+    ; If @error Then
+        ; RecordLogforDebug("Lỗi: Không thể liệt kê các ổ đĩa vật lý.")
+        ; Return False
+    ; EndIf
+
+    ; For $iPhysicalDriveNum In $aDisks
+        ; RecordLogforDebug("--- Đang kiểm tra trên PhysicalDrive" & $iPhysicalDriveNum & " ---")
+
+        ; ; BƯỚC 1 & 2: Lấy Disk ID và Tổng kích thước đĩa
+        ; Local $aDiskInfo = _GetDiskInfo_WinPE($iPhysicalDriveNum)
+        ; If @error Then
+            ; RecordLogforDebug("Lỗi: Không thể lấy dữ liệu cho PhysicalDrive" & $iPhysicalDriveNum & ". Đã bỏ qua.")
+            ; ContinueLoop
+        ; EndIf
+
+        ; Local $sDiskIdentifier = $aDiskInfo[0]  ; Disk ID/GUID
+        ; Local $iDiskSize = $aDiskInfo[1]        ; Tổng kích thước disk (bytes)
+
+        ; If $sDiskIdentifier = "" Or $iDiskSize <= 0 Then
+            ; RecordLogforDebug("Lỗi: Disk ID hoặc kích thước đĩa không hợp lệ. Đã bỏ qua.")
+            ; ContinueLoop
+        ; EndIf
+
+        ; RecordLogforDebug("Disk ID: " & $sDiskIdentifier)
+        ; RecordLogforDebug("Kích thước đĩa (Tổng): " & $iDiskSize & " bytes")
+
+        ; ; BƯỚC 3: Lấy offset của phân vùng ẩn
+        ; RecordLogforDebug("Đang tìm kiếm offset của phân vùng 16MB dành riêng...")
+        ; Local $iTargetOffset = _GetReservedPartitionOffset($iPhysicalDriveNum)
+
+        ; If @error Or $iTargetOffset <= 0 Then
+            ; RecordLogforDebug("Lỗi: Không tìm thấy phân vùng chữ ký hợp lệ. Đã bỏ qua.")
+            ; ContinueLoop
+        ; EndIf
+
+        ; RecordLogforDebug("Đã tìm thấy phân vùng chữ ký tại offset: " & $iTargetOffset & " bytes")
+
+        ; ; Kiểm tra xem offset tính được có hợp lệ không
+        ; If $iTargetOffset + 512 > $iDiskSize Then
+            ; RecordLogforDebug("Lỗi: Offset được tính toán nằm ngoài ranh giới ổ đĩa. Đã bỏ qua.")
+            ; ContinueLoop
+        ; EndIf
+
+        ; ; BƯỚC 4: Tạo hash mong đợi
+        ; Local $sStringToHash = $sDiskIdentifier & $g_sSecretKey
+        ; Local $sExpectedHash = StringLower(_Crypt_HashData($sStringToHash, $CALG_SHA_256))
+        ; RecordLogforDebug("Hash mong đợi: " & $sExpectedHash)
+
+        ; ; BƯỚC 5: Đọc dữ liệu từ sector tại offset đã tính
+        ; Local $sStoredData = _ReadSectorData("\\.\PhysicalDrive" & $iPhysicalDriveNum, $iTargetOffset, 512)
+        ; If $sStoredData = "" Then
+            ; RecordLogforDebug("Lỗi: Không thể đọc dữ liệu tại offset.")
+            ; ContinueLoop
+        ; EndIf
+
+        ; ; BƯỚC 6: Trích xuất hash từ dữ liệu đọc được
+        ; Local $sStoredHash = StringLeft($sStoredData, 64)
+        ; $sStoredHash = "0x" & StringLower(StringRegExpReplace($sStoredHash, "[^a-f0-9]", ""))
+        ; RecordLogforDebug("Hash lưu trữ:   " & $sStoredHash)
+
+        ; ; BƯỚC 7: So sánh
+        ; If $sExpectedHash = $sStoredHash And StringLen($sStoredHash) = 66 Then
+            ; RecordLogforDebug(">>> KIỂM TRA THÀNH CÔNG trên PhysicalDrive" & $iPhysicalDriveNum & " <<<")
+            ; Return True
+        ; Else
+            ; RecordLogforDebug("Hash không khớp trên PhysicalDrive" & $iPhysicalDriveNum)
+        ; EndIf
+    ; Next
+
+    ; RecordLogforDebug("--- KIỂM TRA THẤT BẠI trên tất cả các ổ đĩa ---")
+    ; Return False
+; EndFunc
 Func _VerifyUSBSignature()
 	If $RecordLog = True Then Return True
     RecordLogforDebug("--- Bắt đầu kiểm tra chữ ký (phương pháp WMI) ---")
@@ -1644,29 +1721,77 @@ Func _VerifyUSBSignature()
         Local $sExpectedHash = StringLower(_Crypt_HashData($sStringToHash, $CALG_SHA_256))
         RecordLogforDebug("Hash mong đợi: " & $sExpectedHash)
 
-        ; BƯỚC 5: Đọc dữ liệu từ sector tại offset đã tính
-        Local $sStoredData = _ReadSectorData("\\.\PhysicalDrive" & $iPhysicalDriveNum, $iTargetOffset, 512)
-        If $sStoredData = "" Then
-            RecordLogforDebug("Lỗi: Không thể đọc dữ liệu tại offset.")
-            ContinueLoop
-        EndIf
+        ; BƯỚC 5: Đọc 256 bytes (độ dài chữ ký RSA-2048)
+		Local $bStoredSignature = _ReadSectorData("\\.\PhysicalDrive" & $iPhysicalDriveNum, $iTargetOffset, 256)
 
-        ; BƯỚC 6: Trích xuất hash từ dữ liệu đọc được
-        Local $sStoredHash = StringLeft($sStoredData, 64)
-        $sStoredHash = "0x" & StringLower(StringRegExpReplace($sStoredHash, "[^a-f0-9]", ""))
-        RecordLogforDebug("Hash lưu trữ:   " & $sStoredHash)
-
-        ; BƯỚC 7: So sánh
-        If $sExpectedHash = $sStoredHash And StringLen($sStoredHash) = 66 Then
-            RecordLogforDebug(">>> KIỂM TRA THÀNH CÔNG trên PhysicalDrive" & $iPhysicalDriveNum & " <<<")
-            Return True
-        Else
-            RecordLogforDebug("Hash không khớp trên PhysicalDrive" & $iPhysicalDriveNum)
-        EndIf
+		; BƯỚC 6 & 7: Xác minh bằng RSA thay vì so sánh chuỗi
+		If _VerifyRSASignature($sDiskIdentifier, $bStoredSignature) Then
+			RecordLogforDebug(">>> CHỮ KÝ HỢP LỆ (Signed by TekDT) <<<")
+			Return True
+		Else
+			RecordLogforDebug("Chữ ký giả mạo hoặc không khớp!")
+		EndIf
     Next
 
     RecordLogforDebug("--- KIỂM TRA THẤT BẠI trên tất cả các ổ đĩa ---")
     Return False
+EndFunc
+
+Func _VerifyRSASignature($sDataToVerify, $bSignatureBinary)
+    Local $aCall, $hAlg, $hKey, $iStatus
+
+    ; 1. Chuyển Base64 Public Key sang Binary (Dùng Crypt32.dll)
+    $aCall = DllCall("crypt32.dll", "bool", "CryptStringToBinaryW", _
+        "wstr", $g_sPublicKeyBase64, "dword", 0, "dword", 1, "ptr", 0, "dword*", 0, "ptr", 0, "ptr", 0)
+    If @error Or Not $aCall[0] Then Return False
+    
+    Local $iBinaryLen = $aCall[5]
+    Local $tBinaryKey = DllStructCreate("byte[" & $iBinaryLen & "]")
+    DllCall("crypt32.dll", "bool", "CryptStringToBinaryW", _
+        "wstr", $g_sPublicKeyBase64, "dword", 0, "dword", 1, _
+        "ptr", DllStructGetPtr($tBinaryKey), "dword*", $iBinaryLen, "ptr", 0, "ptr", 0)
+
+    ; 2. Khởi tạo BCrypt RSA Provider
+    $aCall = DllCall("bcrypt.dll", "ntstatus", "BCryptOpenAlgorithmProvider", "ptr*", 0, "wstr", "RSA", "ptr", 0, "dword", 0)
+    If @error Or $aCall[0] <> 0 Then Return False
+    $hAlg = $aCall[1]
+
+    ; 3. Import Public Key
+    $aCall = DllCall("bcrypt.dll", "ntstatus", "BCryptImportKeyPair", _
+        "ptr", $hAlg, "ptr", 0, "wstr", "RSAPUBLICBLOB", "ptr*", 0, _
+        "ptr", DllStructGetPtr($tBinaryKey), "dword", $iBinaryLen, "dword", 0)
+    If @error Or $aCall[0] <> 0 Then 
+        DllCall("bcrypt.dll", "ntstatus", "BCryptCloseAlgorithmProvider", "ptr", $hAlg, "dword", 0)
+        Return False
+    EndIf
+    $hKey = $aCall[4]
+
+    ; 4. Tạo Hash SHA256 cho dữ liệu
+    Local $tHash = DllStructCreate("byte[32]")
+    Local $bData = Binary($sDataToVerify)
+    DllCall("bcrypt.dll", "ntstatus", "BCryptHash", _
+        "ptr", $hAlg, "ptr", 0, "dword", 0, "ptr", 0, "dword", 0, _
+        "ptr", DllStructGetPtr($bData), "dword", BinaryLen($bData), _
+        "ptr", DllStructGetPtr($tHash), "dword", 32)
+
+    ; 5. Cấu trúc Padding đúng cho PKCS1 (SHA256)
+    ; Đây là phần quan trọng để khớp với Python padding.PKCS1v15()
+    Local $tAlgName = DllStructCreate("wstr", "SHA256")
+    Local $tPaddingInfo = DllStructCreate("ptr") ; BCRYPT_PKCS1_PADDING_INFO
+    DllStructSetData($tPaddingInfo, 1, DllStructGetPtr($tAlgName))
+
+    Local $aVerify = DllCall("bcrypt.dll", "ntstatus", "BCryptVerifySignature", _
+        "ptr", $hKey, _
+        "ptr", DllStructGetPtr($tPaddingInfo), _ ; Truyền pointer đến struct
+        "ptr", DllStructGetPtr($tHash), "dword", 32, _
+        "ptr", DllStructGetPtr($bSignatureBinary), "dword", BinaryLen($bSignatureBinary), _
+        "dword", 2) ; BCRYPT_PAD_PKCS1
+
+    ; Dọn dẹp tài nguyên
+    DllCall("bcrypt.dll", "ntstatus", "BCryptDestroyKey", "ptr", $hKey)
+    DllCall("bcrypt.dll", "ntstatus", "BCryptCloseAlgorithmProvider", "ptr", $hAlg, "dword", 0)
+
+    Return ($iStatus[0] = 0) ; 0 = STATUS_SUCCESS
 EndFunc
 
 ;===============================================================================
@@ -1851,6 +1976,62 @@ EndFunc
 ; HÀM: _ReadSectorData
 ; Đọc dữ liệu từ offset cụ thể của ổ đĩa vật lý
 ;===============================================================================
+; Func _ReadSectorData($sDevicePath, $iOffset, $iBytesToRead)
+    ; ; Mở file với quyền đọc
+    ; Local $hFile = DllCall("kernel32.dll", "handle", "CreateFileW", _
+        ; "wstr", $sDevicePath, _
+        ; "dword", 0x80000000, _  ; GENERIC_READ
+        ; "dword", 3, _            ; FILE_SHARE_READ | FILE_SHARE_WRITE
+        ; "ptr", 0, _
+        ; "dword", 3, _            ; OPEN_EXISTING
+        ; "dword", 0, _
+        ; "ptr", 0)
+
+    ; If @error Or $hFile[0] = -1 Or $hFile[0] = 0 Then
+        ; RecordLogforDebug("Lỗi: Không thể mở " & $sDevicePath)
+        ; Return ""
+    ; EndIf
+
+    ; ; Di chuyển file pointer đến offset
+    ; Local $iOffsetLow = BitAND($iOffset, 0xFFFFFFFF)
+    ; ; Dùng phép chia số học để lấy 32-bit cao một cách chính xác cho offset 64-bit
+    ; ; thay vì dùng BitShift không đáng tin cậy. 2^32 = 4294967296
+    ; Local $iOffsetHigh = Int($iOffset / 4294967296)
+
+    ; Local $aResult = DllCall("kernel32.dll", "dword", "SetFilePointer", _
+        ; "handle", $hFile[0], _
+        ; "long", $iOffsetLow, _
+        ; "long*", $iOffsetHigh, _
+        ; "dword", 0) ; FILE_BEGIN
+
+    ; If @error Or $aResult[0] = 0xFFFFFFFF Then
+        ; RecordLogforDebug("Lỗi: Không thể SetFilePointer")
+        ; DllCall("kernel32.dll", "bool", "CloseHandle", "handle", $hFile[0])
+        ; Return ""
+    ; EndIf
+
+    ; ; Đọc dữ liệu
+    ; Local $tBuffer = DllStructCreate("byte[" & $iBytesToRead & "]")
+    ; Local $aBytesRead = DllCall("kernel32.dll", "bool", "ReadFile", _
+        ; "handle", $hFile[0], _
+        ; "ptr", DllStructGetPtr($tBuffer), _
+        ; "dword", $iBytesToRead, _
+        ; "dword*", 0, _
+        ; "ptr", 0)
+
+    ; DllCall("kernel32.dll", "bool", "CloseHandle", "handle", $hFile[0])
+
+    ; If @error Or Not $aBytesRead[0] Or $aBytesRead[4] = 0 Then
+        ; RecordLogforDebug("Lỗi: Không đọc được dữ liệu")
+        ; Return ""
+    ; EndIf
+
+    ; RecordLogforDebug("Đã đọc " & $aBytesRead[4] & " bytes từ offset " & $iOffset)
+
+    ; ; Chuyển đổi sang string (ASCII/ANSI encoding)
+    ; ; Flag 1 là đúng vì Python ghi chuỗi ASCII, không phải UTF-8
+    ; Return BinaryToString(DllStructGetData($tBuffer, 1), 1)
+; EndFunc
 Func _ReadSectorData($sDevicePath, $iOffset, $iBytesToRead)
     ; Mở file với quyền đọc
     Local $hFile = DllCall("kernel32.dll", "handle", "CreateFileW", _
@@ -1885,27 +2066,18 @@ Func _ReadSectorData($sDevicePath, $iOffset, $iBytesToRead)
         Return ""
     EndIf
 
-    ; Đọc dữ liệu
+    ; Đọc dữ liệu vào Struct
     Local $tBuffer = DllStructCreate("byte[" & $iBytesToRead & "]")
     Local $aBytesRead = DllCall("kernel32.dll", "bool", "ReadFile", _
-        "handle", $hFile[0], _
-        "ptr", DllStructGetPtr($tBuffer), _
-        "dword", $iBytesToRead, _
-        "dword*", 0, _
-        "ptr", 0)
+        "handle", $hFile[0], "ptr", DllStructGetPtr($tBuffer), _
+        "dword", $iBytesToRead, "dword*", 0, "ptr", 0)
 
     DllCall("kernel32.dll", "bool", "CloseHandle", "handle", $hFile[0])
 
-    If @error Or Not $aBytesRead[0] Or $aBytesRead[4] = 0 Then
-        RecordLogforDebug("Lỗi: Không đọc được dữ liệu")
-        Return ""
-    EndIf
+    If @error Or Not $aBytesRead[0] Then Return Binary("")
 
-    RecordLogforDebug("Đã đọc " & $aBytesRead[4] & " bytes từ offset " & $iOffset)
-
-    ; Chuyển đổi sang string (ASCII/ANSI encoding)
-    ; Flag 1 là đúng vì Python ghi chuỗi ASCII, không phải UTF-8
-    Return BinaryToString(DllStructGetData($tBuffer, 1), 1)
+    ; TRẢ VỀ BINARY, KHÔNG TRẢ VỀ STRING
+    Return DllStructGetData($tBuffer, 1)
 EndFunc
 
 ;===============================================================================

@@ -3,6 +3,11 @@ from ctypes import wintypes
 from pathlib import Path
 from ui.utils import secret_key, tool_manager
 
+import cryptography
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.asymmetric import padding
+from cryptography.hazmat.primitives import serialization
+
 def _copy_with_progress(worker, src, dst, total_copy_size, copied_so_far, base_progress, progress_range):
     """
     Sao chép một file và cập nhật tiến trình dựa trên tổng dung lượng cần sao chép.
@@ -1094,6 +1099,50 @@ def _get_reserved_partition_offset(phy_drive_num):
     except Exception as e:
         raise IOError(f"Một lỗi không xác định đã xảy ra khi lấy thông tin phân vùng: {e}")
 
+# def _write_usb_signature(device_details, phy_drive_num, partition_scheme):
+    # """
+    # Tạo một phân vùng ẩn 16MB, sau đó ghi chữ ký vào đó.
+    # Đây là phương pháp an toàn và bền vững nhất.
+    # """
+    # # Bước 1: Tạo và ẩn phân vùng bằng diskpart
+    # _create_and_hide_signature_partition(phy_drive_num, partition_scheme)
+    
+    # # Đợi một chút để hệ điều hành nhận diện phân vùng mới
+    # time.sleep(3)
+
+    # # Bước 2: Lấy offset của phân vùng vừa tạo
+    # target_offset = _get_reserved_partition_offset(phy_drive_num)
+
+    # # Bước 3: Ghi dữ liệu vào offset đó
+    # disk_identifier = _get_disk_id_with_diskpart(phy_drive_num)
+    # string_to_hash = disk_identifier + secret_key.SECRET_KEY
+    # hashed_signature = hashlib.sha256(string_to_hash.encode('utf-8')).hexdigest()
+    # padded_data = hashed_signature.encode('ascii').ljust(512, b'\0')
+    # drive_path = f"\\\\.\\PHYSICALDRIVE{phy_drive_num}"
+    
+    # GENERIC_WRITE = 0x40000000
+    # FILE_SHARE_READ = 0x1
+    # FILE_SHARE_WRITE = 0x2
+    # OPEN_EXISTING = 3
+    # handle = -1
+    # try:
+        # handle = ctypes.windll.kernel32.CreateFileW(
+            # drive_path, GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, None, OPEN_EXISTING, 0, None)
+        # if handle == -1: raise PermissionError(f"Không thể mở ổ đĩa {drive_path}. Mã lỗi: {ctypes.windll.kernel32.GetLastError()}")
+        
+        # low_part = ctypes.c_ulong(target_offset & 0xFFFFFFFF)
+        # high_part = ctypes.c_long(target_offset >> 32)
+        # ctypes.windll.kernel32.SetFilePointer(handle, low_part, ctypes.byref(high_part), 0)
+        
+        # bytes_written = ctypes.c_ulong(0)
+        # success = ctypes.windll.kernel32.WriteFile(handle, padded_data, len(padded_data), ctypes.byref(bytes_written), None)
+        # if not success or bytes_written.value != len(padded_data): raise IOError(f"Lỗi WriteFile. Mã lỗi: {ctypes.windll.kernel32.GetLastError()}")
+        
+        # ctypes.windll.kernel32.FlushFileBuffers(handle)
+        # print(f"Đã ghi thành công chữ ký vào phân vùng ẩn tại offset {target_offset}.")
+    # finally:
+        # if handle != -1: ctypes.windll.kernel32.CloseHandle(handle)
+
 def _write_usb_signature(device_details, phy_drive_num, partition_scheme):
     """
     Tạo một phân vùng ẩn 16MB, sau đó ghi chữ ký vào đó.
@@ -1110,9 +1159,17 @@ def _write_usb_signature(device_details, phy_drive_num, partition_scheme):
 
     # Bước 3: Ghi dữ liệu vào offset đó
     disk_identifier = _get_disk_id_with_diskpart(phy_drive_num)
-    string_to_hash = disk_identifier + secret_key.SECRET_KEY
-    hashed_signature = hashlib.sha256(string_to_hash.encode('utf-8')).hexdigest()
-    padded_data = hashed_signature.encode('ascii').ljust(512, b'\0')
+    # Bước 4. Đọc Private Key từ file
+    with open("private_key.pem", "rb") as key_file:
+        private_key = serialization.load_pem_private_key(key_file.read(), password=None)
+
+    # Bước 5. Ký Disk ID (Sử dụng PKCS1v15 để AutoIt dễ xác minh hơn)
+    signature = private_key.sign(
+        disk_identifier.encode('utf-8'),
+        padding.PKCS1v15(),
+        hashes.SHA256()
+    )
+    padded_data = signature.ljust(512, b'\0')
     drive_path = f"\\\\.\\PHYSICALDRIVE{phy_drive_num}"
     
     GENERIC_WRITE = 0x40000000
