@@ -35,8 +35,8 @@ if "%TARGET_EXE2%"=="" (
 )
 
 :: Build sang exe
-"%AUT2EXE%" /in "%TEKDTMENUAU3%" /out "%TARGET_EXE1%" /icon "%LOGO%" /compression 4 /pack /unicode /execlevel requireadministrator /companyname "TekDT" /filedescription "TekDT Menu for Windows PE" /internalname "TekDT Menu" /legalcopyright "TekDT" /originalfilename "%TARGET_EXE1%" /productname "TekDT Menu"
-"%AUT2EXE%" /in "%TEKDTMENUAU3%" /out "%TARGET_EXE2%" /icon "%LOGO%" /compression 4 /pack /unicode /execlevel requireadministrator /companyname "TekDT" /filedescription "TekDT Menu for Windows PE" /internalname "TekDT Menu" /legalcopyright "TekDT" /originalfilename "%TARGET_EXE1%" /productname "TekDT Menu" /x64
+"%AUT2EXE%" /in "%TEKDTMENUAU3%" /out "%TARGET_EXE1%" /icon "%LOGO%" /unicode /execlevel requireadministrator /companyname "TekDT" /filedescription "TekDT Menu for Windows PE" /internalname "TekDT Menu" /legalcopyright "TekDT" /originalfilename "%TARGET_EXE1%" /productname "TekDT Menu"
+"%AUT2EXE%" /in "%TEKDTMENUAU3%" /out "%TARGET_EXE2%" /icon "%LOGO%" /unicode /execlevel requireadministrator /companyname "TekDT" /filedescription "TekDT Menu for Windows PE" /internalname "TekDT Menu" /legalcopyright "TekDT" /originalfilename "%TARGET_EXE1%" /productname "TekDT Menu" /x64
 
 REM Aut2Exe.exe /in <infile.au3> [/out <outfile.exe>] [/icon <iconfile.ico>] [/comp 0-4] [/ignoredirectives] [/nopack] [/pack] [/ansi] [/unicode] [/x64] [/console] [/gui] [/execlevel <asinvoker | highestavailable | requireadministrator | none>] [/compatibility <vista | win7 | win8>] [/comments <>] [/companyname <>] [/filedescription <>] [/internalname <>] [/legalcopyright <>] [/legaltrademarks <>] [/originalfilename <>] [/productname <>] [/fileversion <fixednum[,num]>] [/productversion <fixednum[,num]>]
 
