@@ -25,4 +25,4 @@ Drivers/Drivers
 Drivers/DB
 tekdt_bmc.json
 sign.bat
-build_tekdtmenu.bat
+Drivers/build_tekdtmenu.bat
