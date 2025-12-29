@@ -3,6 +3,8 @@ import base64
 import struct
 import os
 from Crypto.PublicKey import RSA
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import padding
 
 class DeterministicRNG:
     def __init__(self, password):
@@ -21,16 +23,23 @@ class DeterministicRNG:
         return result[:n]
 
 def export_windows_rsa_blob(key):
-    """Xuất Public Key sang định dạng Windows BCRYPT_RSAKEY_BLOB cho AutoIt"""
-    # RSA-2048: e thường là 65537 (0x010001)
-    e_int = key.e
-    n_int = key.n
-    
-    e_bytes = e_int.to_bytes((e_int.bit_length() + 7) // 8, byteorder='big')
-    n_bytes = n_int.to_bytes(256, byteorder='big') 
+    """Xuất RSA Public Key sang BCRYPT_RSAKEY_BLOB chuẩn Windows"""
+    n = key.n
+    e = key.e
+    # RSA-2048: n phải luôn là 256 bytes
+    n_bytes = n.to_bytes(256, 'big')
+    # e thường là 65537 (0x010001), Windows yêu cầu độ dài thực tế (thường là 3 bytes)
+    e_bytes = e.to_bytes((e.bit_length() + 7) // 8, 'big')
 
-    # Magic 'RSA1' (0x31415352)
-    header = struct.pack('<I I I I I I', 0x31415352, 2048, len(e_bytes), len(n_bytes), 0, 0)
+    # BCRYPT_RSAKEY_BLOB header
+    # Magic: RSA1 (0x31415352)
+    header = struct.pack('<6I', 
+        0x31415352,  
+        2048,        
+        len(e_bytes),
+        256,         # cbModulus cố định 256 cho RSA-2048
+        0, 0         
+    )
     blob = header + e_bytes + n_bytes
     return base64.b64encode(blob).decode('utf-8')
 
@@ -61,7 +70,7 @@ try:
         f.write(key_pair.publickey().export_key('PEM'))
 
     # 3. Tạo chuỗi cho AutoIt
-    autoit_blob = export_windows_rsa_blob(key_pair)
+    autoit_blob = export_windows_rsa_blob(key_pair.publickey())
 
     print("-" * 60)
     print("THÀNH CÔNG!")

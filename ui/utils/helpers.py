@@ -1,4 +1,4 @@
-import json, os, shutil, time, subprocess, ctypes, zipfile, config, tempfile, re, hashlib, traceback, sqlite3
+import json, os, shutil, time, subprocess, ctypes, zipfile, config, tempfile, re, traceback, sqlite3
 from ctypes import wintypes
 from pathlib import Path
 from ui.utils import secret_key, tool_manager
@@ -1159,17 +1159,23 @@ def _write_usb_signature(device_details, phy_drive_num, partition_scheme):
 
     # Bước 3: Ghi dữ liệu vào offset đó
     disk_identifier = _get_disk_id_with_diskpart(phy_drive_num)
-    # Bước 4. Đọc Private Key từ file
+    # Chuẩn hóa ID (Bỏ {}, viết hoa, bỏ khoảng trắng)
+    clean_id = disk_identifier.strip().upper().replace("{", "").replace("}", "")
+    # Bước 4. Đọc Private Key
     with open("private_key.pem", "rb") as key_file:
         private_key = serialization.load_pem_private_key(key_file.read(), password=None)
 
-    # Bước 5. Ký Disk ID (Sử dụng PKCS1v15 để AutoIt dễ xác minh hơn)
+    # Bước 5. Ký Disk ID
+    # Kết quả signature sẽ là 256 bytes cho RSA-2048
     signature = private_key.sign(
-        disk_identifier.encode('utf-8'),
+        clean_id.encode('utf-8'), 
         padding.PKCS1v15(),
         hashes.SHA256()
     )
+    
+    # Padded lên 512 bytes (kích thước 1 sector) để đảm bảo ghi an toàn
     padded_data = signature.ljust(512, b'\0')
+    
     drive_path = f"\\\\.\\PHYSICALDRIVE{phy_drive_num}"
     
     GENERIC_WRITE = 0x40000000
@@ -1187,7 +1193,7 @@ def _write_usb_signature(device_details, phy_drive_num, partition_scheme):
         ctypes.windll.kernel32.SetFilePointer(handle, low_part, ctypes.byref(high_part), 0)
         
         bytes_written = ctypes.c_ulong(0)
-        success = ctypes.windll.kernel32.WriteFile(handle, padded_data, len(padded_data), ctypes.byref(bytes_written), None)
+        success = ctypes.windll.kernel32.WriteFile(handle, padded_data, 512, ctypes.byref(bytes_written), None)
         if not success or bytes_written.value != len(padded_data): raise IOError(f"Lỗi WriteFile. Mã lỗi: {ctypes.windll.kernel32.GetLastError()}")
         
         ctypes.windll.kernel32.FlushFileBuffers(handle)
@@ -1196,46 +1202,66 @@ def _write_usb_signature(device_details, phy_drive_num, partition_scheme):
         if handle != -1: ctypes.windll.kernel32.CloseHandle(handle)
 
 def _verify_usb_signature(device_details, phy_drive_num):
-    """
-    Xác thực chữ ký bằng cách tìm offset của phân vùng ẩn và đọc dữ liệu.
-    """
-    print("Bắt đầu quá trình xác thực lại chữ ký...")
+    print("Bắt đầu xác thực (Sửa lỗi Sector Alignment)...")
     
-    # Bước 1: Lấy offset của phân vùng ẩn
     target_offset = _get_reserved_partition_offset(phy_drive_num)
+    
+    # KIỂM TRA OFFSET: Phải chia hết cho 512
+    if target_offset % 512 != 0:
+        raise ValueError(f"Lỗi: Offset {target_offset} không căn chỉnh theo sector (512).")
 
-    # Bước 2: Đọc và so sánh
     disk_identifier = _get_disk_id_with_diskpart(phy_drive_num)
-    string_to_hash = disk_identifier + secret_key.SECRET_KEY
-    expected_signature = hashlib.sha256(string_to_hash.encode('utf-8')).hexdigest()
+    # Phải chuẩn hóa để khớp với lúc ký
+    clean_id = disk_identifier.strip().upper().replace("{", "").replace("}", "")
     drive_path = f"\\\\.\\PHYSICALDRIVE{phy_drive_num}"
 
-    GENERIC_READ = 0x80000000
-    FILE_SHARE_READ = 0x1
-    FILE_SHARE_WRITE = 0x2
-    OPEN_EXISTING = 3
+    # Tải Public Key
+    with open("public_key.pem", "rb") as key_file:
+        public_key = serialization.load_pem_public_key(key_file.read())
+
     handle = -1
     try:
         handle = ctypes.windll.kernel32.CreateFileW(
-            drive_path, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, None, OPEN_EXISTING, 0, None)
-        if handle == -1: raise PermissionError(f"Không thể mở ổ đĩa {drive_path}. Mã lỗi: {ctypes.windll.kernel32.GetLastError()}")
+            drive_path, 0x80000000, 0x1 | 0x2, None, 3, 0, None)
+        
+        if handle == -1: 
+            raise PermissionError(f"Không thể mở ổ đĩa. Error: {ctypes.windll.kernel32.GetLastError()}")
 
+        # Di chuyển con trỏ
         low_part = ctypes.c_ulong(target_offset & 0xFFFFFFFF)
         high_part = ctypes.c_long(target_offset >> 32)
         ctypes.windll.kernel32.SetFilePointer(handle, low_part, ctypes.byref(high_part), 0)
 
-        buffer = ctypes.create_string_buffer(512)
+        # Đọc đúng 1 Sector (512 bytes)
+        sector_size = 512 
+        buffer = ctypes.create_string_buffer(sector_size)
         bytes_read = ctypes.c_ulong(0)
-        ctypes.windll.kernel32.ReadFile(handle, buffer, 512, ctypes.byref(bytes_read), None)
-
-        read_signature = buffer.value[:len(expected_signature)].decode('ascii')
-        if read_signature != expected_signature:
-            raise ValueError("Xác thực chữ ký thất bại! Chữ ký không khớp.")
         
-        print("Xác thực chữ ký thành công.")
-        return True
+        success = ctypes.windll.kernel32.ReadFile(handle, buffer, sector_size, ctypes.byref(bytes_read), None)
+        
+        if not success:
+            error_code = ctypes.windll.kernel32.GetLastError()
+            raise IOError(f"Lỗi khi đọc sector. Mã lỗi: {error_code} (Kiểm tra Alignment hoặc Quyền Admin)")
+
+        # CHỈ LẤY 256 bytes đầu tiên (là phần chứa chữ ký RSA-2048)
+        read_signature_bytes = buffer.raw[:256] 
+
+        # Xác minh
+        try:
+            public_key.verify(
+                read_signature_bytes,
+                clean_id.encode('utf-8'),
+                padding.PKCS1v15(),
+                hashes.SHA256()
+            )
+            print("Xác thực chữ ký thành công!")
+            return True
+        except Exception:
+            raise ValueError("Chữ ký không khớp hoặc dữ liệu phân vùng ẩn bị sai.")
+
     finally:
-        if handle != -1: ctypes.windll.kernel32.CloseHandle(handle)
+        if handle != -1:
+            ctypes.windll.kernel32.CloseHandle(handle)
 
 def _create_and_hide_signature_partition(phy_drive_num, partition_scheme):
     """
