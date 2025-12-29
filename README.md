@@ -3,16 +3,15 @@ TekDT BMC là công cụ tạo thiết bị có thể chứa nhiều bộ cài h
 - Tên phần mềm: TekDT BMC
 - Tác giả: TekDT
 - Mô tả: Phần mềm tạo USB boot tương thích với nhiều cấu hình máy tính khác nhau, tích hợp cài đặt phần mềm tự động sau khi cài đặt Windows.
-- Ngày phát hành: 29-11-2025
-- Phiên bản: 1.0.4
+- Ngày phát hành: 29-12-2025
+- Phiên bản: 1.0.6
 - Email: dinhtrungtek@gmail.com
 - Telegram: @tekdt1152
 - Facebook: @tekdtcom
 
 # Tải xuống
-- Phiên bản mới nhất tại [https://github.com/tekdt/tekdtbmc/releases/download/v1.0.4/TekDT.BMC_v1.0.4.zip]
+- Phiên bản mới nhất tại [[https://github.com/tekdt/tekdtbmc/releases/download/v1.0.4/TekDT.BMC_v1.0.4.zip](https://github.com/tekdt/tekdtbmc/releases/latest/download/TekDT_BMC.zip)]
 - Mã hash SHA256 của chữ ký của TekDT là: 4ef06065990138ab401948b95f536272. Nếu đúng mã hash thì mới chính xác từ TekDT.
-- MD5 cho phiên bản v1.0.4: 7fecbf2cc89167f4af2937d0751bed7e
 
 # Hướng dẫn sử dụng
 Ở giao diện chương trình sẽ có tổng cộng 3 bước, bao gồm: CHỌN USB, CHỌN HOẶC TẢI ISO, THÊM PHẦN MỀM ĐƯỢC CÀI ĐẶT TỰ ĐỘNG SAU KHI CÀI WINDOWS
@@ -37,6 +36,8 @@ Có một số tuỳ chọn thêm ở nút Menu (góc trái trên giao diện):
 - Lược bỏ phiên bản không được chọn trong ISO: Mặc định là Có, nếu là Có thì ở bước 2 khi chọn một phiên bản Windows trong một ISO (chẳng hạn như chọn bản Pro), thì các phiên bản còn lại (như Home, Education,...) sẽ bị loại bỏ hoàn toàn, chỉ giữ lại mỗi phiên bản Pro. Tuy nhiên, điều này sẽ tốn thêm chút thời gian, để chương trình xử lý loại bỏ các phiên bản khác. Điều này sẽ lấy thêm được một ít dung lượng cho thiết bị của bạn, vì đã bỏ bớt các phiên bản không dùng.
 - Lọc và chỉ lấy những phần mềm được Thêm: Mặc định là Có, Ở bước thứ 3 của bạn sẽ chọn các phần mềm được Thêm vào danh sách sẽ được cài đặt sau khi cài Windows xong. Chương trình sẽ loại bỏ lại các phần mềm không được Thêm (không cần tự động cài đặt sau khi cài đặt Windows xong), để lấy thêm dung lượng ổ cứng, tránh lấy hết toàn bộ phần mềm không cần thiết.
 - Giao diện: Mặc định Không có (không chọn). Đây là tuỳ chọn ở màn hình boot, hỗ trợ cho Ventoy. Nếu bạn có giao diện đẹp hơn, hãy copy vào thư mục Themes của TekDT BMC.
+- Tải trình điều khiển: Thêm lựa chọn tải trình điều khiển tích hợp vào quá trình boot trong Windows PE và cài đặt driver sau khi cài đặt Windows hoàn tất. Mặc định nếu ở giao diện Bước 3 mà chưa có file db.sqlite hoặc gói driver DP_MassStorage_*.7z thì chương trình sẽ ngăn lại và tải tự động 2 file này trước khi tiếp tục tạo thiết bị boot. Khuyến khích tải thêm driver DP_Touchpad_*.7z và DP_WLAN-WiFi_*.7z
+- Thông tin phần mềm: Giới thiệu về phần mềm này, cũng như về tác giả - là tôi.
 
 #Lưu ý: Chương trình này cần kết nối internet để hoạt động lần đầu tiên, do cần tải các công cụ cần thiết khác trong thư mục Tools như: Ventoy, 7z, aria2, wimlib, TekDT AIS,... Với giao diện thứ 3, giao diện này sẽ nhúng thêm giao diện chương trình TekDT AIS, cho nên nếu bạn muốn tải phần mềm mới thì cần có kết nối internet để tải, còn nếu trước đó đã tải một vài (hoặc toàn bộ) phần mềm đã đủ dùng thì không cần kết nối internet nữa.
 
