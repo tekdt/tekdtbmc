@@ -21,7 +21,7 @@ FileInstall("sqlite3_x64.dll",@ScriptDir&'\sqlite3_x64.dll')
 
 Opt("WinTitleMatchMode", 2)
 
-If ProcessList("TekDTMenu64.exe")[0][0] > 1 OR ProcessList("TekDTMenu32.exe")[0][0] > 1 Then
+If ProcessList("AutoIt3.exe")[0][0] > 1 OR ProcessList("AutoIt3_x64.exe")[0][0] > 1 Then
 	MsgBox(16,'Thông báo',"Chương trình đã đang chạy")
 	Exit
 EndIf
