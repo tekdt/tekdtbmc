@@ -636,14 +636,13 @@ def create_usb_task(main_app):
         # --- GIAI ĐOẠN 1: ĐỊNH DẠNG USB VỚI VENTOY (0% -> 15%) ---
         install_mode = main_app.config.get("install_mode", "DESTRUCTIVE")
         worker.status.emit(f"Đang cài đặt Ventoy lên {main_app.config['device']}...")
-        ventoy_exe = config.VENTOY_DIR / "Ventoy2Disk.exe"
-        if not ventoy_exe.exists():
+        if not config.VENTOY_EXE.exists():
             raise FileNotFoundError("Không tìm thấy Ventoy2Disk.exe.")
 
         phy_drive_num = main_app.config["device"].replace("\\\\.\\PHYSICALDRIVE", "")
         
         # Luôn thêm /R:16 để tạo phân vùng MSR 16MB cho việc ghi chữ ký an toàn
-        common_args = [str(ventoy_exe), "VTOYCLI", "/I", f"/PhyDrive:{phy_drive_num}", "/R:16"]
+        common_args = [str(config.VENTOY_EXE), "VTOYCLI", "/I", f"/PhyDrive:{phy_drive_num}", "/R:16"]
 
         if install_mode == "NON_DESTRUCTIVE":
             worker.status.emit("Chế độ không phá hủy: Cài đặt vào vùng dung lượng trống...")
