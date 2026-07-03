@@ -83,4 +83,4 @@ To help make the software/script more complete and feature‑rich, TekDT needs m
 
 ---
 
-**Vietnamese version** is available at: [README_VI.md](https://github.com/tekdt/tekdtbmc/blob/main/README_VI.md) (original Vietnamese).
+**Vietnamese version** is available at: [README_VI.md](https://github.com/tekdt/tekdtbmc/blob/freeversion/README_VI.md) (original Vietnamese).
