@@ -1,59 +1,86 @@
 # TekDT BMC
-TekDT BMC là công cụ tạo thiết bị có thể chứa nhiều bộ cài hệ điều hành, tương thích với nhiều loại máy tính có cấu hình khác nhau và quá trình cài đặt hệ điều hành diễn ra một cách tự động.
-- Tên phần mềm: TekDT BMC
-- Tác giả: TekDT
-- Mô tả: Phần mềm tạo USB boot tương thích với nhiều cấu hình máy tính khác nhau, tích hợp cài đặt phần mềm tự động sau khi cài đặt Windows.
-- Ngày phát hành: 29-12-2025
-- Phiên bản: 1.0.6
-- Email: dinhtrungtek@gmail.com
-- Telegram: @tekdt1152
-- Facebook: @tekdtcom
 
-# Tải xuống
-- Phiên bản mới nhất tại [[https://github.com/tekdt/tekdtbmc/releases/download/v1.0.4/TekDT.BMC_v1.0.4.zip](https://github.com/tekdt/tekdtbmc/releases/latest/download/TekDT_BMC.zip)]
-- Mã hash SHA256 của chữ ký của TekDT là: 4ef06065990138ab401948b95f536272. Nếu đúng mã hash thì mới chính xác từ TekDT.
+**TekDT BMC** is a tool for creating bootable devices that can hold multiple operating system installers, compatible with various computer configurations, and automates the OS installation process.
 
-# Hướng dẫn sử dụng
-Ở giao diện chương trình sẽ có tổng cộng 3 bước, bao gồm: CHỌN USB, CHỌN HOẶC TẢI ISO, THÊM PHẦN MỀM ĐƯỢC CÀI ĐẶT TỰ ĐỘNG SAU KHI CÀI WINDOWS
-- Bước 1: Chọn thiết bị USB
-  + Danh sách sổ xuống: Sẽ hiển thị toàn bộ các thiết bị.
-  + Hiển thị ổ cứng: Chức năng này hiện tại chưa hoạt động ổn định (không nên sử dụng, có thể gây mất dữ liệu)
+- **Software name:** TekDT BMC  
+- **Author:** TekDT  
+- **Description:** USB boot creation software compatible with diverse hardware, integrating automated software installation after Windows setup.  
+- **Release date:** December 29, 2025  
+- **Version:** 1.0.6  
+- **Email:** dinhtrungtek@gmail.com  
+- **Facebook:** @tekdtxyz
 
-- Bước 2: Chọn ISO
-  + Thêm ISO từ máy: Chọn ISO có sẵn trên ổ cứng. Khuyến khích sử dụng ISO được tải chính thức từ Microsoft thay cho ISO tuỳ biến.
-  + Xoá ISO đã chọn: Chọn từng ISO và nút này sẽ loại nó khỏi danh sách.
-  + Tải tự động từ Microsoft: Nếu như chưa có ISO thì có thể tick chọn và tải hàng loạt các ISO bạn muốn.
-  + Tải các mục đã chọn: Sau khi chọn các phiên bản ISO muốn tải, thì nút này sẽ tải lần lượt hết tất cả những phiên bản ISO được tick.
+---
 
-- Bước 3: Chọn phần mềm cài đặt tự động sau khi cài đặt Windows hoàn tất.
-  + Dựa vào danh sách phần mềm thì Tải (nếu phần mềm chưa có, cần internet) hoặc thêm vào danh sách được cài tự động. Chương trình sẽ tự động copy TekDT AIS vào thiết bị boot, và tự cấu hình gọi nó để cài đặt phần mềm cần thiết tự động, bạn không cần làm gì thêm.
-  + Sau khi hoàn tất mọi thứ thì nhấn Bắt đầu để tạo USB.
+## Download
 
-Có một số tuỳ chọn thêm ở nút Menu (góc trái trên giao diện):
-- Cấu trúc ổ đĩa: Mặc định chọn GPT để tương thích nhiều hơn (theo tài liệu Ventoy), nếu không tương thích hãy chọn MBR.
-- Định dạng: Mặc định là ExFAT, bạn cũng có thể chọn các định dạng khác.
-- Lấp đầy dung lượng: Mặc định là Có, nếu là Có thì USB của bạn sẽ được lấp đầy để trở thành 0 byte trống. Như vậy sẽ giảm thiệt hại do virus phá dữ liệu bên trong (đặc biệt virus shortcut) và tránh lây nhiêm virus cho máy khác.
-- Lược bỏ phiên bản không được chọn trong ISO: Mặc định là Có, nếu là Có thì ở bước 2 khi chọn một phiên bản Windows trong một ISO (chẳng hạn như chọn bản Pro), thì các phiên bản còn lại (như Home, Education,...) sẽ bị loại bỏ hoàn toàn, chỉ giữ lại mỗi phiên bản Pro. Tuy nhiên, điều này sẽ tốn thêm chút thời gian, để chương trình xử lý loại bỏ các phiên bản khác. Điều này sẽ lấy thêm được một ít dung lượng cho thiết bị của bạn, vì đã bỏ bớt các phiên bản không dùng.
-- Lọc và chỉ lấy những phần mềm được Thêm: Mặc định là Có, Ở bước thứ 3 của bạn sẽ chọn các phần mềm được Thêm vào danh sách sẽ được cài đặt sau khi cài Windows xong. Chương trình sẽ loại bỏ lại các phần mềm không được Thêm (không cần tự động cài đặt sau khi cài đặt Windows xong), để lấy thêm dung lượng ổ cứng, tránh lấy hết toàn bộ phần mềm không cần thiết.
-- Giao diện: Mặc định Không có (không chọn). Đây là tuỳ chọn ở màn hình boot, hỗ trợ cho Ventoy. Nếu bạn có giao diện đẹp hơn, hãy copy vào thư mục Themes của TekDT BMC.
-- Tải trình điều khiển: Thêm lựa chọn tải trình điều khiển tích hợp vào quá trình boot trong Windows PE và cài đặt driver sau khi cài đặt Windows hoàn tất. Mặc định nếu ở giao diện Bước 3 mà chưa có file db.sqlite hoặc gói driver DP_MassStorage_*.7z thì chương trình sẽ ngăn lại và tải tự động 2 file này trước khi tiếp tục tạo thiết bị boot. Khuyến khích tải thêm driver DP_Touchpad_*.7z và DP_WLAN-WiFi_*.7z
-- Thông tin phần mềm: Giới thiệu về phần mềm này, cũng như về tác giả - là tôi.
+- Latest version: [https://github.com/tekdt/tekdtbmc/releases/latest/download/TekDT_BMC.zip](https://github.com/tekdt/tekdtbmc/releases/latest/download/TekDT_BMC.zip)  
+- SHA256 hash of TekDT’s signature: `4ef06065990138ab401948b95f536272` – only if the hash matches is it authentic from TekDT.
 
-#Lưu ý: Chương trình này cần kết nối internet để hoạt động lần đầu tiên, do cần tải các công cụ cần thiết khác trong thư mục Tools như: Ventoy, 7z, aria2, wimlib, TekDT AIS,... Với giao diện thứ 3, giao diện này sẽ nhúng thêm giao diện chương trình TekDT AIS, cho nên nếu bạn muốn tải phần mềm mới thì cần có kết nối internet để tải, còn nếu trước đó đã tải một vài (hoặc toàn bộ) phần mềm đã đủ dùng thì không cần kết nối internet nữa.
+---
 
-# Trách nhiệm
-- TekDT không chịu trách nhiệm khi bạn sử dụng phần mềm/script này hoặc tải ở các nguồn khác được tuỳ biến, sửa đổi dựa trên phần mềm/ này. Bạn có thể sử dụng chương phần mềm/script miễn phí thì hãy tin nó.TekDT sẽ không thu thập thông tin hay làm hại đến máy tính của bạn.
-- Nếu bạn không tin tưởng phần mềm/script này, hãy xoá phần mềm/script đã tải.
+## Usage Instructions
 
-# Hỗ trợ:
-Mọi liên lạc của bạn với TekDT sẽ rất hoan nghênh và đón nhận để TekDT có thể cải tiến phần mềm/script này tốt hơn. Hãy thử liên hệ với TekDT bằng những cách sau:
-- Telegram: @tekdt1152
-- Zalo: 0944.095.092
-- Email: dinhtrungtek@gmail.com
-- Facebook: @tekdtcom
+The program interface has a total of 3 steps: **SELECT USB**, **SELECT OR DOWNLOAD ISO**, **ADD SOFTWARE FOR AUTOMATIC INSTALLATION AFTER WINDOWS SETUP**.
 
-# Đóng góp:
-Để phần mềm/script ngày càng hoàn thiện và nhiều tính năng hơn. TekDT cũng cần có động lực để duy trì. Nếu phần mềm/script này có ích với công việc của bạn, hãy đóng góp một chút. TekDT rất cảm kích việc làm chân thành này của bạn.
-- MOMO: https://me.momo.vn/TekDT1152
-- Biance ID: 877691831
-- USDT (BEP20): 0x53a4f3c22de1caf465ee7b5b6ef26aed9749c721
+### Step 1: Select USB device
+- **Dropdown list:** Shows all available devices.
+- **Show hard disks:** This feature is currently unstable (not recommended; may cause data loss).
+
+### Step 2: Select ISO
+- **Add ISO from computer:** Choose an ISO already on your hard drive. Using official ISOs from Microsoft is recommended over custom ones.
+- **Remove selected ISO:** Select an ISO and click this button to remove it from the list.
+- **Auto‑download from Microsoft:** If you don’t have an ISO yet, tick this option and batch‑download the ISOs you want.
+- **Download checked items:** After selecting the ISO versions you want to download, click this button to download all ticked ISOs one by one.
+
+### Step 3: Select software to install automatically after Windows installation finishes
+- From the software list, click **Download** (if the software is not yet available – requires internet) or **Add** to include it in the automatic installation queue. The program will automatically copy **TekDT AIS** to the boot device and configure it to run automatically – you don’t need to do anything else.
+- After everything is set, click **Start** to create the USB drive.
+
+There are additional options under the **Menu** button (top‑left corner):
+
+- **Partition scheme:** Default is **GPT** for better compatibility (as per Ventoy documentation); if not compatible, choose **MBR**.
+- **Format:** Default is **ExFAT**; you can select other formats.
+- **Fill capacity:** Default is **Yes**. If set to **Yes**, your USB drive will be filled with dummy data to leave 0 bytes free. This reduces damage from viruses (especially shortcut viruses) and prevents infection of other computers.
+- **Strip unused editions from ISO:** Default is **Yes**. If **Yes**, when you select a specific Windows edition (e.g., Pro) in Step 2, all other editions (Home, Education, etc.) are completely removed, keeping only the selected edition. This takes a little extra time but frees up space on your device.
+- **Filter and keep only added software:** Default is **Yes**. In Step 3, only software you have **Added** will be included for automatic installation. The program will remove software not added (i.e., not needed for unattended installation) to save storage space.
+- **Theme:** Default is **None** (not selected). This option applies to the boot screen (Ventoy support). If you have a custom theme, copy it into the `Themes` folder of TekDT BMC.
+- **Download drivers:** Adds the option to download drivers and integrate them into the Windows PE boot process and install them after Windows setup. By default, if the `db.sqlite` file or the driver pack `DP_MassStorage_*.7z` is missing in Step 3, the program will block and automatically download these two files before proceeding. It is also recommended to download `DP_Touchpad_*.7z` and `DP_WLAN-WiFi_*.7z`.
+- **Software info:** Displays information about this software and its author – me.
+
+---
+
+## Note
+
+This program requires an internet connection for its first run, because it needs to download necessary tools into the `Tools` folder – such as Ventoy, 7z, aria2, wimlib, TekDT AIS, etc. The third interface embeds the TekDT AIS interface, so downloading new software also requires internet; however, if you have already downloaded some (or all) of the software you need, you can use it offline afterwards.
+
+---
+
+## Disclaimer
+
+- TekDT is not responsible for any use of this software/script, or for any modified/repackaged versions obtained from other sources. You are free to use this software/script at no cost – trust it. TekDT will not collect your information or harm your computer.
+- If you do not trust this software/script, please delete the downloaded files.
+
+---
+
+## Support
+
+We welcome and appreciate any feedback to help improve this software/script. You can reach TekDT via:
+
+- **Zalo:** 0944.095.092  
+- **Email:** dinhtrungtek@gmail.com  
+- **Facebook:** @tekdtxyz  
+
+---
+
+## Contributions
+
+To help make the software/script more complete and feature‑rich, TekDT needs motivation to maintain it. If this software/script is useful for your work, please consider a small contribution. Your sincere support is greatly appreciated.
+
+- **MOMO:** [https://me.momo.vn/TekDT1152](https://me.momo.vn/TekDT1152)  
+- **Biance ID:** `877691831`
+- **USDT (BEP20):** `0x53a4f3c22de1caf465ee7b5b6ef26aed9749c721`
+
+---
+
+**Vietnamese version** is available at: [README_VI.md](https://github.com/tekdt/tekdtbmc/blob/main/README_VI.md) (original Vietnamese).
