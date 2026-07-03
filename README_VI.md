@@ -80,4 +80,4 @@ Mọi liên lạc của bạn với TekDT sẽ rất hoan nghênh và đón nh�
 
 ---
 
-**English version** is available at: [README.md](https://github.com/tekdt/tekdtbmc/blob/main/README.md).
+**English version** is available at: [README.md](https://github.com/tekdt/tekdtbmc/blob/freeversion/README.md).
